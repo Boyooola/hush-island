@@ -2,7 +2,7 @@
 // There is no captain and no server keeping the course. A voyage is known by the moment it was called (its number)
 // and the moment it casts off; from those two and the clock, every visitor works out where the boat is.
 import { smoothstep, shoreRadius } from './terrain.js';
-import { SITE_A, siteR } from './build.js';
+import { SITE_A, MOOR_R } from './build.js';
 
 export const BOARD_MS = 45000;      // time to climb in before she casts off by herself
 export const SAIL_MS = 130000;      // once round the island
@@ -20,11 +20,11 @@ function along(t) {
 function point(u) {
   const phi = u * Math.PI * 2, a = SITE_A - phi;
   const f = smoothstep(0, 0.6, phi) * (1 - smoothstep(Math.PI * 2 - 0.6, Math.PI * 2, phi));
-  const r = siteR + (OUT - siteR) * f;
+  const r = MOOR_R + (OUT - MOOR_R) * f;
   return [Math.cos(a) * r, Math.sin(a) * r];
 }
 // Where the boat is on voyage (id, cast) at time now: null when there is no voyage to speak of.
-// phase 'board' (on the stocks, filling up), 'sail', or 'done'.
+// phase 'board' (at her mooring, filling up), 'sail', or 'done'.
 export function voyageAt(id, cast, now) {
   if (!id) return null;
   if (now < cast) return { phase: 'board', left: (cast - now) / 1000, pose: null, u: 0 };

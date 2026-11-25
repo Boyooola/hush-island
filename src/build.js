@@ -3,11 +3,15 @@
 import * as THREE from 'three';
 import { shoreRadius, terrainHeight, colliders, smoothstep } from './terrain.js';
 import { makeSignTexture, makeGlowTexture } from './labels.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export const BOAT_GOAL = 120;
 export const SITE_A = 2.62;
 export const siteR = shoreRadius(SITE_A) * 0.9;
 export const SITE = { x: Math.cos(SITE_A) * siteR, z: Math.sin(SITE_A) * siteR };
+// Once she is built the boat leaves the stocks and lies afloat just off the beach, side on to the shore.
+export const MOOR_R = shoreRadius(SITE_A) + 4.1;
+const MOOR = { x: Math.cos(SITE_A) * MOOR_R, z: Math.sin(SITE_A) * MOOR_R, hx: Math.sin(SITE_A), hz: -Math.cos(SITE_A) };
 
 export function buildSite(scene) {
   const wood = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95, flatShading: true, emissive: c, emissiveIntensity: 0.08 });
@@ -85,13 +89,50 @@ export function buildSite(scene) {
   { const p = sail.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin((p.getX(i) / 2.1 + 0.5) * Math.PI) * 0.22 * (0.4 + (0.5 - p.getY(i) / 1.6))); sail.geometry.computeVertexNormals(); }
   sail.rotation.y = Math.PI / 2; sail.position.set(0.24, 2.4, 0); sail.castShadow = true; rig.add(sail);
   for (const x of stations.slice(0, -1)) { const xm = x + 0.35, t = box(0.74, 0.05, 2 * half(xm) * 0.8, paleMat); t.position.set(xm, DECK, 0); t.castShadow = false; rig.add(t); }
-  const pennant = new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -0.26, 0, 0.62, -0.13, 0], 3)), new THREE.MeshBasicMaterial({ color: 0xff9d4d, side: THREE.DoubleSide }));
+  let pennant = new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -0.26, 0, 0.62, -0.13, 0], 3)), new THREE.MeshBasicMaterial({ color: 0xff9d4d, side: THREE.DoubleSide }));
   pennant.position.set(0.2, 3.82, 0); rig.add(pennant);
   rig.visible = false; hull.add(rig);
 
+  // The boat proper is a model (made in Blender, assets/site/boat.glb): a clinker hull of sixty planks, ribs, a
+  // floor, mast, striped sail and a lantern. The rough hull above stands in until it arrives, or if it never does.
+  // Its pieces are named, so the planks can still go on one at a time as driftwood is brought.
+  let model = null, deck = DECK, planksNow = planks, rigNow = rig;
+  new GLTFLoader().load('./boat.glb', (gltf) => {
+    const root = gltf.scene, pl = root.getObjectByName('planks'), rg = root.getObjectByName('rig');
+    if (!pl || !rg) return;
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      const m = o.material;
+      if (m && !m.userData.hush) { m.userData.hush = true; if (!/glow/.test(m.name)) { m.emissive = m.color.clone(); m.emissiveIntensity = 0.08; } }
+    });
+    while (hull.children.length) hull.remove(hull.children[0]);
+    hull.add(root);
+    model = root; deck = 0.47;
+    planksNow = pl.children.slice().sort((a, b) => (a.name < b.name ? -1 : 1));
+    rigNow = rg; pennant = root.getObjectByName('pennant') || pennant;
+    const was = shown; shown = -1; api.setProgress(Math.max(0, was));
+  }, undefined, () => { /* the rough hull stays */ });
+
+  // A gangplank from the sand out to where she lies, on two legs, so that there is a way aboard to be seen.
+  const slip = new THREE.Group();
+  {
+    const r0 = shoreRadius(SITE_A) - 0.5, r1 = MOOR_R - 1.15, y0 = terrainHeight(Math.cos(SITE_A) * r0, Math.sin(SITE_A) * r0) + 0.06, y1 = 0.5;
+    const len = Math.hypot(r1 - r0, y1 - y0);
+    for (const dz of [-0.2, 0, 0.2]) { const b = box(len, 0.05, 0.18, dz ? plankMat : paleMat); b.position.set((r0 + r1) / 2, (y0 + y1) / 2, dz); b.rotation.z = Math.atan2(y1 - y0, r1 - r0); slip.add(b); }
+    for (const dz of [-0.3, 0.3]) { const leg = box(0.1, 1.9, 0.1, frameMat); leg.position.set(r1 - 0.25, y1 - 0.9, dz); slip.add(leg); }
+    const tie = box(0.08, 0.08, 0.76, frameMat); tie.position.set(r1 - 0.25, y1 - 0.08, 0); slip.add(tie);
+    const post = box(0.16, 1.1, 0.16, frameMat); post.position.set(r0 - 0.4, y0 + 0.45, 1.5); slip.add(post);
+    slip.rotation.y = -SITE_A;      // the group's x axis runs out to sea
+    slip.visible = false; scene.add(slip);
+  }
+  const BERTH_R = shoreRadius(SITE_A) + 0.2;
+  const berth = { x: Math.cos(SITE_A) * BERTH_R, z: Math.sin(SITE_A) * BERTH_R };
+
   // Keep walkers out of the hull.
   g.updateMatrixWorld(true);
-  for (const x of [-2, -1, 0, 1, 2]) { const v = new THREE.Vector3(x, 0, 0).applyMatrix4(g.matrixWorld); colliders.push({ x: v.x, z: v.z, r: 0.85 }); }
+  const landCol = [];
+  for (const x of [-2, -1, 0, 1, 2]) { const v = new THREE.Vector3(x, 0, 0).applyMatrix4(g.matrixWorld), c = { x: v.x, z: v.z, r: 0.85 }; colliders.push(c); landCol.push(c); }
   const dropAt = new THREE.Vector3(0, 0, 2.6).applyMatrix4(g.matrixWorld);
 
   // Driftwood on the beaches: a handful of places, three of them holding a piece at any time.
@@ -125,15 +166,16 @@ export function buildSite(scene) {
   // Places for the crew, bow to stern, and where each steps down onto the sand afterwards.
   const SEATS = [[-0.5, 0.34], [-0.5, -0.34], [-1.3, 0.3], [-1.3, -0.3], [-2.0, 0], [1.1, 0]];      // aft of the mast first, where the sail does not hide them
   const tmp = new THREE.Vector3();
-  let shown = -1, away = false;
-  return {
+  let shown = -1;
+  const built = () => shown >= BOAT_GOAL;
+  const api = {
     crewMax: SEATS.length,
-    heading: Math.atan2(Math.cos(HOME_YAW), -Math.sin(HOME_YAW)),      // the way she points on the stocks, as a walker's yaw
+    heading: Math.atan2(MOOR.hx, MOOR.hz),      // the way she points at her mooring, as a walker's yaw
     // Put the hull somewhere on its voyage ({ x, z, hx, hz }: a place and a heading), or back on the stocks (null).
     // seaY gives the height of the water at a point, so that she rides the waves.
     setHull(pose, seaY, t) {
-      if (!pose) { if (away) { away = false; hull.position.copy(g.position); hull.rotation.set(0, HOME_YAW, 0); } return; }
-      away = true;
+      if (!pose && !built()) { hull.position.copy(g.position); hull.rotation.set(0, HOME_YAW, 0); return; }      // on the stocks
+      if (!pose) pose = MOOR;                                                                                      // at her mooring
       const ground = terrainHeight(pose.x, pose.z), water = seaY(pose.x, pose.z) - 0.36;
       const afloat = smoothstep(0.0, 0.5, water - ground);
       const px = -pose.hz, pz = pose.hx;      // the direction across the boat
@@ -150,10 +192,11 @@ export function buildSite(scene) {
     seat(i) {
       const s = SEATS[i % SEATS.length];
       hull.updateMatrixWorld(true);
-      tmp.set(s[0], DECK + 0.03, s[1]).applyMatrix4(hull.matrixWorld);
+      tmp.set(s[0], deck + 0.03, s[1]).applyMatrix4(hull.matrixWorld);
       return { x: tmp.x, y: tmp.y, z: tmp.z };
     },
-    ashore(i) { tmp.set(1.6 - (i % SEATS.length) * 0.9, 0, 2.3 + (i % 2) * 0.5).applyMatrix4(g.matrixWorld); return { x: tmp.x, z: tmp.z }; },
+    ashore(i) { const k = i % SEATS.length, r = BERTH_R - 1.2 - (k % 2) * 0.8, a = SITE_A + ((k >> 1) - 1) * 0.045 + 0.02; return { x: Math.cos(a) * r, z: Math.sin(a) * r }; },
+    berth,
     site: { x: dropAt.x, z: dropAt.z },
     update(dt, t) {
       for (const pc of pieces) {
@@ -167,15 +210,20 @@ export function buildSite(scene) {
     get pieces() { return pieces.filter((p) => p.m.visible).map((p) => ({ x: p.m.position.x, z: p.m.position.z })); },
     // How far along the boat is.
     setProgress(total) {
-      const n = Math.min(planks.length, Math.round((Math.min(total, BOAT_GOAL) / BOAT_GOAL) * planks.length));
-      planks.forEach((p, i) => { p.visible = i < n; });
-      rig.visible = total >= BOAT_GOAL;
+      const n = Math.min(planksNow.length, Math.round((Math.min(total, BOAT_GOAL) / BOAT_GOAL) * planksNow.length));
+      planksNow.forEach((p, i) => { p.visible = i < n; });
+      rigNow.visible = total >= BOAT_GOAL;
       if (total !== shown) {
         shown = total;
+        // Built, she is afloat: nothing stands on the stocks, and the gangplank is out. Until then she sits on them.
+        if (model) model.position.y = built() ? 0 : 0.45;
+        slip.visible = built();
+        for (const c of landCol) c.r = built() ? 0.01 : 0.85;
         signMat.map.dispose();
-        signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'The boat is built' : 'Being built', total >= BOAT_GOAL ? 'Climb in for a sail' : `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);
+        signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'The boat is built' : 'Being built', total >= BOAT_GOAL ? 'She lies at the water' : `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);
         signMat.needsUpdate = true;
       }
     },
   };
+  return api;
 }

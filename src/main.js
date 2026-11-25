@@ -478,7 +478,7 @@ function lookAtBoat() {
     title: built ? 'The boat is built' : 'The keeper\'s boat',
     lines: [
       { text: built
-        ? `All ${BOAT_GOAL} planks are on. She is ready for a sail round the island: stand beside her and climb in, alone or with others. One day she will carry animals to the other islands.`
+        ? `All ${BOAT_GOAL} planks are on. She lies afloat at the end of the gangplank, ready for a sail round the island: go down to the water and climb in, alone or with others. One day she will carry animals to the other islands.`
         : `${boatTotal} of ${BOAT_GOAL} planks so far. When she is built she will carry animals to the other islands. Driftwood washes up on the beaches, and it counts twice with another animal beside you.` },
       ...(crew.length ? [{ text: built ? 'Built by' : 'Built so far by', kind: 'head' }, ...crew, ...more] : [{ text: 'Nobody has added a plank yet. Yours could be the first.' }]),
     ],
@@ -1018,7 +1018,7 @@ let partyStand = false;
 // says which voyage it is on (the moment it was called) and when it casts off, and the earliest word wins.
 let voyage = 0, voyageCast = 0, seenVoyage = 0, seenCast = 0, voyageLine = '', voyageSaid = 0, voyageCalled = 0, voyageWas = '';
 let voyageNow = null, voyageCrew = [];
-const boatDist = () => Math.hypot(yard.site.x - me.x, yard.site.z - me.z);
+const boatDist = () => Math.hypot(yard.berth.x - me.x, yard.berth.z - me.z);
 const boatBuilt = () => boatTotal >= BOAT_GOAL;
 function boardBoat() {
   if (voyage || game || party || !entered || !boatBuilt() || boatDist() > 4.2) return;
@@ -1076,7 +1076,7 @@ function updateVoyage(dt) {
   const v = voyageNow;
   yard.setHull(v && v.pose, (x, z) => world.seaY(x, z), t);
   if (v && v.phase !== voyageWas) {
-    if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'The boat slides down the sand and into the water.', 'sys'); } }
+    if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'She swings away from the shore.', 'sys'); } }
   }
   voyageWas = v ? v.phase : '';
   if (!seenVoyage && voyageCalled) voyageCalled = 0;

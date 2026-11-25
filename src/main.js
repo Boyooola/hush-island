@@ -72,7 +72,15 @@ const mySub = () => (showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' 
 
 // ---------- scene ----------
 const canvas = $('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+} catch (e) {
+  // No 3D drawing on this device or browser: say so on the title screen instead of leaving it dead.
+  $('enter').hidden = true; $('reroll').hidden = true;
+  $('hint').textContent = 'This browser cannot draw 3D graphics (WebGL is switched off or not supported), so the island cannot be shown here. Try another browser or device.';
+  throw e;
+}
 const PR = Math.min(window.devicePixelRatio || 1, 2);
 renderer.setPixelRatio(PR);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;

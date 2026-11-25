@@ -3,6 +3,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 const S = { profiles: new Map(), friends: new Set(), asks: new Map(), notes: [], feedback: [], reports: [], calls: [] };
+const T = {};
 const prof = (pid) => { const p = S.profiles.get(pid) || {}; return { pid, name: p.name || 'A visitor', code: p.code || '', s: p.species || 0, seen: p.seen || 0 }; };
 const F = {
   hi_remember: (a) => { S.profiles.set(a.p_pid, { name: a.p_name, code: a.p_code, species: a.p_species, guest: a.p_guest, seen: Date.now() }); return null; },
@@ -33,6 +34,11 @@ http.createServer((req, res) => {
       const h = crypto.createHash('md5').update(m[1]).digest('hex');
       return send(200, { id: `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`, is_anonymous: true });
     }
+    // Whole tables, as the room asks for them when it moves in. Seeded by POST /_seed {table: [rows]}.
+    if (req.url === '/_seed') { Object.assign(T, JSON.parse(body)); return send(200, { ok: true }); }
+    const tb = (/^\/rest\/v1\/(\w+)\?select=/.exec(req.url) || [])[1];
+    if (tb && req.method === 'GET') { if (req.headers.apikey !== 'test-secret') return send(401, { message: 'no key' }); S.calls.push('table:' + tb); return send(200, T[tb] || []); }
+    if (req.method !== 'GET' && /^\/rest\/v1\/(boat|carvings|bottles)/.test(req.url)) { S.calls.push('WRITE'); return send(201, []); }
     const fn = (/^\/rest\/v1\/rpc\/(\w+)$/.exec(req.url) || [])[1];
     if (!fn || !F[fn]) return send(404, { message: 'no such function' });
     if (req.headers.apikey !== 'test-secret' || req.headers.authorization !== 'Bearer test-secret') return send(401, { message: 'no key' });

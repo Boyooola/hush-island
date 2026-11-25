@@ -9,7 +9,6 @@
     "serve": "npx serve dist"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.0.0",
     "three": "^0.187.0"
   },
   "devDependencies": {

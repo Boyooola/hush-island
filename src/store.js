@@ -77,8 +77,7 @@ export function createStore() {
     try {
       await db.collection('carvings').add({ text, name: clean(name, 22), at: Date.now(), by: me() });
       // Sweep away a few carvings that have faded.
-      db.collection('carvings').where('at', '<', Date.now() - CARVING_LIFE).limit(10).get()
-        .then((old) => old.docs.forEach((d) => db.doc('carvings/' + d.id).delete().catch(() => {}))).catch(() => {});
+      // (Old marks are swept away by the island itself.)
       return 'ok';
     } catch (e) {
       if (e && e.code === 'invalid_argument') canWrite = false;

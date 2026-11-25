@@ -1,59 +1,55 @@
 // The island's two shared services, whatever is behind them:
 //   room: who else is here right now (positions, chat, gestures)
 //   db:   what the island remembers (marks, bottles, the boat)
-// Three possible homes, tried in this order: the Claude page it was first built on, a Supabase project
-// (see config.js), or this browser alone, where tabs of the same browser share with each other.
+// Two possible homes: the island's own room on Cloudflare (worker/index.js), which keeps both, or this browser
+// alone, where tabs of the same browser share with each other. (Until November 2026 the records, and each
+// visitor's guest account, lived in a Supabase project. What is left of that here is only the way across.)
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { setIslandTime } from './now.js';
 
-let made = null, client = null, signing = null;
-// The visitor's guest account with Supabase: { id, token }, or null if there is none to be had (Supabase out of
-// reach, or guest sign-ins switched off). Asked for afresh each time, so the token is never stale.
+let made = null, refreshing = null;
+const ls = { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* no storage */ } } };
+// The guest account this browser had with Supabase, if it had one: what the old sign-in left in storage.
+function oldSession() {
+  try { const s = JSON.parse(ls.get('hush.guest') || 'null'); return s && s.user && typeof s.user.id === 'string' && typeof s.refresh_token === 'string' ? s : null; } catch (e) { return null; }
+}
+export const oldGuestId = () => { const s = oldSession(); return s ? s.user.id : (ls.get('hush.was') || null); };
+// For the move only: proof of that old guest account ({ id, token }), so that the island can let this browser keep
+// the number and friends it had. Once the island says it has done so, this is never asked for again.
 export async function guest() {
-  if (!made) made = build();
-  try { await made; } catch (e) { return null; }
-  if (!client) return null;
-  const within = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(() => res(null), ms))]);
-  try {
-    let got = await within(client.auth.getSession(), 3000);
-    let session = got && got.data ? got.data.session : null;
-    if (!session) {
-      if (!signing) signing = within(client.auth.signInAnonymously(), 6000).finally(() => { signing = null; });
-      got = await signing;
-      session = got && got.data ? got.data.session : null;
-    }
-    return session && session.user ? { id: session.user.id, token: session.access_token } : null;
-  } catch (e) { return null; }
+  if (ls.get('hush.kept')) return null;
+  const s = oldSession();
+  if (!s || !SUPABASE_URL || !SUPABASE_KEY) return null;
+  if (Number(s.expires_at) * 1000 - Date.now() > 60000) return { id: s.user.id, token: s.access_token };
+  if (!refreshing) refreshing = (async () => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, { method: 'POST', headers: { apikey: SUPABASE_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ refresh_token: s.refresh_token }), signal: AbortSignal.timeout(5000) });
+      const j = r.ok ? await r.json() : null;
+      if (!j || typeof j.access_token !== 'string' || !j.user) return null;
+      ls.set('hush.guest', JSON.stringify({ ...s, ...j, expires_at: j.expires_at || Math.floor(Date.now() / 1000) + (j.expires_in || 3600) }));
+      return { id: j.user.id, token: j.access_token };
+    } catch (e) { return null; }
+  })().finally(() => { refreshing = null; });
+  return refreshing;
 }
 export function use(name) {
   if (window.claude && typeof window.claude.use === 'function') return window.claude.use(name);
   if (!made) made = build();
   return made.then((b) => b[name] || null);
 }
-export let mode = 'claude';     // 'claude', 'supabase' or 'local': shown nowhere, handy when checking
+export let mode = 'claude';     // 'claude', 'cloudflare' or 'local': shown nowhere, handy when checking
 
 async function build() {
-  let sb = null;
-  if (SUPABASE_URL && SUPABASE_KEY) {
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      // Every visitor is signed in as a guest: no name, no email, just an account the browser keeps hold of.
-      sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'hush.guest' }, realtime: { params: { eventsPerSecond: 3 } } });
-      client = sb;
-    } catch (e) { sb = null; }
-  }
-  const db = sb ? makeDb(supabaseDriver(sb), 10000) : makeDb(localDriver(), 1000);
-  // Live visitors: the island's own room on Cloudflare if this site has one, else Supabase, else this browser alone.
+  // Whoever this browser was as a guest is still who its bottles belong to.
+  const user = { id: async () => oldGuestId(), can: async () => true };
   const url = location.origin.replace(/^http/, 'ws') + '/room';
   const web = /^https?:/.test(location.protocol);
   const ws = web ? await openSocket(url) : null;
-  if (ws) { mode = 'cloudflare'; return { room: makeRoom(socketWire(ws, url)), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null }; }
-  // No line yet. If this site does have its own room, keep trying for it rather than settling for another one:
+  // No line yet? If this site does have its own room, keep trying for it rather than settling for being alone:
   // everyone has to end up on the same island.
-  if (web && await hasRoom()) { mode = 'cloudflare'; return { room: makeRoom(socketWire(null, url)), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null }; }
-  if (sb) { mode = 'supabase'; return { room: makeRoom(supabaseWire(sb)), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null }; }
+  if (ws || (web && await hasRoom())) { mode = 'cloudflare'; return { room: makeRoom(socketWire(ws, url)), db: makeDb(islandDriver(), 300000), user }; }
   mode = 'local';
-  return { room: makeRoom(localWire()), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null };
+  return { room: makeRoom(localWire()), db: makeDb(localDriver(), 1000), user };
 }
 
 // ---------- the island's own room: one WebSocket to the Worker in worker/index.js ----------
@@ -116,13 +112,6 @@ function localWire() {
   const bc = new BroadcastChannel('hush-island-room');
   return { post: (m) => bc.postMessage(m), listen: (fn) => { bc.onmessage = (e) => fn(e.data); }, up: (fn) => setTimeout(() => fn(true), 0), gap: 100, beat: 2500 };
 }
-function supabaseWire(sb) {
-  const ch = sb.channel('island', { config: { broadcast: { self: false } } });
-  let onMsg = () => {}, onUp = () => {};
-  ch.on('broadcast', { event: 'm' }, ({ payload }) => onMsg(payload));
-  ch.subscribe((status) => onUp(status === 'SUBSCRIBED'));
-  return { post: (m) => { ch.send({ type: 'broadcast', event: 'm', payload: m }).catch(() => {}); }, listen: (fn) => { onMsg = fn; }, up: (fn) => { onUp = fn; }, gap: 700, beat: 6000 };
-}
 function makeRoom(wire) {
   const id = Math.random().toString(36).slice(2, 12);
   let known = id;                // the id others see: the island's own room hands one out when you come ashore
@@ -137,7 +126,8 @@ function makeRoom(wire) {
   const post = () => { if (!ashore) return; lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
   wire.listen((m) => {
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'in') { setIslandTime(m.now); ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc, pid: m.pid, code: m.code, who: m.who }); post(); return; }
+    if (m.t === 'db') { changed.dispatchEvent(new CustomEvent('c', { detail: m.c })); return; }
+    if (m.t === 'in') { setIslandTime(m.now); if (m.kept) { const was = oldGuestId(); if (was) ls.set('hush.was', was); ls.set('hush.kept', '1'); } ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc, pid: m.pid, code: m.code, who: m.who }); post(); return; }
     if (m.t === 'muted') { if (onMod) onMod({ muted: m.until, why: m.why }); return; }
     if (m.t === 'hush') { if (onMod) onMod({ soft: true }); return; }
     if (m.t === 'friends' || m.t === 'mail' || m.t === 'fask' || m.t === 'fyes' || m.t === 'fno' || m.t === 'w' || m.t === 'wok' || m.t === 'wno') { if (onSocial) onSocial(m); return; }
@@ -213,25 +203,22 @@ function localDriver() {
     async del(coll, id) { const d = load(); if (d[coll]) { delete d[coll][id]; save(d); } },
   };
 }
-// Supabase: one table per collection, each row (id, at, d) with the record itself in d. See supabase/schema.sql.
-function supabaseDriver(sb) {
-  const col = (f) => (f === 'at' ? 'at' : `d->>${f}`);
-  const ok = ({ data, error }) => { if (error) throw error; return data; };
+// The island's own room: records are asked for and added over /room/db, and the room says (down the line every
+// visitor already holds) when a collection has changed, so nobody has to keep asking.
+const changed = new EventTarget();
+function islandDriver() {
+  const call = async (body) => {
+    const r = await fetch('/room/db', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('island db ' + r.status);
+    return r.json();
+  };
   return {
-    async list(coll, filters, order, lim) {
-      let q = sb.from(coll).select('id,d');
-      for (const [f, op, v] of filters) q = op === '==' ? q.eq(col(f), v) : op === '<' ? q.lt(col(f), v) : q;
-      if (order) q = q.order('at', { ascending: order[1] !== 'desc' });
-      return ok(await q.limit(lim)).map((r) => [r.id, r.d]);
-    },
-    async one(coll, id) { const rows = ok(await sb.from(coll).select('d').eq('id', id).limit(1)); return rows.length ? rows[0].d : undefined; },
-    async put(coll, id, data) { ok(await sb.from(coll).insert({ id, at: Number(data.at) || Date.now(), d: data })); },
-    async patch(coll, id, data) {
-      const old = await this.one(coll, id);
-      if (!old) throw new Error('missing');
-      ok(await sb.from(coll).update({ d: { ...old, ...data } }).eq('id', id));
-    },
-    async del(coll, id) { ok(await sb.from(coll).delete().eq('id', id)); },
+    live: true,
+    async list(coll, filters, order, lim) { return (await call({ op: 'list', coll, filters, order, lim })).rows; },
+    async one(coll, id) { const d = (await call({ op: 'one', coll, id })).d; return d === null ? undefined : d; },
+    async put(coll, id, data) { await call({ op: 'put', coll, id, data }); },
+    async patch(coll, id, data) { await call({ op: 'patch', coll, id, data }); },
+    async del(coll, id) { await call({ op: 'del', coll, id }); },
   };
 }
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : 'x' + Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -267,7 +254,10 @@ function makeDb(driver, pollMs) {
         };
         const iv = setInterval(tick, pollMs);
         setTimeout(tick, 30);
-        return () => { stopped = true; clearInterval(iv); };
+        // Told of a change, or back from a hidden tab: look at once.
+        const told = (e) => { if (e.detail === coll) tick(); }, back = () => { if (!document.hidden) tick(); };
+        if (driver.live) { changed.addEventListener('c', told); document.addEventListener('visibilitychange', back); }
+        return () => { stopped = true; clearInterval(iv); changed.removeEventListener('c', told); document.removeEventListener('visibilitychange', back); };
       },
       doc: (id) => doc(coll + '/' + (id || newId())),
       add: async (data) => { const r = doc(coll + '/' + newId()); await r.set(data); return r; },

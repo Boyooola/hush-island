@@ -2472,6 +2472,7 @@ window.__ember = {
   get pid() { return myPid; },
   get keptBy() { return keptBy; },
   get code() { return myCode; },
+  get boatTotal() { return boatTotal; }, get carvings() { return carvings; }, store: saved,
   startParty, joinParty, leaveParty,
   boardBoat, castOff, leaveBoat,
   surface: (x, z) => world.surface(x, z), get moving() { return !!moveTarget || !!hop; },

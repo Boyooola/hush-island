@@ -46,6 +46,14 @@ export class Island extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS friends (a TEXT NOT NULL, b TEXT NOT NULL, at INTEGER, PRIMARY KEY (a, b))');
     this.sql.exec('CREATE TABLE IF NOT EXISTS asks (a TEXT NOT NULL, b TEXT NOT NULL, at INTEGER, PRIMARY KEY (a, b))');
     this.sql.exec('CREATE TABLE IF NOT EXISTS mail (at INTEGER PRIMARY KEY, dest TEXT, src TEXT, name TEXT, text TEXT)');
+    // What the island remembers for everyone: the planks of the boat, the marks on the wall, the bottles at sea.
+    // One row per record, the record itself as JSON in d. (These lived in Supabase until November 2026.)
+    this.sql.exec('CREATE TABLE IF NOT EXISTS docs (coll TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, d TEXT NOT NULL, PRIMARY KEY (coll, id))');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS docs_at ON docs (coll, at)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS gone (id TEXT PRIMARY KEY)');                      // records removed here, so the move does not bring them back
+    this.sql.exec('CREATE TABLE IF NOT EXISTS alias (kh TEXT PRIMARY KEY, pid TEXT, code TEXT, at INTEGER)');   // browsers that kept the number they had as a Supabase guest
+    this.sql.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)');
+    this.dbRate = new Map();      // scrambled address -> [minute, reads, writes]
     this.pals = new Map();        // "a|b" -> [are they friends, when asked]: saves asking for every whisper
     this.said = new Map();        // socket -> the last few things it said, for reports; forgotten when the object sleeps
   }
@@ -90,7 +98,7 @@ export class Island extends DurableObject {
   // Friends, notes for absent friends, feedback and reports are kept in Supabase when the Worker has been given
   // the project's secret key (a secret named SUPABASE_SECRET_KEY). Without it they are kept in this room's own
   // small database, so the island works either way.
-  get remote() { return !!this.env.SUPABASE_SECRET_KEY; }
+  get remote() { return false; }      // people-data lives in this room's own database now; see moveIn() below
   get sbUrl() { return this.env.SUPABASE_URL_OVERRIDE || SUPABASE_URL; }
   async sb(fn, args) {
     const key = this.env.SUPABASE_SECRET_KEY;
@@ -99,6 +107,129 @@ export class Island extends DurableObject {
     const text = await r.text();
     return text ? JSON.parse(text) : null;
   }
+  meta(k) { try { const r = this.sql.exec('SELECT v FROM meta WHERE k = ?', k).toArray(); return r.length ? r[0].v : ''; } catch (e) { return ''; } }
+  setMeta(k, v) { this.sql.exec('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)', k, String(v)); }
+
+  // ---- moving in from Supabase ----
+  // Until November 2026 the boat, the wall and the bottles were tables in a Supabase project, and so were friends
+  // and profiles. This copies them here, once, the first time the room runs with the old project's secret key
+  // still set. For a day afterwards it looks again every half hour for anything a browser tab that was open
+  // during the move wrote to the old place. Nothing is ever deleted there. Once the day is over (or if the key was
+  // never set) this does nothing, and the key and the project can go.
+  async moveIn() {
+    const key = this.env.SUPABASE_SECRET_KEY, now = Date.now();
+    if (!key) return true;                                   // nothing to move: a new island, or the key is gone
+    const first = Number(this.meta('moved')) || 0, last = Number(this.meta('looked')) || 0;
+    if (first && (now - first > 86400000 || now - last < 1800000)) return true;
+    if (this.moving) return this.moving;
+    this.moving = (async () => {
+      const get = async (table) => {
+        const r = await fetch(`${this.sbUrl}/rest/v1/${table}?select=*&limit=5000`, { headers: { apikey: key, Authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(8000) });
+        if (!r.ok) throw new Error('supabase ' + table + ' ' + r.status);
+        return r.json();
+      };
+      const ms = (v) => (typeof v === 'number' ? v : Date.parse(v) || now);
+      try {
+        const [boat, carvings, bottles] = await Promise.all([get('boat'), get('carvings'), get('bottles')]);
+        if (!first && !boat.length) throw new Error('nothing to move yet');      // an empty answer is not believed: the boat has planks
+        const social = first ? null : await Promise.all([get('profiles'), get('friends'), get('friend_asks'), get('friend_notes'), get('feedback'), get('reports')]);
+        this.ctx.storage.transactionSync(() => {
+          for (const [coll, rows] of [['boat', boat], ['carvings', carvings], ['bottles', bottles]]) for (const r of rows) {
+            if (!r || typeof r.id !== 'string' || !r.d || typeof r.d !== 'object') continue;
+            this.sql.exec('INSERT OR IGNORE INTO docs (coll, id, at, d) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM gone WHERE id = ?)', coll, r.id, ms(r.at), JSON.stringify(r.d), r.id);
+          }
+          if (social) {
+            const [profiles, friends, asks, notes, feedback, reports] = social;
+            for (const r of profiles) this.sql.exec('INSERT OR REPLACE INTO people (pid, name, code, s, seen) VALUES (?, ?, ?, ?, ?)', r.pid, r.name || 'A visitor', r.code || '', r.species | 0, ms(r.seen));
+            for (const r of friends) this.sql.exec('INSERT OR IGNORE INTO friends (a, b, at) VALUES (?, ?, ?), (?, ?, ?)', r.a, r.b, ms(r.at), r.b, r.a, ms(r.at));
+            for (const r of asks) this.sql.exec('INSERT OR IGNORE INTO asks (a, b, at) VALUES (?, ?, ?)', r.a, r.b, ms(r.at));
+            notes.forEach((r, i) => this.sql.exec('INSERT OR IGNORE INTO mail (at, dest, src, name, text) VALUES (?, ?, ?, ?, ?)', ms(r.at) + i, r.dest, r.src, r.name || 'A visitor', r.body || ''));
+            feedback.forEach((r, i) => this.sql.exec('INSERT OR IGNORE INTO feedback (at, who, h, text) VALUES (?, ?, ?, ?)', ms(r.at) + i, r.who || '', r.h || '', r.body || ''));
+            reports.forEach((r, i) => this.sql.exec('INSERT OR IGNORE INTO reports (at, tid, who, wh, by, note, lines, sure) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ms(r.at) + i, r.tid || '', r.who || '', r.wh || '', r.by_h || '', r.note || '', JSON.stringify(r.lines || []), r.sure ? 1 : 0));
+          }
+          if (!first) this.setMeta('moved', now);
+          this.setMeta('looked', now);
+        });
+        return true;
+      } catch (e) { return !!first; }      // a first move that failed is tried again; a later look that failed can wait
+      finally { this.moving = null; }
+    })();
+    return this.moving;
+  }
+
+  // ---- what the island remembers: /room/db ----
+  // The game asks for lists of records and adds to them. The rules are the island's, not the browser's: only these
+  // three collections, only these shapes, and a bottle can only be answered once and thrown away once answered.
+  async db(request) {
+    const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    if (request.method !== 'POST') return json({ error: 'The game speaks to this address; there is nothing to read here.' }, 405);
+    if (!(await this.moveIn())) return json({ error: 'not ready' }, 503);
+    let m = null;
+    try { const raw = await request.text(); if (raw.length <= 3000) m = JSON.parse(raw); } catch (e) { m = null; }
+    if (!m || typeof m !== 'object') return json({ error: 'bad request' }, 400);
+    const coll = m.coll, now = Date.now();
+    if (coll !== 'boat' && coll !== 'carvings' && coll !== 'bottles') return json({ error: 'no such collection' }, 404);
+    const write = m.op === 'put' || m.op === 'patch' || m.op === 'del';
+    const h = (await this.hashOf(request)) || 'none', minute = Math.floor(now / 60000);
+    let r = this.dbRate.get(h);
+    if (!r || r[0] !== minute) { r = [minute, 0, 0]; this.dbRate.set(h, r); if (this.dbRate.size > 2000) this.dbRate.clear(); }
+    if (write ? ++r[2] > 20 : ++r[1] > 240) return json({ error: 'slow down' }, 429);
+    const idOk = typeof m.id === 'string' && /^[\w-]{8,64}$/.test(m.id);
+    const row = (id) => { const q = this.sql.exec('SELECT d FROM docs WHERE coll = ? AND id = ?', coll, id).toArray(); return q.length ? JSON.parse(q[0].d) : null; };
+    const text = (v, max) => typeof v === 'string' && v.trim().length >= 1 && v.length <= max && judge(v) !== 'mute';
+    const told = () => { for (const { ws } of this.everyone()) this.send(ws, { t: 'db', c: coll }); };
+    try {
+      if (m.op === 'list') {
+        let where = 'coll = ?'; const args = [coll];
+        for (const f of Array.isArray(m.filters) ? m.filters.slice(0, 4) : []) {
+          if (!Array.isArray(f)) continue;
+          if (f[0] === 'at' && f[1] === '<' && Number.isFinite(f[2])) { where += ' AND at < ?'; args.push(f[2]); }
+          else if ((f[0] === 'state' || f[0] === 'from') && f[1] === '==' && typeof f[2] === 'string') { where += ` AND json_extract(d, '$.${f[0]}') = ?`; args.push(f[2].slice(0, 80)); }
+        }
+        const desc = Array.isArray(m.order) && m.order[1] === 'desc', lim = Math.max(1, Math.min(1000, m.lim | 0 || 1000));
+        const rows = this.sql.exec(`SELECT id, d FROM docs WHERE ${where} ORDER BY at ${desc ? 'DESC' : 'ASC'} LIMIT ?`, ...args, lim).toArray();
+        return json({ rows: rows.map((x) => [x.id, JSON.parse(x.d)]) });
+      }
+      if (m.op === 'one') return idOk ? json({ d: row(m.id) }) : json({ error: 'bad id' }, 400);
+      if (m.op === 'put') {
+        const d = m.data;
+        if (!idOk || !d || typeof d !== 'object' || Array.isArray(d)) return json({ error: 'bad record' }, 400);
+        const size = JSON.stringify(d).length;
+        const fine = coll === 'boat' ? (d.n === 1 || d.n === 2) && size < 300
+          : coll === 'carvings' ? text(d.text, 60) && size < 600
+          : d.state === 'adrift' && text(d.text, 140) && size < 900;
+        if (!fine) return json({ error: 'not allowed' }, 403);
+        d.at = now;
+        if (this.sql.exec('SELECT 1 FROM docs WHERE coll = ? AND id = ?', coll, m.id).toArray().length) return json({ error: 'exists' }, 409);
+        this.sql.exec('INSERT INTO docs (coll, id, at, d) VALUES (?, ?, ?, ?)', coll, m.id, now, JSON.stringify(d));
+        // Marks on the wall fade after a week; the wall is swept whenever a new one is cut.
+        if (coll === 'carvings') this.sql.exec('DELETE FROM docs WHERE coll = ? AND at < ?', 'carvings', now - 7 * 86400000);
+        told();
+        return json({ ok: true });
+      }
+      if (m.op === 'patch' && coll === 'bottles') {
+        const old = idOk ? row(m.id) : null, d = m.data;
+        if (!old) return json({ error: 'missing' }, 404);
+        if (old.state !== 'adrift' || !d || typeof d !== 'object' || d.state !== 'replied' || !text(d.reply, 140)) return json({ error: 'not allowed' }, 403);
+        const next = { ...old, state: 'replied', reply: d.reply, replyName: clip(d.replyName, 22), replyAt: now };
+        if (JSON.stringify(next).length >= 1400) return json({ error: 'not allowed' }, 403);
+        this.sql.exec('UPDATE docs SET d = ? WHERE coll = ? AND id = ?', JSON.stringify(next), coll, m.id);
+        told();
+        return json({ ok: true });
+      }
+      if (m.op === 'del' && coll === 'bottles') {
+        const old = idOk ? row(m.id) : null;
+        if (!old) return json({ ok: true });
+        if (old.state !== 'replied') return json({ error: 'not allowed' }, 403);
+        this.sql.exec('DELETE FROM docs WHERE coll = ? AND id = ?', coll, m.id);
+        this.sql.exec('INSERT OR IGNORE INTO gone (id) VALUES (?)', m.id);
+        told();
+        return json({ ok: true });
+      }
+      return json({ error: 'not allowed' }, 403);
+    } catch (e) { return json({ error: 'could not do that' }, 500); }
+  }
+
   later(p) { try { this.ctx.waitUntil(Promise.resolve(p).catch(() => {})); } catch (e) { /* nothing to wait on */ } }
 
   // ---- friends, whispers and notes ----
@@ -107,7 +238,14 @@ export class Island extends DurableObject {
   // a name are taken from it, so nobody can wear someone else's number.
   async identify(a, key, tok) {
     let k = '';
-    a.gid = '';
+    a.gid = ''; a.kept = 0;
+    // A browser that came over from a Supabase guest account keeps the number it had then.
+    const keyOk = typeof key === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(key);
+    const hex = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const kh = keyOk ? (await hex('hush-island:key:' + key)).slice(0, 32) : '';
+    if (kh) {
+      try { const r = this.sql.exec('SELECT pid, code FROM alias WHERE kh = ?', kh).toArray(); if (r.length) { a.pid = r[0].pid; a.code = r[0].code; a.who = 'browser'; a.kept = 1; return; } } catch (e) { /* go on */ }
+    }
     if (typeof tok === 'string' && tok.length > 40 && tok.length < 3500 && /^[\w-]+\.[\w-]+\.[\w-]+$/.test(tok) && this.sbUrl) {
       try {
         const r = await fetch(this.sbUrl + '/auth/v1/user', { headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(3000) });
@@ -120,6 +258,8 @@ export class Island extends DurableObject {
     const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hush-island:person:' + k)));
     a.pid = [...d].slice(0, 10).map((b) => b.toString(16).padStart(2, '0')).join('');
     a.code = String(1000 + (((d[10] << 16) | (d[11] << 8) | d[12]) % 9000));
+    // Shown to be the old guest once, the browser's own secret stands for that guest from now on.
+    if (a.gid && kh) { try { this.sql.exec('INSERT OR REPLACE INTO alias (kh, pid, code, at) VALUES (?, ?, ?, ?)', kh, a.pid, a.code, Date.now()); a.kept = 1; } catch (e) { /* asked again next visit */ } }
   }
   remember(a) {
     if (!a.pid) return;
@@ -165,6 +305,7 @@ export class Island extends DurableObject {
   }
   // Just come ashore: their friends list and any notes left for them follow the welcome, and their friends hear of it.
   async greet(ws, a) {
+    try { await this.moveIn(); } catch (e) { /* friends from before the move turn up next visit */ }
     if (!a.pid) return;
     this.send(ws, { t: 'friends', first: 1, ...(await this.friendsOf(a.pid)) });
     const mail = await this.mailFor(a.pid);
@@ -328,7 +469,9 @@ export class Island extends DurableObject {
   }
 
   async fetch(request) {
+    this.later(this.moveIn());      // the one-time move from Supabase, if it is still to do
     if (request.headers.get('Upgrade') !== 'websocket') {
+      if (new URL(request.url).pathname === '/room/db') return this.db(request);
       if (new URL(request.url).pathname === '/room/feedback') return request.method === 'POST' ? this.feedback(request) : new Response('Feedback is sent from inside the game.', { status: 405 });
       if (new URL(request.url).pathname === '/room/reports.json') {
         // For the keeper of the island only: the key is a secret set on the Worker, sent in a header.
@@ -341,7 +484,9 @@ export class Island extends DurableObject {
       if (new URL(request.url).pathname === '/room/stats.json') return new Response(JSON.stringify(this.stats()), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
       // A plain request gets a head count: how many are ashore, how many are waiting, how many fit.
       const all = this.everyone();
-      const body = { ashore: all.filter((x) => x.a.role === 'in').length, waiting: all.filter((x) => x.a.role === 'wait').length, cap: this.cap };
+      const body = { ashore: all.filter((x) => x.a.role === 'in').length, waiting: all.filter((x) => x.a.role === 'wait').length, cap: this.cap,
+        // Whether the island's records have been moved here from Supabase (true also where there was nothing to move), and how many planks it holds.
+        moved: !this.env.SUPABASE_SECRET_KEY || !!this.meta('moved'), planks: this.sql.exec("SELECT COUNT(*) AS n FROM docs WHERE coll = 'boat'").toArray()[0].n };
       return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
     }
     const pair = new WebSocketPair();
@@ -407,7 +552,7 @@ export class Island extends DurableObject {
       }
       this.top('peak', ashore);
       next.ws.serializeAttachment(next.a);
-      this.send(next.ws, { t: 'in', now: Date.now(), id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0, cc: next.a.cc || '', pid: next.a.pid || '', code: next.a.code || '', who: next.a.who || '' });
+      this.send(next.ws, { t: 'in', now: Date.now(), id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0, cc: next.a.cc || '', pid: next.a.pid || '', code: next.a.code || '', who: next.a.who || '', kept: next.a.kept ? 1 : 0 });
       this.later(this.greet(next.ws, next.a));
       // Ask everyone ashore to say where they are, so the newcomer sees them at once. They have company now.
       for (const { ws, a } of all) if (a.role === 'in' && ws !== next.ws) {
@@ -870,7 +1015,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const room = () => env.ISLAND.get(env.ISLAND.idFromName('main')).fetch(request);
-    if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback') return room();
+    if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback' || url.pathname === '/room/db') return room();
     if (url.pathname === '/room/reports' || url.pathname === '/room/reports/') return new Response(REPORTS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room/stats' || url.pathname === '/room/stats/') return new Response(STATS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room' || url.pathname === '/room/' || url.pathname === '/room/status' || url.pathname === '/room/status/') {

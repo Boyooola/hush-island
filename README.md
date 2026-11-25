@@ -24,7 +24,7 @@ npm run serve      # or serve dist/ with anything
 1. **Supabase**, when `src/config.js` has a project URL and publishable key. Live visitors use Realtime broadcast; marks, bottles and the boat use three tables. Run `supabase/schema.sql` once in the project's SQL editor.
 2. **This browser only**, when the config is empty. Tabs of the same browser see each other, and everything is kept on the device. Good for trying it out; nobody on another device will appear.
 
-The Supabase path has not been run against a live project yet.
+The database rules were checked against the live project. Live visitors over Realtime have not yet been tried from two devices.
 
 ## Layout
 

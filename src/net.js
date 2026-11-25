@@ -40,13 +40,15 @@ export function createNet(handlers) {
   let lastSentAt = 0;
   let pending = null;
   let status = 'connecting';
+  let joinCb = null;
+  const startJoin = () => { if (room && typeof room.join === 'function') room.join(joinCb); else joinCb({ state: 'in' }); };
 
   async function connect() {
     let ns = null;
     try {
       ns = await use('room');
     } catch (e) { ns = null; }
-    if (!ns) { status = 'solo'; handlers.onStatus(status); return; }
+    if (!ns) { status = 'solo'; handlers.onStatus(status); if (joinCb) joinCb({ state: 'in' }); return; }
     room = ns;
     const fail = () => { room = null; status = 'solo'; handlers.onStatus(status); handlers.onPeers([]); };
     try {
@@ -64,6 +66,7 @@ export function createNet(handlers) {
         handlers.onPeers(list);
       }, fail);
       if (pending) { const p = pending; pending = null; send(p, true); }
+      if (joinCb) startJoin();
     } catch (e) { fail(); }
   }
 
@@ -79,5 +82,10 @@ export function createNet(handlers) {
   }
 
   connect();
-  return { send, get status() { return status; } };
+  return {
+    send,
+    get status() { return status; },
+    // Ask for a place on the island. cb hears {state: 'in'}, or {state: 'wait', pos, of} while the island is full.
+    join(cb) { joinCb = cb; if (status === 'solo') cb({ state: 'in' }); else if (room) startJoin(); },
+  };
 }

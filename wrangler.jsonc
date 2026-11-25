@@ -1,9 +1,17 @@
 {
-  // Lets the site be deployed as a Cloudflare Worker that serves the built files.
-  // The name must match the Worker's name in the Cloudflare dashboard.
+  // Hush Island on Cloudflare: the built site in dist/ plus a small Worker (worker/index.js)
+  // that runs the island's live room. The name must match the Worker's name in the dashboard.
   "name": "hush-island",
+  "main": "worker/index.js",
   "compatibility_date": "2026-11-25",
   "assets": {
-    "directory": "./dist"
-  }
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  // How many animals can be ashore at once before newcomers queue.
+  "vars": { "CAP": "40" },
+  "durable_objects": {
+    "bindings": [{ "name": "ISLAND", "class_name": "Island" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Island"] }]
 }

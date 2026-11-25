@@ -416,6 +416,7 @@ export class Avatar {
     this.group.add(this.parts.rig);
     this.setHeld(this.held);
     this.coatShown = false; this.setCoat(this.warmth, this.wet);
+    this.castsShadow = undefined;
     this.setButterfly(this.butterfly);
     this.setRewards(this.nights);
     const size = this.parts.quad ? Math.max(0.9, this.parts.bodyLength * 0.8) : 1.1;
@@ -439,6 +440,13 @@ export class Avatar {
     if (this.parts.fishMesh) this.parts.fishMesh.visible = kind === 2;
     if (this.parts.plankMesh) this.parts.plankMesh.visible = kind === 3;
     if (this.parts.stick) this.parts.stick.visible = false;
+  }
+
+  // Whether this animal throws a shadow. Only worth the cost near the fire, the one light that casts them.
+  setShadows(on) {
+    if (this.castsShadow === on || !this.parts || this.parts.empty) return;
+    this.castsShadow = on;
+    this.parts.rig.traverse((o) => { if (o.isMesh && o.userData.caster !== false) o.castShadow = on; });
   }
 
   setButterfly(on) {

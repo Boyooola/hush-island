@@ -14,16 +14,57 @@ export function use(name) {
 export let mode = 'claude';     // 'claude', 'supabase' or 'local': shown nowhere, handy when checking
 
 async function build() {
+  let sb = null;
   if (SUPABASE_URL && SUPABASE_KEY) {
     try {
       const { createClient } = await import('@supabase/supabase-js');
-      const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 5 } } });
-      mode = 'supabase';
-      return { room: makeRoom(supabaseWire(sb)), db: makeDb(supabaseDriver(sb), 10000), user: null };
-    } catch (e) { /* fall through to this browser alone */ }
+      sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 3 } } });
+    } catch (e) { sb = null; }
   }
+  const db = sb ? makeDb(supabaseDriver(sb), 10000) : makeDb(localDriver(), 1000);
+  // Live visitors: the island's own room on Cloudflare if this site has one, else Supabase, else this browser alone.
+  const url = location.origin.replace(/^http/, 'ws') + '/room';
+  const ws = /^https?:/.test(location.protocol) ? await openSocket(url) : null;
+  if (ws) { mode = 'cloudflare'; return { room: makeRoom(socketWire(ws, url)), db, user: null }; }
+  if (sb) { mode = 'supabase'; return { room: makeRoom(supabaseWire(sb)), db, user: null }; }
   mode = 'local';
-  return { room: makeRoom(localWire()), db: makeDb(localDriver(), 1000), user: null };
+  return { room: makeRoom(localWire()), db, user: null };
+}
+
+// ---------- the island's own room: one WebSocket to the Worker in worker/index.js ----------
+function openSocket(url) {
+  return new Promise((res) => {
+    let done = false, ws;
+    const end = (v) => { if (!done) { done = true; clearTimeout(timer); res(v); } };
+    const timer = setTimeout(() => { try { ws.close(); } catch (e) { /* never opened */ } end(null); }, 4000);
+    try { ws = new WebSocket(url); } catch (e) { end(null); return; }
+    ws.onopen = () => end(ws);
+    ws.onerror = ws.onclose = () => end(null);
+  });
+}
+function socketWire(first, url) {
+  let ws = first, onMsg = () => {}, onUp = () => {}, joined = false;
+  const hook = () => {
+    ws.onmessage = (e) => { if (e.data === 'pong') return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } onMsg(m); };
+    ws.onerror = () => {};
+    ws.onclose = () => { onUp(false); setTimeout(again, 2000); };
+  };
+  // A dropped line is picked up again, and your place ashore asked for again.
+  const again = async () => {
+    const n = await openSocket(url);
+    if (!n) { setTimeout(again, 4000); return; }
+    ws = n; hook(); onUp(true);
+    if (joined) ws.send(JSON.stringify({ t: 'join' }));
+  };
+  hook();
+  setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 20000);
+  window.addEventListener('pagehide', () => { try { ws.close(1000); } catch (e) { /* gone */ } });
+  return {
+    post(m) { if (m.t === 'join') joined = true; if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
+    listen(fn) { onMsg = fn; },
+    up(fn) { onUp = fn; fn(ws.readyState === 1); },
+    gap: 240, beat: 5000, queued: true,
+  };
 }
 
 // ---------- room ----------
@@ -31,38 +72,45 @@ async function build() {
 // here: each visitor says where they are a few times a second, and anyone silent for a while is taken to have left.
 function localWire() {
   const bc = new BroadcastChannel('hush-island-room');
-  return { post: (m) => bc.postMessage(m), listen: (fn) => { bc.onmessage = (e) => fn(e.data); }, up: (fn) => setTimeout(() => fn(true), 0), gap: 100 };
+  return { post: (m) => bc.postMessage(m), listen: (fn) => { bc.onmessage = (e) => fn(e.data); }, up: (fn) => setTimeout(() => fn(true), 0), gap: 100, beat: 2500 };
 }
 function supabaseWire(sb) {
   const ch = sb.channel('island', { config: { broadcast: { self: false } } });
   let onMsg = () => {}, onUp = () => {};
   ch.on('broadcast', { event: 'm' }, ({ payload }) => onMsg(payload));
   ch.subscribe((status) => onUp(status === 'SUBSCRIBED'));
-  return { post: (m) => { ch.send({ type: 'broadcast', event: 'm', payload: m }).catch(() => {}); }, listen: (fn) => { onMsg = fn; }, up: (fn) => { onUp = fn; }, gap: 280 };
+  return { post: (m) => { ch.send({ type: 'broadcast', event: 'm', payload: m }).catch(() => {}); }, listen: (fn) => { onMsg = fn; }, up: (fn) => { onUp = fn; }, gap: 700, beat: 6000 };
 }
 function makeRoom(wire) {
   const id = Math.random().toString(36).slice(2, 12);
   const others = new Map();
+  const beat = wire.beat || 2500;
   let mine = {}, handler = null, lastPost = 0, timer = null, dirty = false;
+  let ashore = !wire.queued, onQueue = null;      // a room with a queue lets you in when there is space
   const emit = () => {
     if (!handler) return;
     handler({ peers: [...others.entries()].map(([peer, o]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence: o.p })) });
   };
-  const post = () => { lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
+  const post = () => { if (!ashore) return; lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
   wire.listen((m) => {
-    if (!m || typeof m !== 'object' || typeof m.id !== 'string' || m.id === id) return;
+    if (!m || typeof m !== 'object') return;
+    if (m.t === 'in') { ashore = true; if (onQueue) onQueue({ state: 'in', cap: m.cap }); post(); return; }
+    if (m.t === 'wait') { ashore = false; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }
+    if (typeof m.id !== 'string' || m.id === id) return;
     if (m.t === 'p' && m.p && typeof m.p === 'object') { others.set(m.id, { p: m.p, at: Date.now() }); emit(); }
     else if (m.t === 'hello') post();
     else if (m.t === 'bye' && others.delete(m.id)) emit();
   });
+  let still = 0;
   setInterval(() => {
     const now = Date.now();
     let gone = false;
-    for (const [k, o] of others) if (now - o.at > 8000) { others.delete(k); gone = true; }
+    for (const [k, o] of others) if (now - o.at > beat * 2.5 + 3000) { others.delete(k); gone = true; }
     if (gone) emit();
-    if (now - lastPost > 2500) post();          // a heartbeat, so a visitor standing still is not taken for gone
+    if (ashore && now - lastPost > beat) post();          // a heartbeat, so a visitor standing still is not taken for gone
+    if (!ashore && onQueue && now - still > 15000) { still = now; wire.post({ t: 'still' }); }   // still waiting in line
   }, 1000);
-  window.addEventListener('pagehide', () => wire.post({ t: 'bye', id }));
+  if (!wire.queued) window.addEventListener('pagehide', () => wire.post({ t: 'bye', id }));
   return {
     presence(patch) {
       mine = { ...mine, ...patch };
@@ -72,8 +120,10 @@ function makeRoom(wire) {
       else if (!timer) timer = setTimeout(() => { timer = null; if (dirty) post(); }, wait);
       return Promise.resolve();
     },
-    onPeers(fn) { handler = fn; wire.post({ t: 'hello', id }); setTimeout(emit, 0); return () => { handler = null; }; },
+    onPeers(fn) { handler = fn; if (!wire.queued) wire.post({ t: 'hello', id }); setTimeout(emit, 0); return () => { handler = null; }; },
     onConnection(fn) { wire.up(fn); return () => {}; },
+    // Ask to come ashore. fn hears {state: 'in'} when there is room, or {state: 'wait', pos, of} while queued.
+    join(fn) { onQueue = fn; if (wire.queued) wire.post({ t: 'join' }); else fn({ state: 'in' }); },
   };
 }
 

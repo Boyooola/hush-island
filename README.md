@@ -26,12 +26,15 @@ As a Worker (the repo's `wrangler.jsonc` points it at `dist`):
 
 ## Visitors and storage
 
-`src/backend.js` picks where shared things live:
+`src/backend.js` picks where shared things live.
 
-1. **Supabase**, when `src/config.js` has a project URL and publishable key. Live visitors use Realtime broadcast; marks, bottles and the boat use three tables. Run `supabase/schema.sql` once in the project's SQL editor.
-2. **This browser only**, when the config is empty. Tabs of the same browser see each other, and everything is kept on the device. Good for trying it out; nobody on another device will appear.
+**Live visitors** (positions, chat, gestures), first that works:
 
-The database rules were checked against the live project. Live visitors over Realtime have not yet been tried from two devices.
+1. **The island's own room on Cloudflare** (`worker/index.js`, a Durable Object reached at `/room`). It relays what each visitor does to the others, and it keeps a queue: only so many animals fit ashore at once (`CAP` in `wrangler.jsonc`, 40 by default), and anyone arriving after that waits on the title screen and steps ashore when someone leaves. `/room/status` answers with a head count.
+2. **Supabase Realtime**, if the room cannot be reached. Fine for a handful of visitors; the free plan's message allowance runs out quickly with more.
+3. **This browser only**: tabs of the same browser see each other.
+
+**Saved things** (marks, bottles, the boat): Supabase tables when `src/config.js` has a project URL and publishable key (run `supabase/schema.sql` once), otherwise this device.
 
 ## Layout
 
@@ -43,6 +46,7 @@ The database rules were checked against the live project. Live visitors over Rea
 - `src/build.js` the keeper's boat
 - `src/clock.js` island time (one day is 48 real minutes)
 - `src/net.js`, `src/store.js`, `src/backend.js` other visitors and saved things
+- `worker/index.js` the live room and its queue, run by Cloudflare
 - `assets/q/` animal models, trimmed with `tools/pack_animals.mjs`
 - `tests/` browser checks written during development (they expect Playwright and Chrome at fixed paths)
 

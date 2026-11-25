@@ -850,11 +850,29 @@ $('reroll').addEventListener('click', () => {
   showIdentity();
   me.play('hop');
 });
+// Stepping ashore asks the island for a place. If it is full you wait in line, on the title screen,
+// and step ashore by yourself when your turn comes.
+let asking = false;
+const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
 $('enter').addEventListener('click', () => {
+  if (entered || asking) return;
+  asking = true;
+  audio.start();
+  $('enter').hidden = true; $('reroll').hidden = true;
+  $('queue').hidden = false;
+  $('queue-text').textContent = 'Finding you a place by the fire…';
+  net.join((q) => {
+    if (q.state === 'in') { comeAshore(); return; }
+    if (entered) return;
+    $('queue-text').textContent = q.pos === 1 ? 'The island is full. You are next in line.' : `The island is full. You are ${nth(q.pos)} in line.`;
+    $('queue-note').textContent = 'Leave this open. You will step ashore as soon as someone leaves.';
+  });
+});
+function comeAshore() {
   if (entered) return;
   entered = true;
+  $('queue').hidden = true;
   store('ember.identity', identity);
-  audio.start();
   document.body.classList.add('playing');
   me.targetYaw = Math.PI;      // turn to face the fire
   addLog('', 'You came ashore. The fire is straight ahead.', 'sys');
@@ -865,7 +883,7 @@ $('enter').addEventListener('click', () => {
   welcomeBack();
   showList();
   setTimeout(() => { if (listState().done.length < 3) addLog('', 'The keeper has three small jobs today. They are listed on the left.', 'sys'); }, 9000);
-});
+}
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { me.tag.userData.draw(me.name, me.sub); keeper.tag.userData.draw(keeper.name, keeper.sub); });
 setInterval(() => { me.setName(me.name, mySub()); pushPresence(false); }, 20000);
 
@@ -943,6 +961,7 @@ function watchQuality(dtRaw) {
 let lastFrame = performance.now();
 let t = 0;
 const tmpV = new THREE.Vector3();
+const viewFrustum = new THREE.Frustum(), viewMatrix = new THREE.Matrix4(), viewSphere = new THREE.Sphere(new THREE.Vector3(), 2.4);
 function frame() {
   const nowMs = performance.now();
   const dt = Math.min((nowMs - lastFrame) / 1000, 0.05);
@@ -1060,6 +1079,7 @@ function frame() {
   placeKeeper();
   keeper.update(dt, t);
 
+  viewFrustum.setFromProjectionMatrix(viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   // Other visitors glide toward where they last said they were.
   for (const p of peers.values()) {
     const av = p.av, d = p.data;
@@ -1074,7 +1094,16 @@ function frame() {
     p.fade = bothAtFire ? 1 : 1 - smoothstep(8, 12, dist);
     av.bubbleFade = p.fade;
     av.look = speaker && speaker.until > t && speaker.av !== av && dist < 14 ? speaker.av : null;
-    av.update(dt, t);
+    // A crowded island: animals out of sight are not drawn, far ones are animated less often,
+    // and only those near the fire throw shadows.
+    viewSphere.center.set(av.x, av.y + 0.8, av.z);
+    const seen = dist < 85 && viewFrustum.intersectsSphere(viewSphere);
+    av.group.visible = seen;
+    av.setShadows(Math.hypot(av.x - FIRE.x, av.z - FIRE.z) < 6.5);
+    p.acc = (p.acc || 0) + dt; p.skip = (p.skip || 0) + 1;
+    const every = dist > 32 ? 3 : dist > 18 ? 2 : 1;
+    if (!seen) { av.group.position.set(av.x, av.y, av.z); p.acc = 0; p.skip = 0; }
+    else if (p.skip >= every) { av.update(p.acc, t); p.acc = 0; p.skip = 0; }
   }
 
   // Camera.
@@ -1165,7 +1194,7 @@ requestAnimationFrame(frame);
 
 // A small handle for checking the page from a test script.
 window.__ember = {
-  me, peers, world, camera, keeper, POSE, life,
+  me, peers, world, camera, renderer, keeper, POSE, life,
   yard, did, listToday,
   critters,
   setRain(v) { rainForce = v; frame.skyAt = 0; },
@@ -1176,7 +1205,8 @@ window.__ember = {
   set wet(v) { wet = v; },
   teleport(x, z, yaw) { me.x = x; me.z = z; vel.x = vel.z = 0; moveTarget = null; if (yaw !== undefined) me.yaw = me.targetYaw = yaw; },
   cam(yaw, pitch, dist) { camYaw = yaw; if (pitch !== undefined) camPitch = pitch; if (dist !== undefined) camDist = dist; },
-  setMode, standUp, sendChat, playEmote, callOut, toggleRest,
+  turn(d) { camYaw += d; },
+  setMode, standUp, sendChat, playEmote, callOut, toggleRest, comeAshore,
   get warmth() { return warmth; },
   set warmth(v) { warmth = v; },
   setFire(fuel) { const now = Date.now(); fireRec = { fuel, at: now, stamp: now }; pushPresence(true); },

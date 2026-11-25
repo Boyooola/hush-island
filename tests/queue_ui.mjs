@@ -1,0 +1,26 @@
+// The whole game against the local room, with space for two: a third visitor should queue, then come ashore.
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const errs = [];
+const open = async () => { const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(2500); await p.evaluate(() => window.__ember.lockQuality()); return p; };
+const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+const a = await open(), b = await open(), c = await open();
+await a.bringToFront(); await a.click('#enter'); await a.waitForTimeout(2500);
+await b.bringToFront(); await b.click('#enter'); await b.waitForTimeout(4000);
+ok('first two are ashore', await a.evaluate(() => document.body.classList.contains('playing')) && await b.evaluate(() => document.body.classList.contains('playing')));
+await b.evaluate(() => window.__ember.sendChat('Hello through the island room'));
+await a.bringToFront(); await a.waitForTimeout(2500);
+ok('they see each other', (await a.evaluate(() => window.__ember.peers.size)) === 1 && (await b.evaluate(() => window.__ember.peers.size)) === 1, await a.evaluate(() => document.getElementById('count').textContent));
+ok('chat arrives', await a.evaluate(() => [...document.querySelectorAll('#log .line')].some((l) => l.textContent.includes('Hello through the island room'))));
+await c.bringToFront(); await c.click('#enter'); await c.waitForTimeout(2500);
+const q = await c.evaluate(() => ({ playing: document.body.classList.contains('playing'), hidden: document.getElementById('queue').hidden, text: document.getElementById('queue-text').textContent, note: document.getElementById('queue-note').textContent }));
+ok('the third waits in line', !q.playing && !q.hidden && q.text.includes('next in line'), JSON.stringify(q));
+await c.screenshot({ path: '/home/claude/ember-isle/shots/q1-waiting.png' });
+await a.close();
+await c.waitForTimeout(5000);
+ok('when one leaves, the third steps ashore without being asked', await c.evaluate(() => document.body.classList.contains('playing')));
+await c.waitForTimeout(3000);
+ok('and sees the one still there', (await c.evaluate(() => window.__ember.peers.size)) === 1, await c.evaluate(() => document.getElementById('count').textContent));
+console.log(errs.length ? errs.slice(0, 3).join('\n') : 'no page errors');
+await browser.close();

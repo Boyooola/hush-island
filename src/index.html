@@ -73,6 +73,13 @@
   }
   .primary:hover { background: var(--amber); }
   .hint { color: var(--ink-quiet); font-size: 13.5px; }
+  /* Waiting for a place: a slow ember and a line of words. */
+  #queue { display: flex; gap: 14px; align-items: center; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); }
+  #queue[hidden] { display: none; }
+  #queue strong { display: block; font-family: var(--display); font-weight: 800; font-size: 21px; line-height: 1.15; color: var(--amber); }
+  #queue span#queue-note { display: block; font-size: 14px; color: var(--ink); margin-top: 3px; }
+  #queue .ember { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 18px 4px rgba(255, 140, 60, 0.7); animation: ember 1.8s ease-in-out infinite; }
+  @keyframes ember { 0%, 100% { transform: scale(0.7); opacity: 0.55; } 50% { transform: scale(1.15); opacity: 1; } }
 
   /* ---- HUD ---- */
   .hud { opacity: 0; visibility: hidden; transition: opacity 0.8s ease 0.8s, visibility 0s linear 0.8s; }
@@ -253,6 +260,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     #intro, .hud, #log .line { transition: none; }
+    #queue .ember { animation: none; }
   }
 </style>
 </head>
@@ -268,6 +276,7 @@
       <button class="ghost" id="reroll" type="button">Different animal</button>
     </div>
     <button class="primary" id="enter" type="button">Step ashore</button>
+    <div id="queue" hidden role="status" aria-live="polite"><span class="ember" aria-hidden="true"></span><div><strong id="queue-text"></strong><span id="queue-note"></span></div></div>
     <div class="hint" id="hint">Walk with WASD or tap the ground. Drag to look around.</div>
   </div>
 </section>

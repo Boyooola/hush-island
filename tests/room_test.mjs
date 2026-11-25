@@ -1,0 +1,40 @@
+// The live room by itself: does it relay, hold a queue when full, and let the next one in when someone leaves?
+const URL = 'ws://localhost:8787/room';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function client(name) {
+  const c = { name, got: [], state: 'new', ws: new WebSocket(URL) };
+  c.ws.onmessage = (e) => { if (e.data === 'pong') return; const m = JSON.parse(e.data); c.got.push(m); if (m.t === 'in') c.state = 'in'; if (m.t === 'wait') c.state = 'wait ' + m.pos + '/' + m.of; };
+  c.open = new Promise((r) => { c.ws.onopen = r; });
+  c.send = (m) => c.ws.send(JSON.stringify(m));
+  return c;
+}
+const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+const [a, b, c, d] = ['A', 'B', 'C', 'D'].map(client);
+await Promise.all([a.open, b.open, c.open, d.open]);
+a.send({ t: 'join' }); await sleep(150);
+b.send({ t: 'join' }); await sleep(150);
+c.send({ t: 'join' }); await sleep(150);
+d.send({ t: 'join' }); await sleep(300);
+ok('first two come ashore (island holds 2)', a.state === 'in' && b.state === 'in', `${a.state}, ${b.state}`);
+ok('third and fourth wait in order', c.state === 'wait 1/2' && d.state === 'wait 2/2', `${c.state}, ${d.state}`);
+a.send({ t: 'p', p: { v: 1, n: 'A', x: 1, z: 2 } }); await sleep(200);
+ok('a position reaches the other one ashore', b.got.some((m) => m.t === 'p' && m.p.n === 'A'));
+ok('and nobody in the queue', !c.got.some((m) => m.t === 'p') && !d.got.some((m) => m.t === 'p'));
+c.send({ t: 'p', p: { v: 1, n: 'C' } }); await sleep(200);
+ok('someone waiting cannot speak to the island', !a.got.some((m) => m.t === 'p' && m.p.n === 'C'));
+a.ws.close(); await sleep(400);
+ok('when one leaves, the next comes ashore', c.state === 'in', c.state);
+ok('the one left behind moves up', d.state === 'wait 1/1', d.state);
+ok('those ashore hear that A left', b.got.some((m) => m.t === 'bye'));
+ok('those ashore are asked to show themselves to the newcomer', b.got.some((m) => m.t === 'hello'));
+for (let i = 0; i < 40; i++) b.send({ t: 'p', p: { v: 1, n: 'B', i } });
+await sleep(400);
+const flood = c.got.filter((m) => m.t === 'p' && m.p.n === 'B').length;
+ok('a flood from one visitor is cut off', flood > 0 && flood <= 13, flood + ' of 40 passed on');
+b.send('x'.repeat(4000)); b.ws.send('{bad json'); await sleep(200);
+ok('junk does not break the room', (() => { b.send({ t: 'p', p: { v: 1, n: 'B2' } }); return true; })());
+await sleep(1200);
+ok('room still relays afterwards', c.got.some((m) => m.t === 'p' && m.p.n === 'B2'));
+for (const x of [b, c, d]) x.ws.close();
+await sleep(200);
+process.exit(0);

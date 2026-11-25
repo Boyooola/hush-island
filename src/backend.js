@@ -4,6 +4,7 @@
 // Three possible homes, tried in this order: the Claude page it was first built on, a Supabase project
 // (see config.js), or this browser alone, where tabs of the same browser share with each other.
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
+import { setIslandTime } from './now.js';
 
 let made = null, client = null, signing = null;
 // The visitor's guest account with Supabase: { id, token }, or null if there is none to be had (Supabase out of
@@ -136,7 +137,7 @@ function makeRoom(wire) {
   const post = () => { if (!ashore) return; lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
   wire.listen((m) => {
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'in') { ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc, pid: m.pid, code: m.code, who: m.who }); post(); return; }
+    if (m.t === 'in') { setIslandTime(m.now); ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc, pid: m.pid, code: m.code, who: m.who }); post(); return; }
     if (m.t === 'muted') { if (onMod) onMod({ muted: m.until, why: m.why }); return; }
     if (m.t === 'hush') { if (onMod) onMod({ soft: true }); return; }
     if (m.t === 'friends' || m.t === 'mail' || m.t === 'fask' || m.t === 'fyes' || m.t === 'fno' || m.t === 'w' || m.t === 'wok' || m.t === 'wno') { if (onSocial) onSocial(m); return; }

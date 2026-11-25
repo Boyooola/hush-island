@@ -407,7 +407,7 @@ export class Island extends DurableObject {
       }
       this.top('peak', ashore);
       next.ws.serializeAttachment(next.a);
-      this.send(next.ws, { t: 'in', id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0, cc: next.a.cc || '', pid: next.a.pid || '', code: next.a.code || '', who: next.a.who || '' });
+      this.send(next.ws, { t: 'in', now: Date.now(), id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0, cc: next.a.cc || '', pid: next.a.pid || '', code: next.a.code || '', who: next.a.who || '' });
       this.later(this.greet(next.ws, next.a));
       // Ask everyone ashore to say where they are, so the newcomer sees them at once. They have company now.
       for (const { ws, a } of all) if (a.role === 'in' && ws !== next.ws) {
@@ -819,7 +819,7 @@ const STATS_PAGE = `<!DOCTYPE html>
     ] : [['No stays counted yet', '', '']]);
 
     const g0 = sum('g0');
-    el('steps-lead').textContent = g0 ? 'Of the ' + g0 + (g0 === 1 ? ' animal' : ' animals') + ' who stepped ashore for the first time and were shown the four steps:' : 'Nobody new has been shown the four steps yet.';
+    el('steps-lead').textContent = g0 ? 'Of the ' + g0 + (g0 === 1 ? ' animal' : ' animals') + ' who stepped ashore for the first time, how many went on to do each of these:' : 'Nobody new has stepped ashore yet.';
     rows('steps', g0 ? [
       ['Walked up to the fire', sum('g1'), pct(sum('g1'), g0)],
       ['Rested by it', sum('g2'), pct(sum('g2'), g0)],

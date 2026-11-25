@@ -1,7 +1,8 @@
+import { timeNow } from './now.js';
 // Island time. One island day takes 48 real minutes and runs off the clock on the wall,
 // so every visitor is always in the same hour of the same day.
 export const DAY_MS = 48 * 60000;
-export function islandHour(now = Date.now()) { return ((now % DAY_MS) / DAY_MS) * 24; }
+export function islandHour(now = timeNow()) { return ((now % DAY_MS) / DAY_MS) * 24; }
 export function clockText(h) {
   const hh = Math.floor(h), mm = Math.floor((h - hh) * 6) * 10;
   const part = h < 5.5 || h >= 19.5 ? 'Night' : h < 8 ? 'Dawn' : h < 16.5 ? 'Day' : 'Dusk';
@@ -39,7 +40,7 @@ const mixHex = (a, b, t) => {
 };
 // Rain: on most island days one spell of about four minutes blows in off the sea. 0 is dry, 1 is pouring.
 function roll(n) { let x = (Math.floor(n) ^ 0x9e3779b9) >>> 0; x = Math.imul(x ^ (x >>> 16), 0x85ebca6b) >>> 0; x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35) >>> 0; return ((x ^ (x >>> 16)) >>> 0) / 4294967296; }
-export function rainAt(now = Date.now()) {
+export function rainAt(now = timeNow()) {
   const d = Math.floor(now / DAY_MS);
   if (roll(d * 5 + 3) > 0.7) return 0;
   const start = d * DAY_MS + (0.12 + roll(d * 7 + 1) * 0.7) * DAY_MS, len = 270000, since = now - start;

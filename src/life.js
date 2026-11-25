@@ -1,5 +1,6 @@
 // Things that live on and around the island: fish under the dock, splashes and shaken-off droplets,
 // and the falling stars everyone sees at the same moment.
+import { timeNow } from './now.js';
 import * as THREE from 'three';
 import { DOCK, clamp, lerp, shoreRadius, terrainHeight } from './terrain.js';
 import { DAY_MS } from './clock.js';
@@ -15,7 +16,7 @@ function hash(n) {
 
 // Falling stars come as a shower at island midnight, once every island day.
 const SHOWER_MS = 150000;
-export function showerState(now = Date.now()) {
+export function showerState(now = timeNow()) {
   const since = now % DAY_MS;
   if (since < SHOWER_MS) return { on: true, startsIn: 0, endsIn: SHOWER_MS - since };
   return { on: false, startsIn: DAY_MS - since, endsIn: 0 };
@@ -153,7 +154,7 @@ export function buildLife(scene, world) {
     for (const b of gulls) {
       b.g.visible = daylight > 0.02;
       if (!b.g.visible) continue;
-      if (b.flock) b.a = (Date.now() / 1000) * b.sp - b.lag; else b.a += b.sp * dt;
+      if (b.flock) b.a = (timeNow() / 1000) * b.sp - b.lag; else b.a += b.sp * dt;
       b.g.position.set((b.cx || 0) + Math.cos(b.a) * b.rad, b.h + Math.sin(t * 0.3 + b.ph) * (b.flock ? 0.3 : 1.5), (b.cz || 0) + Math.sin(b.a) * b.rad);
       b.g.rotation.y = -b.a + (b.sp > 0 ? 0 : Math.PI);
       // Long glides with a few slow beats between.
@@ -366,7 +367,7 @@ export function buildLife(scene, world) {
   const DOLPHIN_EVERY = 95, WHALE_EVERY = 540;
   let lastSplash = -1;
   updaters.push(() => {
-    const now = Date.now() / 1000;
+    const now = timeNow() / 1000;
     const d = seaLife.dolphin;
     if (d) {
       // Three leaps in a row along the shore, somewhere out past the shallows, every minute and a half or so.
@@ -399,7 +400,7 @@ export function buildLife(scene, world) {
   const events = { onShower: null };
   updaters.push((dt) => {
     // The sky keeps time by the clock on the wall, so everyone sees the same stars fall.
-    const now = Date.now(), st = showerState(now), on = st.on || forced > now;
+    const now = timeNow(), st = showerState(now), on = st.on || forced > now;
     if (on !== showerOn) { showerOn = on; if (events.onShower) events.onShower(on); }
     const slotMs = on ? 1300 : 20000, slot = Math.floor(now / slotMs);
     if (slot !== lastSlot) {
@@ -453,7 +454,7 @@ export function buildLife(scene, world) {
     shakeOff(x, y, z, size) { spray(x, y, z, 30, 2.4 * size, 1.6); },
     meteor,
     get shower() { return showerOn; },
-    forceShower(ms = 20000) { forced = Date.now() + ms; },
+    forceShower(ms = 20000) { forced = timeNow() + ms; },
     get fish() { return fish.map((f) => ({ x: f.x, z: f.z, gone: f.gone > 0, scare: f.scare })); },
   };
 }

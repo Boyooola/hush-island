@@ -14,6 +14,7 @@ import { buildLife, showerState } from './life.js';
 import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
 import { voyageAt, BOARD_MS } from './voyage.js';
+import { timeNow, clockSkew } from './now.js';
 import { buildTraces } from './traces.js';
 import { judge } from './words.js';
 
@@ -71,7 +72,7 @@ let identity = store('ember.identity');
 if (!identity || !SPECIES[identity.species] || SPECIES[identity.species].npc || typeof identity.name !== 'string') identity = rollIdentity();
 let showOrigin = store('ember.origin') !== false;
 let COUNTRY = countryName();       // a first guess from the clock's time zone; the island corrects it when you step ashore
-let asleepSince = 0, lastInputAt = Date.now(), laidByNap = false, idleAfter = 120000;
+let asleepSince = 0, lastInputAt = timeNow(), laidByNap = false, idleAfter = 120000;
 let mutedUntil = 0;                // until when the island will not pass on what you say
 const ignored = new Set();         // visitors you have chosen not to hear, until you leave
 let itWho = null;                  // who is "it" in a game of tag: 'me', another visitor's id, or nobody
@@ -80,14 +81,14 @@ let itWho = null;                  // who is "it" in a game of tag: 'me', anothe
 const originText = () => (showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
 // Every visitor has a four-figure number, made once and kept by their browser, so two with the same name can be told apart.
 let myKey = store('ember.key');
-if (typeof myKey !== 'string' || !/^[a-z0-9]{24,40}$/.test(myKey)) { const b = new Uint8Array(20); crypto.getRandomValues(b); myKey = [...b].map((x) => (x % 36).toString(36)).join('') + Date.now().toString(36).slice(-6); store('ember.key', myKey); }
+if (typeof myKey !== 'string' || !/^[a-z0-9]{24,40}$/.test(myKey)) { const b = new Uint8Array(20); crypto.getRandomValues(b); myKey = [...b].map((x) => (x % 36).toString(36)).join('') + timeNow().toString(36).slice(-6); store('ember.key', myKey); }
 let myCode = store('ember.code');
 if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.random() * 9000)); store('ember.code', myCode); }
 const fullName = (name, code) => (code ? `${name} #${code}` : name);
 let sailed = Number(store('ember.sailed')) || 0;      // times round the island in the boat
 const withMarks = (muted, away, it, text, code, sailor) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${sailor ? '§s' : ''}${String(text || '').replace(/§/g, '')}`;
-const mySub = () => withMarks(mutedUntil > Date.now(), !!asleepSince, itWho === 'me', originText(), myCode, sailed > 0);
-const peerSub = (id, data) => withMarks(data.muted > Date.now(), data.asleep, itWho === id, data.sub, data.code, data.sailed > 0);
+const mySub = () => withMarks(mutedUntil > timeNow(), !!asleepSince, itWho === 'me', originText(), myCode, sailed > 0);
+const peerSub = (id, data) => withMarks(data.muted > timeNow(), data.asleep, itWho === id, data.sub, data.code, data.sailed > 0);
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -193,10 +194,10 @@ let actions = [];
 // A record says "the fire had this much fuel at this moment"; it burns down from there.
 // The newest record wins, and each visitor passes on the newest one they know.
 const FIRE_MAX = 1.4, FIRE_FLOOR = 0.08, BURN_PER_MS = 1 / 540000, FEED = 0.45;
-let fireRec = { fuel: 0.5, at: Date.now(), stamp: 0 };
-const fuelNow = () => Math.max(FIRE_FLOOR, fireRec.fuel - (Date.now() - fireRec.at) * BURN_PER_MS);
+let fireRec = { fuel: 0.5, at: timeNow(), stamp: 0 };
+const fuelNow = () => Math.max(FIRE_FLOOR, fireRec.fuel - (timeNow() - fireRec.at) * BURN_PER_MS);
 function adoptFire(rec) {
-  if (!rec || rec.at > Date.now() + 15000 || rec.at <= fireRec.stamp) return;
+  if (!rec || rec.at > timeNow() + 15000 || rec.at <= fireRec.stamp) return;
   const before = fuelNow();
   fireRec = { fuel: rec.fuel, at: rec.at, stamp: rec.at };
   if (entered && fuelNow() > before + 0.2) { world.flareUp(); audio.whoosh(); }
@@ -204,7 +205,7 @@ function adoptFire(rec) {
 function feedFire() {
   guideFlags.fire = true;
   const wasLow = fuelNow() < 0.3;
-  const now = Date.now();
+  const now = timeNow();
   fireRec = { fuel: Math.min(FIRE_MAX, fuelNow() + FEED), at: now, stamp: now };
   audio.whoosh();
   pushPresence(true);
@@ -310,22 +311,17 @@ function listState() {
   return rec && rec.day === todayKey() && Array.isArray(rec.done) ? rec : { day: todayKey(), done: [] };
 }
 // ---------- the guide: always one clear next thing, and a way to find it ----------
-// A first visit walks through four steps at the fire. After that the guide points at the next job on the
+// A first visit is shown one thing: the way to the fire. After that the guide points at the next job on the
 // keeper's list. Either way there is a line of words, an arrow, a distance, and a column of light at the spot.
 const guideFlags = {};
 const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 const STARTER = [
   { text: touch ? 'Walk up to the fire. Tap the ground to move' : 'Walk up to the fire. W A S D, or click the ground', where: () => FIRE, done: () => fireDist() < 5.5 },
-  { text: touch ? 'Rest by the fire. Tap the words at the bottom' : 'Rest by the fire. Press E', where: () => FIRE, done: () => me.mode !== 'stand' && fireDist() < 5.5 },
-  // The stick step says only the next small thing to do, with the key for it.
-  { text: () => {
-    const press = touch ? 'Tap the words at the bottom' : 'Press E';
-    if (held === 1) return fireDist() < 5.2 ? `Drop the stick on the fire. ${press}` : 'Carry the stick back to the fire';
-    if (me.mode !== 'stand') return touch ? 'Get up: tap "Get up" at the bottom. Then fetch a stick for the fire' : 'Get up with R. Then fetch a stick for the fire';
-    return Math.hypot(me.x - WOODPILE.x, me.z - WOODPILE.z) < 1.7 ? `Pick up a stick. ${press}` : 'Walk to the woodpile, a few steps from the fire';
-  }, where: () => (held === 1 ? FIRE : WOODPILE), done: () => !!guideFlags.fire },
-  { text: 'Greet the keeper, the stag lying by the fire', where: () => keeper, done: () => !!guideFlags.greet },
 ];
+// The rest is left to be found. The island still counts, once per visitor, who went on to rest by the fire (g2),
+// feed it (g3) and greet the keeper (g4), so that the keeper can see what newcomers discover by themselves.
+const firsts = (() => { const f = store('ember.firsts'), old = store('ember.starter') || 0; return f && typeof f === 'object' ? f : { g2: old >= 2, g3: old >= 3, g4: old >= 4 }; })();
+function first(k) { if (firsts[k]) return; firsts[k] = true; store('ember.firsts', firsts); net.note(k); }
 let starterAt = store('ember.starter');
 if (!Number.isInteger(starterAt)) starterAt = 0;
 const TASK_WHERE = {
@@ -337,7 +333,7 @@ let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
   if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
-  if (starterAt < STARTER.length) return { text: typeof STARTER[starterAt].text === 'function' ? STARTER[starterAt].text() : STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
+  if (starterAt < STARTER.length) return { text: typeof STARTER[starterAt].text === 'function' ? STARTER[starterAt].text() : STARTER[starterAt].text, at: STARTER[starterAt].where(), step: '' };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
 }
@@ -366,10 +362,15 @@ function updateGuide(now) {
       store('ember.starter', starterAt);
       net.note('g' + starterAt);
       audio.pop(560);
-      if (starterAt >= STARTER.length) addLog('', 'That is how the island works. From here the keeper has three small jobs a day. The next one is at the top of the screen.', 'sys');
+      if (starterAt >= STARTER.length) addLog('', touch ? 'This is the fire. The words at the bottom are what you can do where you stand. If you want something to do, the keeper has three small jobs a day: the next one is at the top of the screen.' : 'This is the fire. E and R do whatever is in reach where you stand. If you want something to do, the keeper has three small jobs a day: the next one is at the top of the screen.', 'sys');
+    }
+    if (starterAt >= STARTER.length) {
+      if (me.mode !== 'stand' && fireDist() < 5.5) first('g2');
+      if (guideFlags.fire) first('g3');
+      if (guideFlags.greet) first('g4');
     }
     goal = asleepSince ? null : findGoal();
-    // The keeper's list stays out of the way until the first four steps are done: one thing at a time.
+    // The keeper's list stays out of the way until the fire is reached: one thing at a time.
     $('tasks').dataset.fresh = starterAt < STARTER.length ? 'true' : 'false';
     const el = $('goal');
     el.hidden = !goal;
@@ -628,7 +629,7 @@ function updateKeeperGame(dt) {
     if (game && game === d.game && me.mode === 'stand' && !asleepSince) runners.push({ id: myWireId(), av: me });
     for (const [id, p] of peers) if (p.data.game === d.game && d.game && p.data.mode === 'stand' && !p.data.asleep) runners.push({ id, av: p.av });
     const humans = (game && game === d.game ? 1 : 0) + [...peers.values()].filter((p) => d.game && p.data.game === d.game).length;
-    if (d.game && (Date.now() - d.game > tagTime * 1000 || !humans)) {
+    if (d.game && (timeNow() - d.game > tagTime * 1000 || !humans)) {
       // The round is over, or everyone has gone: back to the fire for a rest.
       d.game = 0; d.it = 0; keeperHoming = true; keeperRestUntil = now + 45;
       if (entered && now - keeperSaid > 20) { keeperSaid = now; setTimeout(() => keeperSays('Enough for these old legs. Good game.'), 600); }
@@ -697,7 +698,7 @@ function taggable(reach, playersOnly) {
 }
 // A stamp later than any seen so far, so the order of tags is the same for everyone whatever their clocks say.
 function tagStamp() {
-  let at = Math.max(Date.now(), myIt + 1, tagSeen + 1, myTag ? myTag[1] + 1 : 0);
+  let at = Math.max(timeNow(), myIt + 1, tagSeen + 1, myTag ? myTag[1] + 1 : 0);
   for (const [, q] of folk()) at = Math.max(at, q.data.it + 1, q.data.tagAt + 1);
   return at;
 }
@@ -713,7 +714,7 @@ function flash(title, sub = '') {
 function inviteTag(id) {
   const p = peers.get(id);
   if (!p || !entered || game) return;
-  myInvite = [id, Date.now()]; myInviteAt = nowSec();
+  myInvite = [id, timeNow()]; myInviteAt = nowSec();
   me.targetYaw = Math.atan2(p.av.x - me.x, p.av.z - me.z);
   playEmote('wag');
   addLog('', `You asked ${p.data.name} to play tag. If they say yes, you are it.`, 'sys');
@@ -773,7 +774,7 @@ function heardTag(id, p, data) {
   }
   if (!(data.tagAt > (p.tagAt || 0))) return;
   p.tagAt = data.tagAt;
-  if (data.tagAt > Date.now() + 60000 || data.tagAt <= tagSeen) return;      // a stamp from the future, or old news
+  if (data.tagAt > timeNow() + 60000 || data.tagAt <= tagSeen) return;      // a stamp from the future, or old news
   tagSeen = data.tagAt;
   if (!entered) return;
   if (data.tagTo === 'keeper' && K.data.game && data.game === K.data.game) keeperMadeIt(data.tagAt);
@@ -826,7 +827,7 @@ function updateTag() {
   if (game && (asleepSince || !entered)) leaveTag(false);
   // The game in view: yours if you are playing, otherwise the newest one still running on the island.
   let g = game;
-  if (!g) for (const [, p] of folk()) if (p.data.game > g && Date.now() - p.data.game < tagTime * 1000 + 5000) g = p.data.game;
+  if (!g) for (const [, p] of folk()) if (p.data.game > g && timeNow() - p.data.game < tagTime * 1000 + 5000) g = p.data.game;
   seenGame = g;
   const players = [];
   if (g) for (const [id, p] of folk()) if (p.data.game === g) players.push(id);
@@ -836,7 +837,7 @@ function updateTag() {
   for (const id of players) { const d = folkGet(id).data; if (d.it > d.tagAt && d.it > at && !d.asleep) { who = id; at = d.it; } }
   if (who !== 'me' && myIt && game) { let later = false; for (const id of players) { const d = folkGet(id).data; if (d.it > myIt && d.it > d.tagAt) later = true; } if (later) { myIt = 0; pushPresence(true); } }
   if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); for (const [id, p] of peers) p.av.setName(p.data.name, peerSub(id, p.data)); pushPresence(true); }
-  const left = g ? tagTime - (Date.now() - g) / 1000 : 0;
+  const left = g ? tagTime - (timeNow() - g) / 1000 : 0;
   const itName = who === 'me' ? 'You' : who === 'keeper' ? 'The keeper' : who ? folkGet(who).data.name : '';
   if (game) {
     // Your game ends when time is up, when everyone else has gone, or when whoever was it has left.
@@ -904,7 +905,7 @@ function walkToRing() {
 const restingAtFire = () => [...peers.values()].filter((p) => p.data.mode !== 'stand' && !p.data.asleep && Math.hypot(p.av.x - FIRE.x, p.av.z - FIRE.z) < 5.5);
 function startParty() {
   if (party || seenParty || game || voyage || !entered) return;
-  party = Math.max(Date.now(), tagSeen + 1); partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
+  party = Math.max(timeNow(), tagSeen + 1); partyJoinedAt = timeNow(); partyAlone = 0; partyBeat = -1;
   standUp(); setHeld(0); walkToRing();
   flash('Dance!', 'Round the fire');
   addLog('', 'You started a dance at the fire. Anyone near can join in.', 'sys');
@@ -914,7 +915,7 @@ function startParty() {
 }
 function joinParty() {
   if (party || !seenParty || game || voyage || !entered) return;
-  party = seenParty; partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
+  party = seenParty; partyJoinedAt = timeNow(); partyAlone = 0; partyBeat = -1;
   if (me.mode !== 'stand') standUp();
   setHeld(0); walkToRing();
   flash('You are in', 'Round the fire');
@@ -924,13 +925,13 @@ function joinParty() {
 }
 function leaveParty(why = '') {
   if (!party) return;
-  const danced = Date.now() - partyJoinedAt;
+  const danced = timeNow() - partyJoinedAt;
   party = 0;
   if (why === 'done') {
     // Danced it through: warm to the bone, and (not more than once in ten minutes) a plank on the boat.
     warmth = 1; warmSaid = true;
-    const last = store('ember.danced') || 0, plank = danced > 25000 && Date.now() - last > 600000;
-    if (plank) { store('ember.danced', Date.now()); addPlanks(1); }
+    const last = store('ember.danced') || 0, plank = danced > 25000 && timeNow() - last > 600000;
+    if (plank) { store('ember.danced', timeNow()); addPlanks(1); }
     flash('What a dance', plank ? 'Warm right through, and a plank on the boat' : 'Warm right through');
     addLog('', plank ? 'The dance is over. You are warm right through, and a plank goes on the boat in your name.' : 'The dance is over. You are warm right through.', 'sys');
     did('warm');
@@ -939,9 +940,9 @@ function leaveParty(why = '') {
 }
 function updateParty(dt) {
   let g = party;
-  if (!g) for (const p of peers.values()) if (p.data.dance > g && Date.now() - p.data.dance < PARTY_MS) g = p.data.dance;
+  if (!g) for (const p of peers.values()) if (p.data.dance > g && timeNow() - p.data.dance < PARTY_MS) g = p.data.dance;
   seenParty = g;
-  const left = g ? (PARTY_MS - (Date.now() - g)) / 1000 : 0;
+  const left = g ? (PARTY_MS - (timeNow() - g)) / 1000 : 0;
   const ids = [];
   if (g) for (const [id, p] of peers) if (p.data.dance === g) ids.push(id);
   if (!seenParty && partyCalled) partyCalled = 0;
@@ -952,25 +953,25 @@ function updateParty(dt) {
     audio.pop(620);
   }
   if (party) {
-    partyAlone = ids.length ? 0 : partyAlone || Date.now();
+    partyAlone = ids.length ? 0 : partyAlone || timeNow();
     if (left <= 0) leaveParty('done');
     else if (asleepSince || !entered) leaveParty();
-    else if (partyAlone && Date.now() - partyAlone > 25000) leaveParty("alone");      // time for others to notice and join
+    else if (partyAlone && timeNow() - partyAlone > 25000) leaveParty("alone");      // time for others to notice and join
   }
   const on = !!g && left > 0 && entered;
   const n = ids.length + (party ? 1 : 0);
-  const beat = on ? Math.floor((Date.now() - g) / BEAT_MS) : -1;
+  const beat = on ? Math.floor((timeNow() - g) / BEAT_MS) : -1;
   const newBeat = on && beat !== partyBeat;
   if (party) {
     // Your place in the ring: the dancers in a fixed order, evenly spaced, all turning together.
     const order = [myWireId(), ...ids].sort(), i = order.indexOf(myWireId());
-    const slot = (i / order.length) * Math.PI * 2 + ((Date.now() - party) / 1000) * 0.5;
+    const slot = (i / order.length) * Math.PI * 2 + ((timeNow() - party) / 1000) * 0.5;
     const rdt = Math.min(0.25, Math.max(0, (performance.now() - partyTick) / 1000)); partyTick = performance.now();
     const r = Math.hypot(me.x - FIRE.x, me.z - FIRE.z);
-    lastInputAt = Date.now();
+    lastInputAt = timeNow();
     if (partyPhase === 'walk') {
       // First walk out between the logs to the ring, on your own feet.
-      if (!moveTarget || Math.abs(r - PARTY_R) < 0.45 || Date.now() - partyJoinedAt > 8000) { partyPhase = 'ring'; partyAng = Math.atan2(me.x - FIRE.x, me.z - FIRE.z); moveTarget = null; world.hideMarker(); }
+      if (!moveTarget || Math.abs(r - PARTY_R) < 0.45 || timeNow() - partyJoinedAt > 8000) { partyPhase = 'ring'; partyAng = Math.atan2(me.x - FIRE.x, me.z - FIRE.z); moveTarget = null; world.hideMarker(); }
     } else {
       // Then go round with the ring, catching up along it to your own place rather than jumping there.
       const gap = Math.atan2(Math.sin(slot - partyAng), Math.cos(slot - partyAng));
@@ -1026,7 +1027,7 @@ function boardBoat() {
     voyage = seenVoyage; voyageCast = seenCast;
     addLog('', 'You climbed into the boat.', 'sys');
   } else {
-    voyage = Date.now(); voyageCast = voyage + BOARD_MS;
+    voyage = timeNow(); voyageCast = voyage + BOARD_MS;
     addLog('', 'You climbed into the boat. She casts off in a moment: anyone near can climb in too.', 'sys');
   }
   setHeld(0); setMode('sit'); playEmote('hop'); audio.pop(700);
@@ -1035,8 +1036,8 @@ function boardBoat() {
   pushPresence(true);
 }
 function castOff() {
-  if (!voyage || Date.now() >= voyageCast - 3000) return;
-  voyageCast = Date.now() + 3000;
+  if (!voyage || timeNow() >= voyageCast - 3000) return;
+  voyageCast = timeNow() + 3000;
   pushPresence(true);
 }
 function leaveBoat(why = '') {
@@ -1057,7 +1058,7 @@ function leaveBoat(why = '') {
 }
 function updateVoyage(dt) {
   // Which voyage is on: mine, or the earliest one anybody near is on.
-  const now = Date.now();
+  const now = timeNow();
   let g = voyage, cast = voyageCast;
   const ids = [];
   for (const [id, p] of peers) {
@@ -1141,8 +1142,8 @@ function gestureTo(id, kind) {
     me.x = p.av.x + (dx / d) * gap; me.z = p.av.z + (dz / d) * gap;
     setMode('lie');
   } else if (g.emote) playEmote(g.emote);
-  if (kind === 'share') { myGesture = ['share', id, Date.now(), held]; setTimeout(() => { setHeld(0); pushPresence(true); }, 500); }
-  else myGesture = [kind, id, Date.now()];
+  if (kind === 'share') { myGesture = ['share', id, timeNow(), held]; setTimeout(() => { setHeld(0); pushPresence(true); }, 500); }
+  else myGesture = [kind, id, timeNow()];
   ripple((me.x + p.av.x) / 2, (me.z + p.av.z) / 2, 1.6, g.color);
   addLog('', g.did(p.data.name), 'sys');
   audio.pop(kind === 'nuzzle' ? 820 : 680);
@@ -1245,9 +1246,9 @@ function onSocial(m) {
 function whisperTo(pid, text) {
   const f = friendOf(pid);
   if (!f || !text) return;
-  if (mutedUntil > Date.now()) { addLog('', 'You are muted, so that went nowhere.', 'sys'); return; }
+  if (mutedUntil > timeNow()) { addLog('', 'You are muted, so that went nowhere.', 'sys'); return; }
   const verdict = judge(text);
-  if (verdict === 'mute') { net.selfMute(); setMuted(Date.now() + 600000, 'words'); return; }
+  if (verdict === 'mute') { net.selfMute(); setMuted(timeNow() + 600000, 'words'); return; }
   if (verdict === 'soft') { addLog('', 'Gently, please. That one was not sent.', 'sys'); return; }
   net.social({ t: 'w', to: pid, text });
   addLog(`To ${f.name}`, text, 'whisper you');
@@ -1373,16 +1374,16 @@ function addLog(name, text, kind, peerId, verb) {
 }
 // Muted: what you type is not passed on for a while. The island decides for how long; without it, ten minutes.
 function setMuted(until, why) {
-  const was = mutedUntil > Date.now();
+  const was = mutedUntil > timeNow();
   mutedUntil = Math.max(mutedUntil, until);
   store('ember.mute', mutedUntil);
   if (!was) addLog('', why === 'reports'
-    ? `Several animals reported you, so you are muted for ${Math.ceil((mutedUntil - Date.now()) / 60000)} minutes. You can still walk, call and play.`
-    : `That is not said on this island. You are muted for ${Math.ceil((mutedUntil - Date.now()) / 60000)} minutes. You can still walk, call and play.`, 'sys');
+    ? `Several animals reported you, so you are muted for ${Math.ceil((mutedUntil - timeNow()) / 60000)} minutes. You can still walk, call and play.`
+    : `That is not said on this island. You are muted for ${Math.ceil((mutedUntil - timeNow()) / 60000)} minutes. You can still walk, call and play.`, 'sys');
   me.setName(me.name, mySub());
   pushPresence(true);
 }
-{ const m = store('ember.mute'); if (Number.isFinite(m) && m > Date.now()) mutedUntil = Math.min(m, Date.now() + 3600000); }
+{ const m = store('ember.mute'); if (Number.isFinite(m) && m > timeNow()) mutedUntil = Math.min(m, timeNow() + 3600000); }
 // A note for whoever looks after the island.
 function openFeedback() {
   openSheet({
@@ -1437,14 +1438,14 @@ function sendChat(raw) {
   const now = performance.now();
   if (now - lastSayAt < 900) return;
   lastSayAt = now;
-  if (mutedUntil > Date.now()) { addLog('', `You are muted, so nobody would hear that. ${Math.ceil((mutedUntil - Date.now()) / 60000)} more minutes. Everything else on the island still works.`, 'sys'); return; }
+  if (mutedUntil > timeNow()) { addLog('', `You are muted, so nobody would hear that. ${Math.ceil((mutedUntil - timeNow()) / 60000)} more minutes. Everything else on the island still works.`, 'sys'); return; }
   const verdict = judge(text);
-  if (verdict === 'mute') { net.selfMute(); setMuted(Date.now() + 600000, 'words'); return; }
+  if (verdict === 'mute') { net.selfMute(); setMuted(timeNow() + 600000, 'words'); return; }
   if (verdict === 'soft') { addLog('', 'Gently, please. That one was not sent.', 'sys'); return; }
   me.say(text);
   speaker = { av: me, until: t + 5 };
   addLog(me.name, text, 'you');
-  sayMsg = [text, Date.now()];
+  sayMsg = [text, timeNow()];
   pushPresence(true);
 }
 $('chat').addEventListener('submit', (e) => {
@@ -1463,7 +1464,7 @@ function playEmote(name) {
     if (name === 'shake') setTimeout(() => did('shake'), 0);
   }
   me.play(name);
-  emoteMsg = [name, Date.now()];
+  emoteMsg = [name, timeNow()];
   pushPresence(true);
 }
 // ---------- other people ----------
@@ -1474,7 +1475,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast] : null, sv: sailed, gs: myGesture, mu: mutedUntil > Date.now() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast] : null, sv: sailed, gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -1510,7 +1511,7 @@ const net = createNet({
       if (data.say && data.say.id !== p.sayId) {
         p.sayId = data.say.id;
         // Not shown: anything from the muted or from someone you chose not to hear, and words that slipped past.
-        if (p.fade > 0.05 && !ignored.has(id) && !(data.muted > Date.now()) && !judge(data.say.text)) {
+        if (p.fade > 0.05 && !ignored.has(id) && !(data.muted > timeNow()) && !judge(data.say.text)) {
           p.av.say(data.say.text); speaker = { av: p.av, until: t + 5 }; addLog(data.name, data.say.text, '', id); audio.blip(700);
           p.lines = (p.lines || []).concat(data.say.text).slice(-5);
         }
@@ -1636,7 +1637,7 @@ $('sheet-form').addEventListener('submit', async (e) => {
 $('sheet-close').addEventListener('click', closeSheet);
 
 function ago(ms) {
-  const m = Math.max(0, Date.now() - ms) / 60000;
+  const m = Math.max(0, timeNow() - ms) / 60000;
   if (m < 2) return 'just now';
   if (m < 60) return `${Math.floor(m)} minutes ago`;
   if (m < 1440) return m < 120 ? 'an hour ago' : `${Math.floor(m / 60)} hours ago`;
@@ -1994,7 +1995,7 @@ $('btn-leave').addEventListener('click', () => leaveIsland('left'));
 
 // Sleep: an animal nobody has touched for a while lies down and dozes, and its name tag says so.
 function wake(stand = true) {
-  lastInputAt = Date.now();
+  lastInputAt = timeNow();
   if (!asleepSince) return;
   asleepSince = 0; me.asleep = false;
   if (laidByNap && stand && me.mode === 'lie') standUp();
@@ -2005,8 +2006,8 @@ function wake(stand = true) {
 for (const type of ['keydown', 'pointerdown', 'wheel', 'touchstart']) window.addEventListener(type, () => wake(), { capture: true, passive: true });
 setInterval(() => {
   if (!entered) return;
-  if (!asleepSince && Date.now() - lastInputAt > idleAfter) {
-    asleepSince = Date.now(); me.asleep = true;
+  if (!asleepSince && timeNow() - lastInputAt > idleAfter) {
+    asleepSince = timeNow(); me.asleep = true;
     if (me.mode === 'stand') { laidByNap = true; setMode('lie', nearestFreeSeat(2.0)); }
     else if (me.mode === 'sit') { laidByNap = false; setMode('lie', mySeat); }
     addLog('', 'You have dozed off. Touch anything to wake up.', 'sys');
@@ -2017,7 +2018,7 @@ setInterval(() => {
 function comeAshore(q = {}) {
   if (entered) return;
   entered = true;
-  lastInputAt = Date.now();
+  lastInputAt = timeNow();
   $('hint').textContent = '';
   $('queue').hidden = true;
   store('ember.identity', identity);
@@ -2031,7 +2032,7 @@ function comeAshore(q = {}) {
   if (/^\d{4}$/.test(String(q.code || ''))) { myCode = q.code; store('ember.code', myCode); $('who-code').textContent = '#' + myCode; me.setName(me.name, mySub()); }
   if (typeof q.pid === 'string') myPid = q.pid;
   keptBy = q.who === 'guest' ? 'guest' : 'browser';
-  if (q.mu > Date.now()) { mutedUntil = Math.max(mutedUntil, q.mu); me.setName(me.name, mySub()); }
+  if (q.mu > timeNow()) { mutedUntil = Math.max(mutedUntil, q.mu); me.setName(me.name, mySub()); }
   const laid = traces.setLeft(q.tracks, (sp) => !!(SPECIES[sp] && SPECIES[sp].hoof), (sp) => (SPECIES[sp] ? SPECIES[sp].height : 1));
   if (Number.isFinite(q.today)) {
     const others = Math.max(0, q.today - 1);
@@ -2457,6 +2458,7 @@ window.__ember = {
   seaReady,
   audio,
   get country() { return COUNTRY; },
+  get skew() { return clockSkew(); }, timeNow,
   setBoat(total, crew) { boatTotal = total; boatCrew = crew || boatCrew; yard.setProgress(total); },
   lookAtBoat, setOwnName,
   openVisitor, ignored,
@@ -2479,7 +2481,7 @@ window.__ember = {
   setMode, standUp, sendChat, playEmote, callOut, toggleRest, comeAshore,
   get warmth() { return warmth; },
   set warmth(v) { warmth = v; },
-  setFire(fuel) { const now = Date.now(); fireRec = { fuel, at: now, stamp: now }; pushPresence(true); },
+  setFire(fuel) { const now = timeNow(); fireRec = { fuel, at: now, stamp: now }; pushPresence(true); },
   lockQuality() { qualityLocked = true; },
   walkTo(x, z) { moveTarget = findPath(me.x, me.z, x, z); stuckFor = 0; return moveTarget ? moveTarget.map((p) => [Math.round(p.x * 10) / 10, Math.round(p.z * 10) / 10]) : null; },
   get walking() { return !!moveTarget; },

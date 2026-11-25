@@ -1,4 +1,5 @@
 // Builds the island: sky, sea, land, fire, dock, trees and all small life.
+import { timeNow } from './now.js';
 import * as THREE from 'three';
 import {
   mulberry32, clamp, lerp, smoothstep, noise2, terrainHeight, groundHeight, shoreRadius,
@@ -180,7 +181,7 @@ export function buildWorld(scene, opts = {}) {
       cover = k.cloud || 0;
     });
     updaters.push(() => {
-      const drift = (Date.now() / 1000) * 1.6;
+      const drift = (timeNow() / 1000) * 1.6;
       for (const b of banks) {
         b.g.visible = !b.rainOnly || cover > 0.3;
         b.g.position.set(((b.off + drift) % 640) - 320, b.y, b.z);

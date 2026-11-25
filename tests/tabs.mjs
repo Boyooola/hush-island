@@ -1,0 +1,47 @@
+// Two tabs of one browser, no stand-ins: they should see each other and share marks and planks.
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox'] });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const a = await ctx.newPage(), b = await ctx.newPage();
+const errs = [];
+for (const p of [a, b]) p.on('pageerror', (e) => errs.push(e.message));
+const url = 'http://localhost:8765/index.html';
+await a.goto(url); await b.goto(url);
+await a.waitForTimeout(2000);
+await a.evaluate(() => window.__ember.lockQuality()); await b.evaluate(() => window.__ember.lockQuality());
+await a.bringToFront(); await a.click('#enter');
+await b.bringToFront(); await b.click('#enter');
+await b.waitForTimeout(3500);
+await b.evaluate(() => { const e = window.__ember; e.teleport(2.5, 22, Math.PI); e.sendChat('Hello from the other tab'); });
+await b.waitForTimeout(800);
+await a.bringToFront(); await a.waitForTimeout(2500);
+console.log('A sees visitors:', await a.evaluate(() => window.__ember.peers.size), '|', await a.evaluate(() => document.getElementById('count').textContent));
+console.log('A log:', await a.evaluate(() => [...document.querySelectorAll('#log .line')].slice(-2).map((l) => l.textContent).join(' | ')));
+await a.screenshot({ path: 'shots/x1-two-tabs.png' });
+// A mark scratched in one tab shows in the other.
+await a.evaluate(() => { const e = window.__ember; e.teleport(-5.2, 5.0, 0); });
+await a.waitForTimeout(700);
+await a.evaluate(() => window.__ember.run(0));
+await a.waitForTimeout(700);
+await a.fill('#sheet-input', 'First mark on Hush Island');
+await a.click('#sheet-send');
+await a.waitForTimeout(1500);
+console.log('A sheet:', await a.evaluate(() => document.getElementById('sheet-note').textContent));
+await a.evaluate(() => { const e = window.__ember; e.closeSheet(); e.teleport(10, 20, 0); });
+await a.waitForTimeout(600);
+await b.bringToFront();
+await b.evaluate(() => { const e = window.__ember; e.teleport(-5.2, 5.0, 0); });
+await b.waitForTimeout(700);
+await b.evaluate(() => window.__ember.run(0));
+await b.waitForTimeout(2500);
+console.log('B reads:', await b.evaluate(() => [...document.querySelectorAll('#sheet-body .row')].map((r) => r.textContent).join(' | ')));
+// Planks.
+await b.evaluate(() => { const e = window.__ember; e.closeSheet(); e.did('wood'); });
+await b.waitForTimeout(1500);
+await a.bringToFront(); await a.waitForTimeout(2500);
+console.log('boat A / B:', await a.evaluate(() => window.__ember.boat), '/', await b.evaluate(() => window.__ember.boat));
+await b.close();
+await a.waitForTimeout(1500);
+console.log('after B closes, A sees:', await a.evaluate(() => window.__ember.peers.size));
+console.log(errs.length ? errs.join('\n') : 'no page errors');
+await browser.close();

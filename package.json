@@ -1,0 +1,21 @@
+{
+  "name": "hush-island",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A small island where animals from all over the world rest by a fire.",
+  "type": "module",
+  "scripts": {
+    "build": "sh build.sh",
+    "serve": "npx serve dist"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "esbuild": "^0.28.2"
+  }
+}

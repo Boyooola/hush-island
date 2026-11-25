@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import {
   clamp, lerp, smoothstep, groundHeight, moveWithCollision, shoreProximity,
-  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS,
-} from './terrain.js';
+  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip } from './terrain.js';
 import { buildWorld } from './world.js';
 import { Avatar, SPECIES, PLAYABLE, NAME_WORDS, POSE } from './avatar.js';
 import { buildCritters } from './critters.js';
@@ -1017,7 +1016,18 @@ let partyStand = false;
 // aboard says so, sails once round the island and comes home. Like the dance there is no referee: each animal aboard
 // says which voyage it is on (the moment it was called) and when it casts off, and the earliest word wins.
 let voyage = 0, voyageCast = 0, seenVoyage = 0, seenCast = 0, voyageLine = '', voyageSaid = 0, voyageCalled = 0, voyageWas = '';
-let voyageNow = null, voyageCrew = [];
+let voyageNow = null, voyageCrew = [], voyageSeated = false, voyageWalkAt = 0, voyageDolphins = false;
+// A short hop from one place to another (the last step into the boat, and back out onto the gangplank).
+let hop = null;
+function hopTo(to, done) { playEmote('hop'); hop = { x0: me.x, y0: me.y, z0: me.z, to, t0: t, dur: 0.5, done }; }
+function updateHop() {
+  const u = Math.min(1, (t - hop.t0) / hop.dur), e = u * u * (3 - 2 * u), p = hop.to();
+  me.targetYaw = Math.atan2(p.x - hop.x0, p.z - hop.z0);
+  me.x = lerp(hop.x0, p.x, e); me.z = lerp(hop.z0, p.z, e);
+  me.y = lerp(hop.y0, p.y ?? groundHeight(p.x, p.z), e) + Math.sin(u * Math.PI) * 0.35;
+  vel.x = vel.z = 0;
+  if (u >= 1) { const d = hop.done; hop = null; if (d) d(); }
+}
 const boatDist = () => Math.hypot(yard.berth.x - me.x, yard.berth.z - me.z);
 const boatBuilt = () => boatTotal >= BOAT_GOAL;
 function boardBoat() {
@@ -1025,12 +1035,14 @@ function boardBoat() {
   if (seenVoyage) {
     if (!voyageNow || voyageNow.phase !== 'board' || voyageCrew.length >= yard.crewMax) return;
     voyage = seenVoyage; voyageCast = seenCast;
-    addLog('', 'You climbed into the boat.', 'sys');
   } else {
     voyage = timeNow(); voyageCast = voyage + BOARD_MS;
-    addLog('', 'You climbed into the boat. She casts off in a moment: anyone near can climb in too.', 'sys');
+    addLog('', 'She casts off in a moment: anyone near can come aboard too.', 'sys');
   }
-  setHeld(0); setMode('sit'); playEmote('hop'); audio.pop(700);
+  // Up the gangplank on your own feet, and a hop over her side at the top.
+  setHeld(0); audio.pop(700);
+  voyageSeated = false; voyageWalkAt = timeNow(); voyageDolphins = false; hop = null;
+  moveTarget = onSlip(me.x, me.z) ? [yard.plankHead] : [yard.plankFoot, yard.plankHead]; moveTarget.short = true;
   flash('All aboard', 'Once round the island');
   voyageSaid = 0;
   pushPresence(true);
@@ -1043,11 +1055,15 @@ function castOff() {
 function leaveBoat(why = '') {
   if (!voyage) return;
   const i = Math.max(0, voyageCrew.indexOf(myWireId()));
-  voyage = 0; voyageCast = 0;
-  const a = yard.ashore(i);
-  me.x = a.x; me.z = a.z; vel.x = vel.z = 0; moveTarget = null;
-  setMode('stand'); playEmote('hop');
-  if (why === 'home') {
+  const wasSeated = voyageSeated;
+  voyage = 0; voyageCast = 0; voyageSeated = false; hop = null;
+  vel.x = vel.z = 0; moveTarget = null;
+  setMode('stand');
+  // Back over her side onto the gangplank, and down it to the sand.
+  const walkOff = () => { moveTarget = [yard.plankFoot, yard.ashore(i)]; moveTarget.short = true; };
+  if (entered) { if (wasSeated) hopTo(() => yard.plankHead, walkOff); else walkOff(); }
+  if (why === 'missed') addLog('', 'She has gone without you.', 'sys');
+  else if (why === 'home') {
     sailed += 1; store('ember.sailed', sailed);
     flash('Home again', sailed === 1 ? 'You have sailed round the island' : `${sailed} times round the island`);
     addLog('', sailed === 1 ? 'Home again. You have sailed right round the island, and a small sail by your name says so.' : `Home again. That is ${sailed} times round the island.`, 'sys');
@@ -1075,6 +1091,10 @@ function updateVoyage(dt) {
   if (voyageNow && voyageNow.phase === 'done' && !voyage) voyageNow = null;
   const v = voyageNow;
   yard.setHull(v && v.pose, (x, z) => world.seaY(x, z), t);
+  // Twice on the way round, dolphins come alongside for a while.
+  const dolphins = !!v && v.phase === 'sail' && ((v.u > 0.14 && v.u < 0.42) || (v.u > 0.58 && v.u < 0.84));
+  life.escort(dolphins ? v.pose : null);
+  if (dolphins && voyage && voyageSeated && !voyageDolphins) { voyageDolphins = true; addLog('', 'Dolphins! Two of them, leaping alongside.', 'sys'); audio.pop(760); }
   if (v && v.phase !== voyageWas) {
     if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'She swings away from the shore.', 'sys'); } }
   }
@@ -1088,7 +1108,17 @@ function updateVoyage(dt) {
   if (voyage && v) {
     if (v.phase === 'done') leaveBoat('home');
     else if (!entered) leaveBoat();
-    else {
+    else if (!voyageSeated) {
+      // Still on the way up the gangplank.
+      lastInputAt = now;
+      const head = yard.plankHead, dh = Math.hypot(me.x - head.x, me.z - head.z);
+      if (hop) { /* in the air */ }
+      else if (v.phase === 'sail' && dh > 3) leaveBoat('missed');
+      else if (dh < 0.55 || (!moveTarget && dh < 2) || now - voyageWalkAt > 9000 || v.phase === 'sail') {
+        moveTarget = null; world.hideMarker();
+        hopTo(() => yard.seat(Math.max(0, voyageCrew.indexOf(myWireId()))), () => { voyageSeated = true; setMode('sit'); addLog('', 'You are aboard.', 'sys'); pushPresence(true); });
+      } else if (!moveTarget) { if (me.mode !== 'stand') setMode('stand'); moveTarget = onSlip(me.x, me.z) ? [yard.plankHead] : [yard.plankFoot, yard.plankHead]; moveTarget.short = true; }
+    } else {
       // Sit in your place: the crew in a fixed order, bow to stern.
       const seat = yard.seat(voyageCrew.indexOf(myWireId()));
       const k = v.phase === 'sail' ? 1 : 1 - Math.exp(-dt * 7);
@@ -1475,7 +1505,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast] : null, sv: sailed, gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -1976,7 +2006,7 @@ function leaveIsland(why) {
   const was = entered;
   entered = false; asking = false;
   if (was && why === 'left') net.note('left');
-  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; party = 0; voyage = 0; voyageCast = 0; myGesture = null; gestureBack = null; friendInvite = null; ignored.clear();
+  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; party = 0; voyage = 0; voyageCast = 0; voyageSeated = false; hop = null; myGesture = null; gestureBack = null; friendInvite = null; ignored.clear();
   if (was || why !== 'tide') net.leave();
   wake(false);
   setMode('stand'); setHeld(0);
@@ -2267,8 +2297,9 @@ function frame() {
   const yWas = me.y;
   me.y = groundHeight(me.x, me.z);
   updateParty(dt);
-  if (voyage) me.y = yWas;
+  if (voyage && voyageSeated) me.y = yWas;
   updateVoyage(dt);
+  if (hop) updateHop();
   updateWith();
   me.update(dt, t);
 
@@ -2299,7 +2330,7 @@ function frame() {
     av.speed = lerp(av.speed, Math.hypot(av.x - px, av.z - pz) / dt, 0.25);
     av.targetYaw = d.yaw;
     av.y = groundHeight(av.x, av.z);
-    const crewAt = voyageNow && d.voyage && d.voyage.id === seenVoyage ? voyageCrew.indexOf(id) : -1;
+    const crewAt = voyageNow && d.voyage && d.voyage.seated && d.voyage.id === seenVoyage ? voyageCrew.indexOf(id) : -1;
     if (crewAt >= 0 && voyageNow.phase !== 'done') {
       // Aboard: in their place in the boat, wherever the boat is, rather than where they last said they were.
       const seat = yard.seat(crewAt), kk = voyageNow.phase === 'sail' && p.aboard ? 1 : 1 - Math.exp(-dt * 7);
@@ -2443,7 +2474,8 @@ window.__ember = {
   get code() { return myCode; },
   startParty, joinParty, leaveParty,
   boardBoat, castOff, leaveBoat,
-  get voyage() { return { mine: voyage, seen: seenVoyage, cast: seenCast, crew: voyageCrew.slice(), phase: voyageNow ? voyageNow.phase : '', left: voyageNow ? voyageNow.left : 0, u: voyageNow ? voyageNow.u : 0, sailed, line: voyageLine }; },
+  surface: (x, z) => world.surface(x, z), get moving() { return !!moveTarget || !!hop; },
+  get voyage() { return { mine: voyage, seen: seenVoyage, cast: seenCast, crew: voyageCrew.slice(), seated: voyageSeated, dolphins: life.escorting, phase: voyageNow ? voyageNow.phase : '', left: voyageNow ? voyageNow.left : 0, u: voyageNow ? voyageNow.u : 0, sailed, line: voyageLine }; },
   set voyageCast(v) { if (voyage) { voyageCast = v; pushPresence(true); } },
   get party() { return party; },
   get seenParty() { return seenParty; },

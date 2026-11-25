@@ -1,7 +1,7 @@
 // The keeper's boat: something being built on the west beach, plank by plank, by everyone who visits.
 // Driftwood washes up around the island; carried here, each piece becomes part of the hull.
 import * as THREE from 'three';
-import { shoreRadius, terrainHeight, colliders, smoothstep } from './terrain.js';
+import { shoreRadius, terrainHeight, colliders, smoothstep, SLIP, slipPoint } from './terrain.js';
 import { makeSignTexture, makeGlowTexture } from './labels.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -117,11 +117,13 @@ export function buildSite(scene) {
   // A gangplank from the sand out to where she lies, on two legs, so that there is a way aboard to be seen.
   const slip = new THREE.Group();
   {
-    const r0 = shoreRadius(SITE_A) - 0.5, r1 = MOOR_R - 1.15, y0 = terrainHeight(Math.cos(SITE_A) * r0, Math.sin(SITE_A) * r0) + 0.06, y1 = 0.5;
+    // Where it lies is written down in terrain.js (SLIP), because it can be walked on.
+    const r0 = SLIP.r0 - 0.3, r1 = SLIP.r1 + 0.1, y0 = SLIP.y0 - 0.05, y1 = SLIP.y1 - 0.03;
     const len = Math.hypot(r1 - r0, y1 - y0);
-    for (const dz of [-0.2, 0, 0.2]) { const b = box(len, 0.05, 0.18, dz ? plankMat : paleMat); b.position.set((r0 + r1) / 2, (y0 + y1) / 2, dz); b.rotation.z = Math.atan2(y1 - y0, r1 - r0); slip.add(b); }
-    for (const dz of [-0.3, 0.3]) { const leg = box(0.1, 1.9, 0.1, frameMat); leg.position.set(r1 - 0.25, y1 - 0.9, dz); slip.add(leg); }
-    const tie = box(0.08, 0.08, 0.76, frameMat); tie.position.set(r1 - 0.25, y1 - 0.08, 0); slip.add(tie);
+    for (const dz of [-0.33, 0, 0.33]) { const b = box(len, 0.05, 0.31, dz ? plankMat : paleMat); b.position.set((r0 + r1) / 2, (y0 + y1) / 2, dz); b.rotation.z = Math.atan2(y1 - y0, r1 - r0); slip.add(b); }
+    for (const dz of [-0.46, 0.46]) { const leg = box(0.1, 1.9, 0.1, frameMat); leg.position.set(r1 - 0.25, y1 - 0.9, dz); slip.add(leg); }
+    const tie = box(0.08, 0.08, 1.06, frameMat); tie.position.set(r1 - 0.25, y1 - 0.08, 0); slip.add(tie);
+    for (const x of [r0 + len * 0.33, r0 + len * 0.66]) { const cl = box(0.07, 0.03, 0.96, frameMat); cl.position.set(x, y0 + (y1 - y0) * ((x - r0) / (r1 - r0)) + 0.035, 0); cl.rotation.z = Math.atan2(y1 - y0, r1 - r0); slip.add(cl); }
     const post = box(0.16, 1.1, 0.16, frameMat); post.position.set(r0 - 0.4, y0 + 0.45, 1.5); slip.add(post);
     slip.rotation.y = -SITE_A;      // the group's x axis runs out to sea
     slip.visible = false; scene.add(slip);
@@ -195,7 +197,9 @@ export function buildSite(scene) {
       tmp.set(s[0], deck + 0.03, s[1]).applyMatrix4(hull.matrixWorld);
       return { x: tmp.x, y: tmp.y, z: tmp.z };
     },
-    ashore(i) { const k = i % SEATS.length, r = BERTH_R - 1.2 - (k % 2) * 0.8, a = SITE_A + ((k >> 1) - 1) * 0.045 + 0.02; return { x: Math.cos(a) * r, z: Math.sin(a) * r }; },
+    ashore(i) { const k = i % SEATS.length; return slipPoint(SLIP.r0 - 1.3 - (k % 2) * 0.9, ((k >> 1) - 1) * 1.1 + 0.3); },
+    // The two ends of the gangplank: its foot on the sand and its head at the boat's side.
+    plankFoot: slipPoint(SLIP.r0 + 0.1), plankHead: slipPoint(SLIP.r1 - 0.15),
     berth,
     site: { x: dropAt.x, z: dropAt.z },
     update(dt, t) {
@@ -217,7 +221,7 @@ export function buildSite(scene) {
         shown = total;
         // Built, she is afloat: nothing stands on the stocks, and the gangplank is out. Until then she sits on them.
         if (model) model.position.y = built() ? 0 : 0.45;
-        slip.visible = built();
+        slip.visible = SLIP.on = built();
         for (const c of landCol) c.r = built() ? 0.01 : 0.85;
         signMat.map.dispose();
         signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'The boat is built' : 'Being built', total >= BOAT_GOAL ? 'She lies at the water' : `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);

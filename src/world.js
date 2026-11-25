@@ -3,8 +3,7 @@ import { timeNow } from './now.js';
 import * as THREE from 'three';
 import {
   mulberry32, clamp, lerp, smoothstep, noise2, terrainHeight, groundHeight, shoreRadius,
-  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders,
-} from './terrain.js';
+  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip } from './terrain.js';
 import { makeGlowTexture, makeSkyLabel, makeSignTexture, makeCarvingBoard } from './labels.js';
 
 export const FOG_COLOR = 0x142a4d;
@@ -1121,6 +1120,7 @@ export function buildWorld(scene, opts = {}) {
     // What is underfoot at a point: 'water', 'sand', 'wood' or 'grass'.
     surface(x, z) {
       if (x >= DOCK.x0 && x <= DOCK.x1 && z >= DOCK.z0 && z <= DOCK.z1 && terrainHeight(x, z) < DOCK.y) return 'wood';
+      if (onSlip(x, z)) return 'wood';
       const h = terrainHeight(x, z);
       return h < 0.04 ? 'water' : h < 0.55 ? 'sand' : 'grass';
     },

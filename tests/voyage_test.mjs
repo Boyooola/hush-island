@@ -29,7 +29,17 @@ for (const p of [a, b]) await p.evaluate(() => window.__ember.setBoat(120));
 await a.waitForTimeout(1200);
 ok('a finished boat can be taken out', /Take the boat out/.test(await acts(a)), await acts(a));
 await a.screenshot({ path: S + 'v1-offer.png' });
-await act(a, 'Take the boat out'); await a.waitForTimeout(2500);
+const from = await a.evaluate(() => [window.__ember.me.x, window.__ember.me.z]);
+await act(a, 'Take the boat out');
+// She walks up the gangplank: no jump of more than a stride or two between looks, and dry feet on the way.
+let far = 0, last = from, onWood = 0;
+for (let i = 0; i < 60; i++) {
+  await a.waitForTimeout(250);
+  const q = await a.evaluate(() => { const e = window.__ember; return [e.me.x, e.me.z, e.voyage.seated, e.surface(e.me.x, e.me.z)]; });
+  far = Math.max(far, Math.hypot(q[0] - last[0], q[1] - last[1])); last = q; if (q[3] === 'wood') onWood++;
+  if (q[2]) break;
+}
+ok('boarding is a walk up the gangplank and a hop, not a jump across the water', last[2] && far < 2.6 && onWood >= 2, 'biggest step ' + far.toFixed(2) + ' m, looks on the plank ' + onWood);
 const v1 = await a.evaluate(() => window.__ember.voyage);
 ok('climbing in starts the time to board', v1.mine > 0 && v1.phase === 'board' && v1.left > 30 && v1.crew.length === 1, JSON.stringify(v1));
 ok('from the boat you can cast off or step out', /Cast off now/.test(await acts(a)) && /Step back ashore/.test(await acts(a)), await acts(a));
@@ -37,7 +47,7 @@ await a.screenshot({ path: S + 'v2-aboard.png' });
 await near(b, 1.2);
 ok('another animal near is told and offered a place', await until(b, () => /Climb into the boat/.test(JSON.stringify(window.__ember.actions)), 15000), await acts(b));
 await b.screenshot({ path: S + 'v3-other.png' });
-await act(b, 'Climb into the boat'); 
+await act(b, 'Climb into the boat'); await until(b, () => window.__ember.voyage.seated, 25000);
 ok('both are aboard the same voyage', await until(a, () => window.__ember.voyage.crew.length === 2, 15000) && (await b.evaluate(() => window.__ember.voyage.mine)) === v1.mine);
 await a.waitForTimeout(2500); await a.screenshot({ path: S + 'v4-two.png' });
 await act(b, 'Cast off now');
@@ -48,6 +58,7 @@ await a.evaluate(() => { window.__ember.voyageCast = Date.now() - 45000; });
 await until(b, () => window.__ember.voyage.u > 0.25, 15000); await a.waitForTimeout(3000);
 const at = await a.evaluate(() => { const e = window.__ember, p = [...e.peers.values()][0]; return { me: [e.me.x, e.me.y, e.me.z], mate: [p.av.x, p.av.y, p.av.z], r: Math.hypot(e.me.x, e.me.z), mode: e.me.mode, wet: e.me.wet }; });
 ok('the boat is out at sea with both in it', at.r > 44 && Math.hypot(at.me[0] - at.mate[0], at.me[2] - at.mate[2]) < 2 && at.me[1] > -0.2 && at.me[1] < 1.2 && Math.abs(at.me[1] - at.mate[1]) < 0.4, JSON.stringify(at));
+ok('dolphins come alongside', await until(a, () => window.__ember.voyage.dolphins > 0, 12000));
 await a.screenshot({ path: S + 'v5-sea.png' });
 await b.screenshot({ path: S + 'v5b-sea.png' });
 const c = await open(1); await c.evaluate(() => window.__ember.setBoat(120));
@@ -56,16 +67,16 @@ await c.evaluate(() => { const e = window.__ember; e.teleport(e.yard.berth.x, e.
 ok('and cannot take her while she is away', !/boat/.test((await acts(c)).replace('Look over the boat', '')), await acts(c));
 await a.evaluate(() => { window.__ember.voyageCast = Date.now() - 124000; });
 ok('she comes home and the crew step ashore', await until(a, () => !window.__ember.voyage.mine, 40000) && await until(b, () => !window.__ember.voyage.mine, 40000));
-await a.waitForTimeout(2500);
+await until(a, () => window.__ember.surface(window.__ember.me.x, window.__ember.me.z) === 'sand' && !window.__ember.moving, 25000);
 const end = await a.evaluate(() => { const e = window.__ember; return { v: e.voyage, d: Math.hypot(e.me.x - e.yard.berth.x, e.me.z - e.yard.berth.z), mode: e.me.mode, log: e.log.join(' | ') }; });
-ok('each is on the sand by the yard, on their feet, with one voyage to their name', end.d < 4 && end.mode === 'stand' && end.v.sailed === 1 && /sailed right round the island/.test(end.log), JSON.stringify(end.v) + ' ' + end.d.toFixed(1));
+ok('each is on the sand by the yard, on their feet, with one voyage to their name', end.d < 6 && end.mode === 'stand' && end.v.sailed === 1 && /sailed right round the island/.test(end.log), JSON.stringify(end.v) + ' ' + end.d.toFixed(1));
 ok('the sail by the name is told to others', await until(c, () => [...window.__ember.peers.values()].filter((p) => p.data.sailed === 1).length === 2, 15000));
 await a.screenshot({ path: S + 'v6-home.png' });
 ok('the boat can go out again', await until(a, () => /Take the boat out/.test(JSON.stringify(window.__ember.actions)), 15000), await acts(a));
 const st = await (await fetch('http://localhost:8787/room/stats.json')).json();
 ok('voyages are counted', JSON.stringify(st).includes('"sail":2'), JSON.stringify(st).slice(0, 300));
 // Alone, stepping out before she goes leaves the boat at home.
-await act(a, 'Take the boat out'); await a.waitForTimeout(1500); await act(a, 'Step back ashore'); await a.waitForTimeout(1500);
+await act(a, 'Take the boat out'); await until(a, () => window.__ember.voyage.seated, 25000); await act(a, 'Step back ashore'); await a.waitForTimeout(1500);
 ok('stepping out alone calls the voyage off', await a.evaluate(() => !window.__ember.voyage.mine && !window.__ember.voyage.seen) && await until(c, () => !window.__ember.voyage.seen, 10000));
 console.log(errs.length ? [...new Set(errs)].join('|') : 'no page errors');
 await browser.close();

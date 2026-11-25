@@ -363,6 +363,9 @@ export function buildLife(scene, world) {
     if (dg) { seaLife.dolphin = new THREE.Mesh(dg, mat); seaLife.dolphin.visible = false; scene.add(seaLife.dolphin); }
     if (wg) { seaLife.whale = new THREE.Mesh(wg, mat); seaLife.whale.visible = false; scene.add(seaLife.whale); }
   }
+  // Dolphins that come alongside the boat on her voyage: two of them, leaping in turn a little way off her beam.
+  const escorts = [];
+  let escortPose = null;
   const SEA_TURN = Math.PI / 2;
   const DOLPHIN_EVERY = 95, WHALE_EVERY = 540;
   let lastSplash = -1;
@@ -384,6 +387,19 @@ export function buildLife(scene, world) {
         if (mark !== lastSplash && (u < 0.12 || u > 0.88)) { lastSplash = mark; world.ripple(x, z); }
       }
     }
+    if (d && !escorts.length) for (let i = 0; i < 2; i++) { const e = new THREE.Mesh(d.geometry, d.material); e.visible = false; scene.add(e); escorts.push(e); }
+    escorts.forEach((e, i) => {
+      const p = escortPose, k = (now + i * 1.7) % 3.4, u = k / 1.5;
+      e.visible = !!p && u < 1;
+      if (!e.visible) { e.userData.wet = 0; return; }
+      // Abreast of the boat and a few lengths off, one each side, drawing ahead through the leap.
+      const side = i ? -1 : 1, off = 4.6 + i * 1.3, fwd = -1.5 + u * 4.5 + i * 1.2;
+      const x = p.x + p.hx * fwd - p.hz * off * side, z = p.z + p.hz * fwd + p.hx * off * side;
+      e.position.set(x, world.seaY(x, z) - 0.5 + Math.sin(u * Math.PI) * 1.8, z);
+      e.rotation.set(0, Math.atan2(-p.hz, p.hx), Math.cos(u * Math.PI) * 0.9, 'YZX');
+      const mark = u < 0.5 ? 1 : 2;
+      if (e.userData.wet !== mark && (u < 0.12 || u > 0.88)) { e.userData.wet = mark; world.ripple(x, z); }
+    });
     const w = seaLife.whale;
     if (w) {
       // Far out, a whale's back rises, rolls forward and sinks again.
@@ -454,6 +470,9 @@ export function buildLife(scene, world) {
     shakeOff(x, y, z, size) { spray(x, y, z, 30, 2.4 * size, 1.6); },
     meteor,
     get shower() { return showerOn; },
+    // Send the dolphins alongside the boat at this place and heading, or (null) call them off.
+    escort(pose) { escortPose = pose; },
+    get escorting() { return escorts.filter((e) => e.visible).length; },
     forceShower(ms = 20000) { forced = timeNow() + ms; },
     get fish() { return fish.map((f) => ({ x: f.x, z: f.z, gone: f.gone > 0, scare: f.scare })); },
   };

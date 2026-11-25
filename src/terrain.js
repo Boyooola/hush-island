@@ -78,6 +78,18 @@ export function terrainHeight(x, z) {
   return h;
 }
 
+// The gangplank out to the boat's mooring on the west beach: a sloping walkway from the sand to her side.
+// It is only there (on: true) once the boat is built. Lengths are along the line from the fire out through the yard.
+export const SLIP = (() => { const a = 2.62, shore = shoreRadius(a), r0 = shore - 0.5; return { a, on: false, r0, r1: shore + 4.1 - 1.0, y0: terrainHeight(Math.cos(a) * r0, Math.sin(a) * r0) + 0.06, y1: 0.52, half: 0.5 }; })();
+const slipAt = (x, z) => [x * Math.cos(SLIP.a) + z * Math.sin(SLIP.a), -x * Math.sin(SLIP.a) + z * Math.cos(SLIP.a)];
+export function onSlip(x, z) {
+  if (!SLIP.on) return false;
+  const [along, across] = slipAt(x, z);
+  return along >= SLIP.r0 - 0.3 && along <= SLIP.r1 + 0.1 && Math.abs(across) <= SLIP.half;
+}
+export const slipHeight = (x, z) => lerp(SLIP.y0, SLIP.y1, Math.min(1, Math.max(0, (slipAt(x, z)[0] - SLIP.r0) / (SLIP.r1 - SLIP.r0))));
+export const slipPoint = (r, across = 0) => ({ x: Math.cos(SLIP.a) * r - Math.sin(SLIP.a) * across, z: Math.sin(SLIP.a) * r + Math.cos(SLIP.a) * across });
+
 export function onDock(x, z) {
   return x >= DOCK.x0 && x <= DOCK.x1 && z >= DOCK.z0 && z <= DOCK.z1;
 }
@@ -86,11 +98,12 @@ export function onDock(x, z) {
 export function groundHeight(x, z) {
   const h = terrainHeight(x, z);
   if (onDock(x, z) && h < DOCK.y) return DOCK.y;
+  if (onSlip(x, z)) return Math.max(h, slipHeight(x, z));
   return h;
 }
 
 export function walkable(x, z) {
-  if (onDock(x, z)) return true;
+  if (onDock(x, z) || onSlip(x, z)) return true;
   return terrainHeight(x, z) > -0.22;
 }
 

@@ -336,7 +336,10 @@
 
   /* Narrow windows and tablets: the top row keeps to one line by dropping words before it wraps. */
   @media (min-width: 721px) and (max-width: 1040px) { #daytext { display: none; } }
-  @media (min-width: 721px) and (max-width: 880px) { #daybar { width: 120px; } #count { display: none; } }
+  @media (min-width: 721px) and (max-width: 1000px) { #daybar { width: 120px; } #count { display: none; } }
+  /* The guide keeps to one line beside the list on wider screens; long names are cut short rather than wrapped. */
+  @media (min-width: 721px) { #goal { max-width: min(640px, calc(100% - 420px)); } #goal-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; } }
+  @media (min-width: 721px) and (max-width: 800px) { .tools { gap: 12px; } .chip { font-size: 13.5px; } }
   /* A phone held sideways: wide but very short. Everything gives up a little height. */
   @media (max-height: 520px) and (min-width: 721px) {
     #intro { align-items: center; padding-top: 10px; padding-bottom: 10px; }
@@ -364,10 +367,12 @@
     .word { font-size: 16.5px; padding: 6px 0; }
     .act { font-size: 21px; }
     #help { padding-top: 56px; background: rgba(5, 9, 20, 0.93); }
-    #tasks { top: 186px; }
-    #game { top: 100px; left: 16px; transform: none; gap: 10px; font-size: 14px; }
+    #tasks { top: 190px; }
+    .tools { gap: 4px 11px; }
+    .chip { font-size: 13px; }
+    #game { top: 108px; left: 16px; transform: none; gap: 10px; font-size: 14px; }
     #game b { font-size: 16px; }
-    #goal { top: 132px; font-size: 17px; gap: 9px; left: 16px; right: 16px; transform: none; max-width: none; text-align: left; }
+    #goal { top: 136px; font-size: 17px; gap: 9px; left: 16px; right: 16px; transform: none; max-width: none; text-align: left; }
     #day { order: 3; flex: 1 1 100%; }
     #daybar { width: 140px; }
     #tasks-list { font-size: 13.5px; }

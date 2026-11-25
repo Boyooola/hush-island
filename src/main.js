@@ -108,6 +108,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1200);
 const world = buildWorld(scene, { pixelRatio: PR });
 const life = buildLife(scene, world);
+const seaReady = life.loadSea();            // modelled fish arrive a moment after the island does
 const yard = buildSite(scene);
 const critters = buildCritters(scene, world);
 const traces = buildTraces(scene, groundHeight, (x, z) => world.surface(x, z));
@@ -2317,6 +2318,7 @@ window.__ember = {
   set tagTime(v) { tagTime = v; },
   get netId() { return net.id; },
   get mutedUntil() { return mutedUntil; },
+  seaReady,
   audio,
   get country() { return COUNTRY; },
   setBoat(total, crew) { boatTotal = total; boatCrew = crew || boatCrew; yard.setProgress(total); },

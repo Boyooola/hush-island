@@ -65,9 +65,9 @@ export function buildLife(scene, world) {
       // A looping path round the end of the dock; a scare pushes it out to sea for a moment.
       const tx = HOME.x + Math.cos(f.a) * f.rx + f.sx * f.scare * 4, tz = HOME.z + Math.sin(f.a * 1.3 + f.ph) * f.rz + f.sz * f.scare * 4;
       f.x = lerp(f.x, tx, 1 - Math.exp(-dt * 3)); f.z = lerp(f.z, tz, 1 - Math.exp(-dt * 3));
-      f.m.position.set(f.x, world.seaY(f.x, f.z) + 0.03, f.z);
+      f.m.position.set(f.x, world.seaY(f.x, f.z) + (f.model ? -0.03 + Math.sin(t * 2.3 + f.ph) * 0.03 : 0.03), f.z);
       if (Math.hypot(f.x - px, f.z - pz) > 1e-4) f.m.rotation.y = Math.atan2(-(f.z - pz), f.x - px) + Math.sin(t * 9 + f.ph) * 0.18;
-      f.m.material.opacity = 0.5 * (1 - 0.75 * f.scare);
+      if (!f.model) f.m.material.opacity = 0.5 * (1 - 0.75 * f.scare);
     }
     nextJump -= dt;
     if (nextJump < 0 && !jump) {
@@ -321,6 +321,81 @@ export function buildLife(scene, world) {
     s.m.visible = true;
   }
   let lastSlot = 0, showerOn = false, forced = 0;
+  // ---------- modelled sea life ----------
+  // The fish at the dock start as plain shapes, so they are there at once. When the models arrive (sea.json, packed
+  // by tools/pack_models.mjs from Quaternius's public-domain Fish Pack) they take the shapes' places, a dolphin
+  // starts leaping offshore now and then, and once in a long while a whale shows its back far out.
+  // Both keep to the wall clock, so everyone on the island sees the same leap at the same moment.
+  const seaLife = { dolphin: null, whale: null };
+  function applySea(models) {
+    const geo = (name, length) => {
+      const m = models[name];
+      if (!m) return null;
+      const raw = (b64, T) => { const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new T(u8.buffer); };
+      const p16 = raw(m.p, Int16Array), c8 = raw(m.c, Uint8Array);
+      const pos = new Float32Array(p16.length), col = new Float32Array(c8.length), c = new THREE.Color();
+      for (let i = 0; i < p16.length; i++) pos[i] = p16[i] * m.k;
+      for (let i = 0; i < c8.length; i += 3) { c.setRGB(c8[i] / 255, c8[i + 1] / 255, c8[i + 2] / 255, THREE.SRGBColorSpace); col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.center();
+      g.rotateY(SEA_TURN);                  // the models lie along z; here a nose points along +x
+      g.computeBoundingBox();
+      const len = g.boundingBox.max.x - g.boundingBox.min.x;
+      g.scale(length / len, length / len, length / len);
+      g.computeVertexNormals();
+      return g;
+    };
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0, flatShading: true, emissive: 0x223344, emissiveIntensity: 0.25 });
+    const kinds = [geo('Fish3', 0.5), geo('Fish2', 0.56), geo('Fish1', 0.7)].filter(Boolean);
+    if (kinds.length) {
+      fish.forEach((f, i) => {
+        const k = f.m.scale.x;
+        f.m.geometry = kinds[i % kinds.length]; f.m.material = mat; f.m.renderOrder = 0;
+        f.m.scale.setScalar(0.8 + (k - 0.8) * 0.5);
+        f.model = true;
+      });
+      jumper.geometry = kinds[1 % kinds.length]; jumper.material = mat; jumper.scale.setScalar(1.1);
+    }
+    const dg = geo('Dolphin', 2.5), wg = geo('Whale', 15);
+    if (dg) { seaLife.dolphin = new THREE.Mesh(dg, mat); seaLife.dolphin.visible = false; scene.add(seaLife.dolphin); }
+    if (wg) { seaLife.whale = new THREE.Mesh(wg, mat); seaLife.whale.visible = false; scene.add(seaLife.whale); }
+  }
+  const SEA_TURN = Math.PI / 2;
+  const DOLPHIN_EVERY = 95, WHALE_EVERY = 540;
+  let lastSplash = -1;
+  updaters.push(() => {
+    const now = Date.now() / 1000;
+    const d = seaLife.dolphin;
+    if (d) {
+      // Three leaps in a row along the shore, somewhere out past the shallows, every minute and a half or so.
+      const n = Math.floor(now / DOLPHIN_EVERY), k = now - n * DOLPHIN_EVERY, leap = Math.floor(k / 1.9), u = k / 1.9 - leap;
+      d.visible = leap < 3;
+      if (d.visible) {
+        const a0 = hash(n * 7 + 3) * 6.28, dir = hash(n * 11) > 0.5 ? 1 : -1, r = 44 + hash(n * 5) * 10;
+        const a = a0 + dir * (leap + u) * 0.075;
+        const x = Math.cos(a) * r, z = Math.sin(a) * r, y = world.seaY(x, z) - 0.5 + Math.sin(u * Math.PI) * 1.9;
+        d.position.set(x, y, z);
+        // Heading along the shore, nose up on the way out of the water and down on the way back in.
+        d.rotation.set(0, Math.atan2(-(dir * Math.cos(a)), dir * -Math.sin(a)), Math.cos(u * Math.PI) * 0.9, 'YZX');
+        const mark = n * 10 + leap * 2 + (u > 0.5 ? 1 : 0);
+        if (mark !== lastSplash && (u < 0.12 || u > 0.88)) { lastSplash = mark; world.ripple(x, z); }
+      }
+    }
+    const w = seaLife.whale;
+    if (w) {
+      // Far out, a whale's back rises, rolls forward and sinks again.
+      const n = Math.floor(now / WHALE_EVERY), k = now - n * WHALE_EVERY, u = k / 16;
+      w.visible = u < 1;
+      if (w.visible) {
+        const a = hash(n * 13 + 1) * 6.28, r = 105 + hash(n * 3) * 25, x = Math.cos(a) * r + u * 9 * Math.sin(a), z = Math.sin(a) * r - u * 9 * Math.cos(a);
+        w.position.set(x, world.seaY(x, z) - 4.6 + Math.sin(u * Math.PI) * 3.3, z);
+        w.rotation.set(0, Math.atan2(Math.cos(a), Math.sin(a)), (0.5 - u) * 0.5, 'YZX');
+      }
+    }
+  });
+
   const events = { onShower: null };
   updaters.push((dt) => {
     // The sky keeps time by the clock on the wall, so everyone sees the same stars fall.
@@ -348,6 +423,9 @@ export function buildLife(scene, world) {
   return {
     events,
     update(dt, t) { for (const u of updaters) u(dt, t); },
+    // Fetch the modelled fish, dolphin and whale. The sea works without them.
+    async loadSea(url = 'sea.json') { try { const r = await fetch(url); if (!r.ok) return null; const models = await r.json(); applySea(models); return models; } catch (e) { return null; } },
+    get seaLife() { return seaLife; },
     setDaylight(v) { daylight = v; dayNow = v; },
     // How hard it is raining (0 to 1), and where the viewer is so the rain falls round them.
     setRain(v, centre) { rainNow = v; if (centre) rainCentre.copy(centre); },

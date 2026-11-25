@@ -29,6 +29,7 @@ export function parsePeer(p) {
     wet: num(s.w, 0, 1),
     butterfly: s.b === 1,
     nights: Math.floor(num(s.nv, 0, 9999)),
+    asleep: num(s.zz, 0, 1e15) > 0,
     warmth: num(s.tl, 0, 1),
     fire: Array.isArray(s.fr) && Number.isFinite(s.fr[0]) && Number.isFinite(s.fr[1]) ? { fuel: num(s.fr[0], 0, 1.4), at: num(s.fr[1], 0, 1e15) } : null,
   };
@@ -87,5 +88,7 @@ export function createNet(handlers) {
     get status() { return status; },
     // Ask for a place on the island. cb hears {state: 'in'}, or {state: 'wait', pos, of} while the island is full.
     join(cb) { joinCb = cb; if (status === 'solo') cb({ state: 'in' }); else if (room) startJoin(); },
+    // Give up your place and stop being seen.
+    leave() { joinCb = null; lastSent = ''; if (room && typeof room.leave === 'function') room.leave(); handlers.onPeers([]); },
   };
 }

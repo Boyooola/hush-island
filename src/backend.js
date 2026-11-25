@@ -60,7 +60,7 @@ function socketWire(first, url) {
   setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 20000);
   window.addEventListener('pagehide', () => { try { ws.close(1000); } catch (e) { /* gone */ } });
   return {
-    post(m) { if (m.t === 'join') joined = true; if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
+    post(m) { if (m.t === 'join') joined = true; if (m.t === 'leave') joined = false; if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
     listen(fn) { onMsg = fn; },
     up(fn) { onUp = fn; fn(ws.readyState === 1); },
     gap: 240, beat: 5000, queued: true,
@@ -96,6 +96,7 @@ function makeRoom(wire) {
     if (!m || typeof m !== 'object') return;
     if (m.t === 'in') { ashore = true; if (onQueue) onQueue({ state: 'in', cap: m.cap }); post(); return; }
     if (m.t === 'wait') { ashore = false; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }
+    if (m.t === 'out') { ashore = false; others.clear(); emit(); wire.post({ t: 'leave' }); const f = onQueue; onQueue = null; if (f) f({ state: 'out', why: m.why }); return; }
     if (typeof m.id !== 'string' || m.id === id) return;
     if (m.t === 'p' && m.p && typeof m.p === 'object') { others.set(m.id, { p: m.p, at: Date.now() }); emit(); }
     else if (m.t === 'hello') post();
@@ -123,7 +124,12 @@ function makeRoom(wire) {
     onPeers(fn) { handler = fn; if (!wire.queued) wire.post({ t: 'hello', id }); setTimeout(emit, 0); return () => { handler = null; }; },
     onConnection(fn) { wire.up(fn); return () => {}; },
     // Ask to come ashore. fn hears {state: 'in'} when there is room, or {state: 'wait', pos, of} while queued.
-    join(fn) { onQueue = fn; if (wire.queued) wire.post({ t: 'join' }); else fn({ state: 'in' }); },
+    join(fn) { onQueue = fn; if (wire.queued) wire.post({ t: 'join' }); else { ashore = true; fn({ state: 'in' }); if (handler) wire.post({ t: 'hello', id }); } },
+    // Back to the title screen: stop being seen, give up your place.
+    leave() {
+      if (wire.queued) wire.post({ t: 'leave' }); else wire.post({ t: 'bye', id });
+      ashore = false; onQueue = null; others.clear(); emit();
+    },
   };
 }
 

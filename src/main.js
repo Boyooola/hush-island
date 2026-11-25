@@ -68,7 +68,9 @@ let identity = store('ember.identity');
 if (!identity || !SPECIES[identity.species] || SPECIES[identity.species].npc || typeof identity.name !== 'string') identity = rollIdentity();
 let showOrigin = store('ember.origin') !== false;
 const COUNTRY = countryName();
-const mySub = () => (showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
+let asleepSince = 0, lastInputAt = Date.now(), laidByNap = false, idleAfter = 120000;
+const napText = () => { const m = Math.floor((Date.now() - asleepSince) / 60000); return m < 1 ? 'away' : `away, ${m} min`; };
+const mySub = () => (asleepSince ? napText() : showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -182,6 +184,7 @@ function adoptFire(rec) {
   if (entered && fuelNow() > before + 0.2) { world.flareUp(); audio.whoosh(); }
 }
 function feedFire() {
+  guideFlags.fire = true;
   const wasLow = fuelNow() < 0.3;
   const now = Date.now();
   fireRec = { fuel: Math.min(FIRE_MAX, fuelNow() + FEED), at: now, stamp: now };
@@ -288,6 +291,82 @@ function listState() {
   try { rec = JSON.parse(localStorage.getItem('ember.list')); } catch (e) { rec = null; }
   return rec && rec.day === todayKey() && Array.isArray(rec.done) ? rec : { day: todayKey(), done: [] };
 }
+// ---------- the guide: always one clear next thing, and a way to find it ----------
+// A first visit walks through four steps at the fire. After that the guide points at the next job on the
+// keeper's list. Either way there is a line of words, an arrow, a distance, and a column of light at the spot.
+const guideFlags = {};
+const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+const STARTER = [
+  { text: touch ? 'Walk up to the fire. Tap the ground to move' : 'Walk up to the fire. W A S D, or click the ground', where: () => FIRE, done: () => fireDist() < 5.5 },
+  { text: touch ? 'Rest by the fire. Tap the words at the bottom' : 'Rest by the fire. Press E', where: () => FIRE, done: () => me.mode !== 'stand' && fireDist() < 5.5 },
+  { text: 'Fetch a stick from the woodpile and drop it on the fire', where: () => (held === 1 ? FIRE : WOODPILE), done: () => !!guideFlags.fire },
+  { text: 'Greet the keeper, the stag lying by the fire', where: () => keeper, done: () => !!guideFlags.greet },
+];
+let starterAt = store('ember.starter');
+if (!Number.isInteger(starterAt)) starterAt = 0;
+const TASK_WHERE = {
+  wood: () => (held === 3 ? yard.site : yard.pieces[0] || yard.site), dock: () => ({ x: DOCK.x1 - 0.6, z: 0 }), fire: () => (held === 1 ? FIRE : WOODPILE),
+  warm: () => FIRE, hill: () => HILL, mark: () => WALL, bottle: () => CRATE, shake: () => ({ x: SPAWN.x, z: SPAWN.z + 4.6 }),
+  butterfly: () => life.meadowNear(me.x, me.z).meadow || FIRE, stone: () => life.stone,
+};
+let goal = null;
+function findGoal() {
+  if (starterAt < STARTER.length) return { text: STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
+  const st = listState(), id = listToday().find((k) => !st.done.includes(k));
+  return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
+}
+const beacon = new THREE.Group();
+{
+  const c = document.createElement('canvas'); c.width = 4; c.height = 128;
+  const g = c.getContext('2d'), grad = g.createLinearGradient(0, 128, 0, 0);
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)'); grad.addColorStop(0.5, 'rgba(255,255,255,0.3)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 4, 128);
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 16, 14, 1, true), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: 0xffc978, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+  col.position.y = 8;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.05, 28), new THREE.MeshBasicMaterial({ color: 0xffc978, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08;
+  beacon.add(col, ring);
+  beacon.userData = { col, ring };
+  beacon.visible = false;
+  scene.add(beacon);
+}
+let goalCheckAt = 0;
+function updateGuide(now) {
+  if (!entered) { beacon.visible = false; return; }
+  if (now - goalCheckAt > 300) {
+    goalCheckAt = now;
+    if (starterAt < STARTER.length && STARTER[starterAt].done()) {
+      starterAt++;
+      store('ember.starter', starterAt);
+      audio.pop(560);
+      if (starterAt >= STARTER.length) addLog('', 'That is how the island works. From here the keeper has three small jobs a day. The next one is at the top of the screen.', 'sys');
+    }
+    goal = asleepSince ? null : findGoal();
+    // The keeper's list stays out of the way until the first four steps are done: one thing at a time.
+    $('tasks').dataset.fresh = starterAt < STARTER.length ? 'true' : 'false';
+    const el = $('goal');
+    el.hidden = !goal;
+    if (goal) {
+      const label = goal.step ? `${goal.step}. ${goal.text}` : goal.text;
+      if (label !== el.dataset.shown) { el.dataset.shown = label; $('goal-text').textContent = label; }
+    }
+  }
+  if (!goal) { beacon.visible = false; return; }
+  const dx = goal.at.x - me.x, dz = goal.at.z - me.z, d = Math.hypot(dx, dz);
+  // The arrow points to where the goal lies as seen on screen: straight up means dead ahead.
+  const rel = Math.atan2(dx, dz) - (camYaw + Math.PI);
+  $('goal-arrow').style.transform = `rotate(${(-90 - rel * 180 / Math.PI).toFixed(0)}deg)`;
+  $('goal-dist').textContent = d < 3.2 ? 'here' : `${Math.round(d)} m`;
+  beacon.visible = d > 3.2;
+  if (beacon.visible) {
+    beacon.position.set(goal.at.x, Math.max(groundHeight(goal.at.x, goal.at.z), 0), goal.at.z);
+    const pulse = 0.5 + 0.5 * Math.sin(now / 320);
+    beacon.userData.ring.scale.setScalar(1 + pulse * 0.5);
+    beacon.userData.ring.material.opacity = 0.75 - pulse * 0.45;
+    beacon.userData.col.material.opacity = (0.4 + 0.2 * pulse) * (skyNow.dark > 0.5 ? 1 : 1.5);
+  }
+}
+
 function showList() {
   const st = listState(), today = listToday();
   for (const el of [$('list'), $('tasks-list')]) {
@@ -296,6 +375,7 @@ function showList() {
       const li = document.createElement('li');
       li.textContent = TASKS[id];
       if (st.done.includes(id)) li.className = 'done';
+      else if (id === today.find((k) => !st.done.includes(k))) li.className = 'now';
       el.appendChild(li);
     }
   }
@@ -390,6 +470,7 @@ function callOut() {
 }
 // Greeting: a dip of the head and a wagging tail.
 function greet(av, name) {
+  if (av === keeper) guideFlags.greet = true;
   me.targetYaw = Math.atan2(av.x - me.x, av.z - me.z);
   playEmote('greet');
   addLog('', `You greet ${name}.`, 'sys');
@@ -454,7 +535,7 @@ function presenceState() {
     v: 1, n: me.name, s: me.species, c: me.palette, t: mySub(),
     x: Math.round(me.x * 100) / 100, z: Math.round(me.z * 100) / 100, r: Math.round(me.targetYaw * 100) / 100,
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
-    m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, nv: nights,
+    m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
   };
 }
@@ -511,6 +592,7 @@ const net = createNet({
       p.av.setRewards(data.nights);
       p.av.setCoat(data.warmth, data.wet);
       p.av.setButterfly(data.butterfly);
+      p.av.asleep = data.asleep;
       adoptFire(data.fire);
     }
     for (const [id, p] of peers) {
@@ -842,13 +924,45 @@ function showIdentity() {
   $('emote-call').textContent = sp.callLabel;
   $('emote-sit').hidden = !!sp.hoof;
   $('help-keys').textContent = sp.hoof ? `${sp.callLabel}, hop, shake, wag. 6 to lie down.` : `${sp.callLabel}, hop, shake, wag, sit, lie down.`;
+  if ($('pick-animal').childElementCount) drawPicker();
 }
 showIdentity();
 if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) { $('hint').textContent = 'Tap the ground to walk. Drag to look around.'; $('say').placeholder = 'Tap here to speak'; }
-$('reroll').addEventListener('click', () => {
-  identity = rollIdentity();
+// Choosing who to arrive as: any of the animals, any of its coats. The name stays a matter of luck.
+function drawPicker() {
+  const animals = $('pick-animal'), coats = $('pick-coat');
+  animals.textContent = ''; coats.textContent = '';
+  SPECIES.forEach((sp, i) => {
+    if (sp.npc) return;
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = sp.label;
+    b.setAttribute('aria-pressed', i === identity.species ? 'true' : 'false');
+    b.addEventListener('click', () => { if (i !== identity.species) pickLook(i, 0); });
+    animals.appendChild(b);
+  });
+  const sp = SPECIES[identity.species];
+  sp.tints.forEach((tint, k) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.background = tint || sp.toy[1];
+    b.setAttribute('aria-label', `${sp.label} coat ${k + 1}`);
+    b.setAttribute('aria-pressed', k === identity.palette ? 'true' : 'false');
+    b.addEventListener('click', () => { if (k !== identity.palette) pickLook(identity.species, k); });
+    coats.appendChild(b);
+  });
+}
+function pickLook(species, palette) {
+  const word = identity.name.split(' ')[0];
+  identity = { species, palette, name: `${word} ${SPECIES[species].label}` };
   showIdentity();
   me.play('hop');
+}
+drawPicker();
+$('reroll').addEventListener('click', () => {
+  let word = identity.name.split(' ')[0];
+  for (let k = 0; k < 8 && word === identity.name.split(' ')[0]; k++) word = NAME_WORDS[Math.floor(Math.random() * NAME_WORDS.length)];
+  identity = { ...identity, name: `${word} ${SPECIES[identity.species].label}` };
+  showIdentity();
 });
 // Stepping ashore asks the island for a place. If it is full you wait in line, on the title screen,
 // and step ashore by yourself when your turn comes.
@@ -858,19 +972,64 @@ $('enter').addEventListener('click', () => {
   if (entered || asking) return;
   asking = true;
   audio.start();
-  $('enter').hidden = true; $('reroll').hidden = true;
+  $('enter').hidden = true; $('picker').hidden = true;
   $('queue').hidden = false;
   $('queue-text').textContent = 'Finding you a place by the fire…';
   net.join((q) => {
     if (q.state === 'in') { comeAshore(); return; }
+    if (q.state === 'out') { leaveIsland('tide'); return; }
     if (entered) return;
     $('queue-text').textContent = q.pos === 1 ? 'The island is full. You are next in line.' : `The island is full. You are ${nth(q.pos)} in line.`;
     $('queue-note').textContent = 'Leave this open. You will step ashore as soon as someone leaves.';
   });
 });
+// Back to the title screen. Your place is given up, and you can choose again and step ashore when you like.
+function leaveIsland(why) {
+  const was = entered;
+  entered = false; asking = false;
+  if (was || why !== 'tide') net.leave();
+  wake(false);
+  setMode('stand'); setHeld(0);
+  hasButterfly = false; me.setButterfly(false);
+  closeSheet(); $('help').hidden = true;
+  me.x = SPAWN.x; me.z = SPAWN.z; me.yaw = me.targetYaw = 0.35; vel.x = vel.z = 0; moveTarget = null; world.hideMarker();
+  document.body.classList.remove('playing');
+  $('queue').hidden = true; $('enter').hidden = false; $('picker').hidden = false;
+  $('enter').textContent = 'Step ashore again';
+  $('hint').textContent = why === 'tide'
+    ? 'You fell asleep while others were waiting for a place, so the tide carried you out. Step ashore again whenever you like.'
+    : 'You have left the island. Choose again if you like, and step ashore whenever you are ready.';
+  audio.setRain(0);
+}
+$('btn-leave').addEventListener('click', () => leaveIsland('left'));
+
+// Sleep: an animal nobody has touched for a while lies down and dozes, and its name tag says so.
+function wake(stand = true) {
+  lastInputAt = Date.now();
+  if (!asleepSince) return;
+  asleepSince = 0; me.asleep = false;
+  if (laidByNap && stand && me.mode === 'lie') standUp();
+  laidByNap = false;
+  me.setName(me.name, mySub());
+  pushPresence(true);
+}
+for (const type of ['keydown', 'pointerdown', 'wheel', 'touchstart']) window.addEventListener(type, () => wake(), { capture: true, passive: true });
+setInterval(() => {
+  if (!entered) return;
+  if (!asleepSince && Date.now() - lastInputAt > idleAfter) {
+    asleepSince = Date.now(); me.asleep = true;
+    if (me.mode === 'stand') { laidByNap = true; setMode('lie', nearestFreeSeat(2.0)); }
+    else if (me.mode === 'sit') { laidByNap = false; setMode('lie', mySeat); }
+    addLog('', 'You have dozed off. Touch anything to wake up.', 'sys');
+  }
+  if (asleepSince) { me.setName(me.name, mySub()); pushPresence(true); }
+}, 4000);
+
 function comeAshore() {
   if (entered) return;
   entered = true;
+  lastInputAt = Date.now();
+  $('hint').textContent = '';
   $('queue').hidden = true;
   store('ember.identity', identity);
   document.body.classList.add('playing');
@@ -880,9 +1039,9 @@ function comeAshore() {
   canvas.focus();
   // If nobody here already knows how the fire is doing, your view of it becomes the shared one.
   setTimeout(() => { if (!fireRec.stamp) { fireRec.stamp = fireRec.at; pushPresence(true); } }, 3000);
-  welcomeBack();
+  if (!comeAshore.before) { comeAshore.before = true; welcomeBack(); } else setTimeout(lookForBottle, 4000);
   showList();
-  setTimeout(() => { if (listState().done.length < 3) addLog('', 'The keeper has three small jobs today. They are listed on the left.', 'sys'); }, 9000);
+  setTimeout(() => { if (starterAt >= STARTER.length && listState().done.length < 3) addLog('', 'The keeper has three small jobs today. They are listed on the left, and the next one is at the top of the screen.', 'sys'); }, 9000);
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { me.tag.userData.draw(me.name, me.sub); keeper.tag.userData.draw(keeper.name, keeper.sub); });
 setInterval(() => { me.setName(me.name, mySub()); pushPresence(false); }, 20000);
@@ -1142,7 +1301,7 @@ function frame() {
     const floor = Math.max(groundHeight(goalPos.x, goalPos.z), 0) + 0.45;
     if (goalPos.y < floor) goalPos.y = floor;
   }
-  if (entered) enterBlend = Math.min(1, enterBlend + dt / 2.4);
+  enterBlend = entered ? Math.min(1, enterBlend + dt / 2.4) : Math.max(0, enterBlend - dt / 1.6);
   const eb = enterBlend * enterBlend * (3 - 2 * enterBlend);
   goalPos.lerpVectors(introPos, goalPos, eb);
   goalLook.lerpVectors(introLook, goalLook, eb);
@@ -1185,6 +1344,7 @@ function frame() {
     }
   }
   life.setRain(rainNow, camPos);
+  updateGuide(nowMs);
   world.update(dt, t);
   life.update(dt, t);
   yard.update(dt, t);
@@ -1205,6 +1365,12 @@ window.__ember = {
   me, peers, world, camera, renderer, keeper, POSE, life,
   yard, did, listToday,
   critters,
+  leaveIsland,
+  get goal() { return goal ? { text: goal.text, x: goal.at.x, z: goal.at.z, step: goal.step } : null; },
+  get starterAt() { return starterAt; },
+  set idleAfter(v) { idleAfter = v; },
+  get asleep() { return !!asleepSince; },
+  get identity() { return identity; },
   setRain(v) { rainForce = v; frame.skyAt = 0; },
   get butterfly() { return hasButterfly; },
   setHour(h) { hourShift = (h - islandHour() + 48) % 24; frame.skyAt = 0; },

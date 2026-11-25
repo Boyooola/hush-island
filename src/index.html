@@ -99,6 +99,16 @@
   }
   .primary:hover { background: var(--amber); }
   .hint { color: var(--ink-quiet); font-size: 13.5px; }
+  /* Choosing an animal and its coat: plain words and small dots of fur colour. */
+  #picker { display: flex; flex-direction: column; gap: 10px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); }
+  #picker[hidden] { display: none; }
+  .pick { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .pick button { background: none; border: 0; padding: 3px 0; font-family: var(--display); font-weight: 800; font-size: 18px; line-height: 1.1; color: var(--ink-quiet); }
+  .pick button:hover { color: var(--ink); }
+  .pick button[aria-pressed="true"] { color: var(--amber); text-decoration: underline; text-decoration-color: var(--ember); text-underline-offset: 5px; text-decoration-thickness: 2px; }
+  .pick.coats { gap: 10px; }
+  .pick.coats button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid rgba(5, 9, 20, 0.6); box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
+  .pick.coats button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--amber), 0 1px 6px rgba(0, 0, 0, 0.5); }
   /* Waiting for a place: a slow ember and a line of words. */
   #queue { display: flex; gap: 14px; align-items: center; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); }
   #queue[hidden] { display: none; }
@@ -149,6 +159,13 @@
   .word:active { transform: translateY(1px); }
   .word[hidden] { display: none; }
 
+  /* The one next thing to do: words, an arrow toward it, and how far. */
+  #goal { position: fixed; top: 50px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: baseline; gap: 12px; max-width: min(640px, calc(100% - 32px));
+    font-family: var(--display); font-weight: 800; font-size: 21px; line-height: 1.15; color: var(--amber); text-align: center;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 18px rgba(255, 140, 60, 0.45), 0 0 14px rgba(0, 0, 0, 0.85); pointer-events: none; }
+  #goal[hidden] { display: none; }
+  #goal-arrow { display: inline-block; font-size: 20px; color: var(--ember); transition: transform 0.15s linear; align-self: center; }
+  #goal-dist { font: 700 14px var(--body); color: var(--ink); white-space: nowrap; }
   /* Today's jobs, written down the left edge of the sky. */
   #tasks { position: fixed; left: 16px; top: 54px; max-width: min(300px, 62vw); display: flex; flex-direction: column; gap: 5px; z-index: 3;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.8), 0 0 22px rgba(0, 0, 0, 0.5); }
@@ -161,6 +178,8 @@
   #tasks-list li.done { color: var(--ink-quiet); text-decoration: line-through; text-decoration-color: rgba(185, 196, 216, 0.6); }
   #tasks-list li.done::before { background: var(--ember); box-shadow: 0 0 8px var(--ember); }
   #tasks[data-closed="true"] #tasks-list { display: none; }
+  #tasks[data-fresh="true"] { display: none; }
+  #tasks-list li.now { color: var(--amber); font-weight: 700; }
 
   #bottom {
     position: fixed; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 12px; align-items: center;
@@ -288,7 +307,8 @@
     .word { font-size: 16.5px; padding: 6px 0; }
     .act { font-size: 21px; }
     #help { padding-top: 56px; background: rgba(5, 9, 20, 0.93); }
-    #tasks { top: 132px; }
+    #tasks { top: 186px; }
+    #goal { top: 132px; font-size: 17px; gap: 9px; left: 16px; right: 16px; transform: none; max-width: none; text-align: left; }
     #day { order: 3; flex: 1 1 100%; }
     #daybar { width: 140px; }
     #tasks-list { font-size: 13.5px; }
@@ -311,10 +331,14 @@
 <section id="intro" aria-labelledby="title">
   <div class="card">
     <h1 id="title">Hush Island</h1>
-    <p>Somewhere quiet. Come and lie by the fire.</p>
+    <p>Somewhere quiet. Sit by the fire, fish off the dock, howl at the stars, and help build the boat with whoever else is here.</p>
     <div class="who">
       <div><small>You arrive as</small><strong id="who-name">Sleepy Otter</strong></div>
-      <button class="ghost" id="reroll" type="button">Different animal</button>
+      <button class="ghost" id="reroll" type="button">Another name</button>
+    </div>
+    <div id="picker">
+      <div class="pick" id="pick-animal" role="group" aria-label="Choose your animal"></div>
+      <div class="pick coats" id="pick-coat" role="group" aria-label="Choose your coat"></div>
     </div>
     <button class="primary" id="enter" type="button">Step ashore</button>
     <div id="queue" hidden role="status" aria-live="polite"><span class="ember" aria-hidden="true"></span><div><strong id="queue-text"></strong><span id="queue-note"></span></div></div>
@@ -329,8 +353,11 @@
     <button class="chip" id="btn-music" type="button" aria-pressed="true">Music on</button>
     <button class="chip" id="btn-sound" type="button" aria-pressed="true">Sound on</button>
     <button class="chip" id="btn-help" type="button" aria-pressed="false">Help</button>
+    <button class="chip" id="btn-leave" type="button">Leave</button>
   </div>
 </div>
+
+<div id="goal" class="hud" hidden role="status" aria-live="polite"><span id="goal-arrow" aria-hidden="true">➤</span><span id="goal-text"></span><span id="goal-dist"></span></div>
 
 <aside id="tasks" class="hud" aria-label="The keeper's list for today">
   <button id="tasks-head" type="button" aria-expanded="true">The keeper's list <span id="tasks-count"></span></button>

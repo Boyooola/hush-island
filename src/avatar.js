@@ -663,7 +663,7 @@ export class Avatar {
     }
     this.headYaw = lerp(this.headYaw, hy, 1 - Math.exp(-dt * 5));
     this.lieFor = lying ? (this.lieFor || 0) + dt : 0;
-    const dozing = this.lieFor > 6 && this.talk <= 0 && !this.look && !this.emote;
+    const dozing = this.asleep || (this.lieFor > 6 && this.talk <= 0 && !this.look && !this.emote);
     const restTo = !lying ? 0 : this.stargaze ? -1 : dozing ? 1 : 0;
     this.pose.rest = lerp(this.pose.rest || 0, restTo, 1 - Math.exp(-dt * 1.6));
     const LP = POSE[spec.hoof ? 'hoof' : 'paw'], r = this.pose.rest;

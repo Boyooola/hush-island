@@ -11,11 +11,13 @@ const DEFAULT_CAP = 40;          // animals ashore at once
 const STALE_MS = 45000;          // a visitor silent this long is taken to have left
 const MAX_BYTES = 2500;          // largest message accepted
 const MAX_PER_SECOND = 12;       // messages accepted from one visitor each second
+const DEFAULT_SLEEP_OUT = 600;   // seconds asleep before a visitor can be moved on, and only when others are waiting
 
 export class Island extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.cap = Math.max(1, parseInt(env.CAP, 10) || DEFAULT_CAP);
+    this.sleepOut = Math.max(1, parseInt(env.SLEEP_OUT, 10) || DEFAULT_SLEEP_OUT) * 1000;
     this.rate = new Map();        // socket -> [second, count]; forgotten when the object sleeps, which is fine
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
@@ -53,6 +55,15 @@ export class Island extends DurableObject {
     all = all.filter((x) => x.a.role !== 'gone');
     let ashore = all.filter((x) => x.a.role === 'in').length;
     const waiting = all.filter((x) => x.a.role === 'wait').sort((p, q) => p.a.at - q.a.at);
+    // Full, with a line: whoever has slept longest by the fire (past the limit) is carried out by the tide.
+    if (waiting.length && ashore >= this.cap) {
+      const sleepers = all.filter((x) => x.a.role === 'in' && x.a.zz && now - x.a.zz > this.sleepOut).sort((p, q) => p.a.zz - q.a.zz);
+      for (const sl of sleepers.slice(0, waiting.length - Math.max(0, this.cap - ashore))) {
+        this.step(sl.ws, sl.a, all);
+        this.send(sl.ws, { t: 'out', why: 'tide' });
+        ashore--;
+      }
+    }
     while (ashore < this.cap && waiting.length) {
       const next = waiting.shift();
       next.a.role = 'in';
@@ -63,6 +74,14 @@ export class Island extends DurableObject {
       for (const { ws, a } of all) if (a.role === 'in' && ws !== next.ws) this.send(ws, { t: 'hello', id: next.a.id });
     }
     waiting.forEach((w, i) => this.send(w.ws, { t: 'wait', pos: i + 1, of: waiting.length, cap: this.cap }));
+  }
+
+  // Take a visitor off the island without closing their line: they are back on the title screen.
+  step(ws, a, all) {
+    const was = a.role;
+    a.role = 'new'; a.zz = 0;
+    ws.serializeAttachment(a);
+    if (was === 'in') for (const { ws: o, a: b } of all || this.everyone()) if (b.role === 'in' && o !== ws) this.send(o, { t: 'bye', id: a.id });
   }
 
   webSocketMessage(ws, raw) {
@@ -79,6 +98,9 @@ export class Island extends DurableObject {
       if (a.role === 'new') { a.role = 'wait'; a.at = now; a.seen = now; ws.serializeAttachment(a); }
       this.settle();
     } else if (m.t === 'p' && a.role === 'in' && m.p && typeof m.p === 'object') {
+      // Remember since when a visitor says they have been asleep (never earlier than a day ago, never in the future).
+      const zz = typeof m.p.zz === 'number' && m.p.zz > 0 ? Math.min(now, Math.max(now - 86400000, m.p.zz)) : 0;
+      if ((zz > 0) !== ((a.zz || 0) > 0)) { a.zz = zz; ws.serializeAttachment(a); }
       const out = JSON.stringify({ t: 'p', id: a.id, p: m.p });
       for (const o of this.ctx.getWebSockets()) {
         if (o === ws) continue;
@@ -86,9 +108,10 @@ export class Island extends DurableObject {
         if (b && b.role === 'in') { try { o.send(out); } catch (e) { /* gone */ } }
       }
     } else if (m.t === 'leave') {
-      try { ws.close(1000, 'left'); } catch (e) { /* gone */ }
+      if (a.role === 'in' || a.role === 'wait') { this.step(ws, a); this.settle(); }
+    } else if (a.role === 'wait') {
+      this.settle();      // a waiting visitor's "still here": a good moment to see whether a sleeper can make room
     }
-    // Anything else (a waiting visitor's "still here") only refreshes the time they were last heard from.
   }
 
   webSocketClose(ws) { this.gone(ws); }

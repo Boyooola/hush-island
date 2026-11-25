@@ -9,7 +9,8 @@
     "binding": "ASSETS"
   },
   // How many animals can be ashore at once before newcomers queue.
-  "vars": { "CAP": "40" },
+  // SLEEP_OUT: seconds a visitor can sleep before the tide may carry them out, and only if others are waiting.
+  "vars": { "CAP": "40", "SLEEP_OUT": "600" },
   "durable_objects": {
     "bindings": [{ "name": "ISLAND", "class_name": "Island" }]
   },

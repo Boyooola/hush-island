@@ -31,7 +31,7 @@ for (let i = 0; i < 40; i++) b.send({ t: 'p', p: { v: 1, n: 'B', i } });
 await sleep(400);
 const flood = c.got.filter((m) => m.t === 'p' && m.p.n === 'B').length;
 ok('a flood from one visitor is cut off', flood > 0 && flood <= 13, flood + ' of 40 passed on');
-b.send('x'.repeat(4000)); b.ws.send('{bad json'); await sleep(200);
+b.send('x'.repeat(4000)); b.ws.send('{bad json'); await sleep(1200);   // past the second in which the flood was cut off
 ok('junk does not break the room', (() => { b.send({ t: 'p', p: { v: 1, n: 'B2' } }); return true; })());
 await sleep(1200);
 ok('room still relays afterwards', c.got.some((m) => m.t === 'p' && m.p.n === 'B2'));

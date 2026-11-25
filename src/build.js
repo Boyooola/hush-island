@@ -1,12 +1,12 @@
 // The keeper's boat: something being built on the west beach, plank by plank, by everyone who visits.
 // Driftwood washes up around the island; carried here, each piece becomes part of the hull.
 import * as THREE from 'three';
-import { shoreRadius, terrainHeight, colliders } from './terrain.js';
+import { shoreRadius, terrainHeight, colliders, smoothstep } from './terrain.js';
 import { makeSignTexture, makeGlowTexture } from './labels.js';
 
 export const BOAT_GOAL = 120;
-const SITE_A = 2.62;
-const siteR = shoreRadius(SITE_A) * 0.9;
+export const SITE_A = 2.62;
+export const siteR = shoreRadius(SITE_A) * 0.9;
 export const SITE = { x: Math.cos(SITE_A) * siteR, z: Math.sin(SITE_A) * siteR };
 
 export function buildSite(scene) {
@@ -20,11 +20,18 @@ export function buildSite(scene) {
   g.rotation.y = -SITE_A + Math.PI / 2;        // lying along the shore, bow toward the open beach
   scene.add(g);
 
+  // The hull is its own piece, so that it can leave the stocks and sail. At rest it lies exactly where the yard is.
+  const hull = new THREE.Group();
+  hull.position.copy(g.position); hull.rotation.y = g.rotation.y;
+  scene.add(hull);
+  const HOME_YAW = g.rotation.y;
+
   // Stocks and keel.
   for (const x of [-1.5, 0, 1.5]) { const b = box(0.3, 0.3, 1.1, frameMat); b.position.set(x, 0.15, 0); g.add(b); }
-  const keel = box(5.2, 0.16, 0.2, frameMat); keel.position.y = 0.38; g.add(keel);
-  for (const s of [-1, 1]) { const post = box(0.16, 1.25, 0.18, frameMat); post.position.set(s * 2.75, 0.85, 0); post.rotation.z = -s * 0.5; g.add(post); }
+  const keel = box(5.2, 0.16, 0.2, frameMat); keel.position.y = 0.38; hull.add(keel);
+  for (const s of [-1, 1]) { const post = box(0.16, 1.25, 0.18, frameMat); post.position.set(s * 2.75, 0.85, 0); post.rotation.z = -s * 0.5; hull.add(post); }
   // Ribs: seven stations, widest amidships.
+  const DECK = 0.74;        // the floor the crew sits on, above the keel
   const half = (x) => 0.95 * Math.sqrt(Math.max(0.05, 1 - (x / 2.9) ** 2));
   const stations = [-2.1, -1.4, -0.7, 0, 0.7, 1.4, 2.1];
   // Each rib turns at the bilge: out from the keel, then up the side.
@@ -34,7 +41,7 @@ export function buildSite(scene) {
     const rib = box(0.09, Math.hypot(dz, dy) + 0.05, 0.09, frameMat);
     rib.position.set(x, 0.42 + (p0[1] + p1[1]) / 2, s * ((p0[0] + p1[0]) / 2) * w);
     rib.rotation.x = s * Math.atan2(dz, dy);
-    g.add(rib);
+    hull.add(rib);
   };
   for (const x of stations) for (const s of [-1, 1]) { ribPiece(x, s, [0, 0], BILGE); ribPiece(x, s, BILGE, TOP); }
   // Planks: laid from the keel upward as the count grows. One strake across the bottom, three up each side.
@@ -51,7 +58,7 @@ export function buildSite(scene) {
     p.rotation.y = -s * Math.atan2(z1 - z0, x1 - x0);
     p.rotation.x = s * Math.atan2(dz, dy);
     p.visible = false;
-    g.add(p);
+    hull.add(p);
     planks.push(p);
   }
   // The yard: a sawhorse, a stack of cut planks, and a sign that keeps count.
@@ -69,18 +76,18 @@ export function buildSite(scene) {
   lamp.scale.setScalar(1.5); lamp.position.set(3.4, 1.75, 1.9); g.add(lamp);
   const lampLight = new THREE.PointLight(0xffc27a, 6, 9, 1.8); lampLight.position.set(3.4, 1.7, 2.0); g.add(lampLight);
 
-  // Finished: a mast, a furled sail on its yard, two thwarts and a pennant. Hidden until the last plank is on.
+  // Finished: a mast, a sail on its yard, a floor to sit on and a pennant. Hidden until the last plank is on.
   const rig = new THREE.Group();
   const sailMat = new THREE.MeshStandardMaterial({ color: 0xefe6d2, roughness: 1, flatShading: true, side: THREE.DoubleSide, emissive: 0xefe6d2, emissiveIntensity: 0.1 });
   const mast = box(0.13, 3.4, 0.13, frameMat); mast.position.set(0.2, 0.42 + 1.7, 0); rig.add(mast);
   const yardArm = box(0.09, 0.09, 2.3, frameMat); yardArm.position.set(0.2, 3.25, 0); rig.add(yardArm);
-  const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 1.9, 3, 2), sailMat);
-  { const p = sail.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin((p.getX(i) / 2.1 + 0.5) * Math.PI) * 0.22 * (0.4 + (0.5 - p.getY(i) / 1.9))); sail.geometry.computeVertexNormals(); }
-  sail.rotation.y = Math.PI / 2; sail.position.set(0.24, 2.25, 0); sail.castShadow = true; rig.add(sail);
-  for (const x of [-1.1, 1.2]) { const t = box(0.22, 0.06, 2 * half(x) * 0.9, paleMat); t.position.set(x, 0.42 + 0.62, 0); rig.add(t); }
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 1.6, 3, 2), sailMat);
+  { const p = sail.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin((p.getX(i) / 2.1 + 0.5) * Math.PI) * 0.22 * (0.4 + (0.5 - p.getY(i) / 1.6))); sail.geometry.computeVertexNormals(); }
+  sail.rotation.y = Math.PI / 2; sail.position.set(0.24, 2.4, 0); sail.castShadow = true; rig.add(sail);
+  for (const x of stations.slice(0, -1)) { const xm = x + 0.35, t = box(0.74, 0.05, 2 * half(xm) * 0.8, paleMat); t.position.set(xm, DECK, 0); t.castShadow = false; rig.add(t); }
   const pennant = new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -0.26, 0, 0.62, -0.13, 0], 3)), new THREE.MeshBasicMaterial({ color: 0xff9d4d, side: THREE.DoubleSide }));
   pennant.position.set(0.2, 3.82, 0); rig.add(pennant);
-  rig.visible = false; g.add(rig);
+  rig.visible = false; hull.add(rig);
 
   // Keep walkers out of the hull.
   g.updateMatrixWorld(true);
@@ -115,8 +122,38 @@ export function buildSite(scene) {
   }
   pieces.forEach(place);
 
-  let shown = -1;
+  // Places for the crew, bow to stern, and where each steps down onto the sand afterwards.
+  const SEATS = [[-0.5, 0.34], [-0.5, -0.34], [-1.3, 0.3], [-1.3, -0.3], [-2.0, 0], [1.1, 0]];      // aft of the mast first, where the sail does not hide them
+  const tmp = new THREE.Vector3();
+  let shown = -1, away = false;
   return {
+    crewMax: SEATS.length,
+    heading: Math.atan2(Math.cos(HOME_YAW), -Math.sin(HOME_YAW)),      // the way she points on the stocks, as a walker's yaw
+    // Put the hull somewhere on its voyage ({ x, z, hx, hz }: a place and a heading), or back on the stocks (null).
+    // seaY gives the height of the water at a point, so that she rides the waves.
+    setHull(pose, seaY, t) {
+      if (!pose) { if (away) { away = false; hull.position.copy(g.position); hull.rotation.set(0, HOME_YAW, 0); } return; }
+      away = true;
+      const ground = terrainHeight(pose.x, pose.z), water = seaY(pose.x, pose.z) - 0.36;
+      const afloat = smoothstep(0.0, 0.5, water - ground);
+      const px = -pose.hz, pz = pose.hx;      // the direction across the boat
+      const pitch = Math.atan2(seaY(pose.x + pose.hx * 2.2, pose.z + pose.hz * 2.2) - seaY(pose.x - pose.hx * 2.2, pose.z - pose.hz * 2.2), 4.4);
+      const roll = Math.atan2(seaY(pose.x + px * 0.8, pose.z + pz * 0.8) - seaY(pose.x - px * 0.8, pose.z - pz * 0.8), 1.6);
+      hull.position.set(pose.x, Math.max(ground, water), pose.z);
+      hull.rotation.order = 'YZX';
+      hull.rotation.y = Math.atan2(-pose.hz, pose.hx);
+      hull.rotation.z = pitch * afloat;
+      hull.rotation.x = (roll * 0.8 + Math.sin(t * 0.9) * 0.03) * afloat;
+      pennant.rotation.y = Math.sin(t * 5) * 0.25;
+    },
+    // Where seat i is in the world right now.
+    seat(i) {
+      const s = SEATS[i % SEATS.length];
+      hull.updateMatrixWorld(true);
+      tmp.set(s[0], DECK + 0.03, s[1]).applyMatrix4(hull.matrixWorld);
+      return { x: tmp.x, y: tmp.y, z: tmp.z };
+    },
+    ashore(i) { tmp.set(1.6 - (i % SEATS.length) * 0.9, 0, 2.3 + (i % 2) * 0.5).applyMatrix4(g.matrixWorld); return { x: tmp.x, z: tmp.z }; },
     site: { x: dropAt.x, z: dropAt.z },
     update(dt, t) {
       for (const pc of pieces) {
@@ -136,7 +173,7 @@ export function buildSite(scene) {
       if (total !== shown) {
         shown = total;
         signMat.map.dispose();
-        signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'The boat is built' : 'Being built', total >= BOAT_GOAL ? 'Voyages: under construction' : `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);
+        signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'The boat is built' : 'Being built', total >= BOAT_GOAL ? 'Climb in for a sail' : `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);
         signMat.needsUpdate = true;
       }
     },

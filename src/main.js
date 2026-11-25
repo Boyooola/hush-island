@@ -13,6 +13,7 @@ import { createStore, todayKey } from './store.js';
 import { buildLife, showerState } from './life.js';
 import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
+import { voyageAt, BOARD_MS } from './voyage.js';
 import { buildTraces } from './traces.js';
 import { judge } from './words.js';
 
@@ -83,9 +84,10 @@ if (typeof myKey !== 'string' || !/^[a-z0-9]{24,40}$/.test(myKey)) { const b = n
 let myCode = store('ember.code');
 if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.random() * 9000)); store('ember.code', myCode); }
 const fullName = (name, code) => (code ? `${name} #${code}` : name);
-const withMarks = (muted, away, it, text, code) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${String(text || '').replace(/§/g, '')}`;
-const mySub = () => withMarks(mutedUntil > Date.now(), !!asleepSince, itWho === 'me', originText(), myCode);
-const peerSub = (id, data) => withMarks(data.muted > Date.now(), data.asleep, itWho === id, data.sub, data.code);
+let sailed = Number(store('ember.sailed')) || 0;      // times round the island in the boat
+const withMarks = (muted, away, it, text, code, sailor) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${sailor ? '§s' : ''}${String(text || '').replace(/§/g, '')}`;
+const mySub = () => withMarks(mutedUntil > Date.now(), !!asleepSince, itWho === 'me', originText(), myCode, sailed > 0);
+const peerSub = (id, data) => withMarks(data.muted > Date.now(), data.asleep, itWho === id, data.sub, data.code, data.sailed > 0);
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -475,7 +477,7 @@ function lookAtBoat() {
     title: built ? 'The boat is built' : 'The keeper\'s boat',
     lines: [
       { text: built
-        ? `All ${BOAT_GOAL} planks are on. This boat will carry animals to the other islands. The voyages are still under construction, so for now she waits on the beach.`
+        ? `All ${BOAT_GOAL} planks are on. She is ready for a sail round the island: stand beside her and climb in, alone or with others. One day she will carry animals to the other islands.`
         : `${boatTotal} of ${BOAT_GOAL} planks so far. When she is built she will carry animals to the other islands. Driftwood washes up on the beaches, and it counts twice with another animal beside you.` },
       ...(crew.length ? [{ text: built ? 'Built by' : 'Built so far by', kind: 'head' }, ...crew, ...more] : [{ text: 'Nobody has added a plank yet. Yours could be the first.' }]),
     ],
@@ -762,7 +764,7 @@ function tagPeer(id) {
 function heardTag(id, p, data) {
   if (data.invAt > (p.invAt || 0)) {
     p.invAt = data.invAt;
-    if (data.invTo === net.id && entered && !asleepSince && !game && !party && !ignored.has(id)) {
+    if (data.invTo === net.id && entered && !asleepSince && !game && !party && !voyage && !ignored.has(id)) {
       invitedBy = { id, name: data.name, until: nowSec() + 14 };
       flash(`${data.name} wants to play tag`, touch ? 'Tap the words below to play' : 'Press E to play');
       addLog('', `${data.name} asks you to play tag.`, 'sys');
@@ -856,10 +858,10 @@ function updateTag() {
   const line = !g || !entered || left <= 0 ? '' : game
     ? `${who === 'me' ? 'You are it!' : who ? `${itName} is it. Run!` : 'Tag'}|${players.length + 1} playing|Stop playing`
     : `Tag: ${who ? `${itName} is it` : 'a game is on'}|${players.length} playing|Join in`;
-  if (line || !partyLine) el.hidden = !line;       // a dance at the fire may be using the line
+  if (line || (!partyLine && !voyageLine)) el.hidden = !line;       // a dance at the fire or the boat may be using the line
   if (line) {
     $('game-time').textContent = clockText(left);
-    if (line !== gameLine) { partyLine = ''; const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; el.classList.toggle('it', who === 'me'); }
+    if (line !== gameLine) { partyLine = ''; voyageLine = ''; const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; el.classList.toggle('it', who === 'me'); }
   }
   gameLine = line;
   // Rings under the players, and a marker over whoever is it.
@@ -884,7 +886,7 @@ function updateTag() {
     itMarker.rotation.y = t * 2.4;
   }
 }
-$('game-btn').addEventListener('click', () => { if (game) leaveTag(); else if (seenGame) joinTag(); else if (party) leaveParty(); else joinParty(); canvas.focus(); });
+$('game-btn').addEventListener('click', () => { if (voyage) { if (voyageNow && voyageNow.phase === 'board') leaveBoat(); } else if (voyageLine && !gameLine && !partyLine) boardBoat(); else if (game) leaveTag(); else if (seenGame) joinTag(); else if (party) leaveParty(); else joinParty(); canvas.focus(); });
 
 // ---------- a dance at the fire ----------
 // When a few animals are resting at the fire, one of them can start a dance. Everyone who joins circles the fire
@@ -901,7 +903,7 @@ function walkToRing() {
 }
 const restingAtFire = () => [...peers.values()].filter((p) => p.data.mode !== 'stand' && !p.data.asleep && Math.hypot(p.av.x - FIRE.x, p.av.z - FIRE.z) < 5.5);
 function startParty() {
-  if (party || seenParty || game || !entered) return;
+  if (party || seenParty || game || voyage || !entered) return;
   party = Math.max(Date.now(), tagSeen + 1); partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
   standUp(); setHeld(0); walkToRing();
   flash('Dance!', 'Round the fire');
@@ -911,7 +913,7 @@ function startParty() {
   pushPresence(true);
 }
 function joinParty() {
-  if (party || !seenParty || game || !entered) return;
+  if (party || !seenParty || game || voyage || !entered) return;
   party = seenParty; partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
   if (me.mode !== 'stand') standUp();
   setHeld(0); walkToRing();
@@ -997,17 +999,127 @@ function updateParty(dt) {
   partyStand = on && !keeperLoose;
   // The line at the top, when no game of tag has it.
   const el = $('game');
-  const line = on && !gameLine ? `${party ? 'Dancing at the fire' : 'A dance at the fire'}|${n} dancing|${party ? 'Step out' : game ? '' : 'Join in'}` : '';
-  if (!gameLine) {
+  const line = on && !gameLine && !voyage ? `${party ? 'Dancing at the fire' : 'A dance at the fire'}|${n} dancing|${party ? 'Step out' : game ? '' : 'Join in'}` : '';
+  if (!gameLine && !voyageLine) {
     el.hidden = !line;
     if (line) {
       $('game-time').textContent = clockText(left);
-      if (line !== partyLine) { const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; $('game-btn').hidden = !c; el.classList.remove('it'); }
+      if (line !== partyLine) { voyageLine = ''; const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; $('game-btn').hidden = !c; el.classList.remove('it'); }
     }
-  } else $('game-btn').hidden = false;
+  } else if (gameLine) $('game-btn').hidden = false;
   partyLine = line;
 }
 let partyStand = false;
+
+// ---------- the boat's voyage ----------
+// Once the boat is built, anyone can climb in. She casts off when the time to board runs out, or sooner if someone
+// aboard says so, sails once round the island and comes home. Like the dance there is no referee: each animal aboard
+// says which voyage it is on (the moment it was called) and when it casts off, and the earliest word wins.
+let voyage = 0, voyageCast = 0, seenVoyage = 0, seenCast = 0, voyageLine = '', voyageSaid = 0, voyageCalled = 0, voyageWas = '';
+let voyageNow = null, voyageCrew = [];
+const boatDist = () => Math.hypot(yard.site.x - me.x, yard.site.z - me.z);
+const boatBuilt = () => boatTotal >= BOAT_GOAL;
+function boardBoat() {
+  if (voyage || game || party || !entered || !boatBuilt() || boatDist() > 4.2) return;
+  if (seenVoyage) {
+    if (!voyageNow || voyageNow.phase !== 'board' || voyageCrew.length >= yard.crewMax) return;
+    voyage = seenVoyage; voyageCast = seenCast;
+    addLog('', 'You climbed into the boat.', 'sys');
+  } else {
+    voyage = Date.now(); voyageCast = voyage + BOARD_MS;
+    addLog('', 'You climbed into the boat. She casts off in a moment: anyone near can climb in too.', 'sys');
+  }
+  setHeld(0); setMode('sit'); playEmote('hop'); audio.pop(700);
+  flash('All aboard', 'Once round the island');
+  voyageSaid = 0;
+  pushPresence(true);
+}
+function castOff() {
+  if (!voyage || Date.now() >= voyageCast - 3000) return;
+  voyageCast = Date.now() + 3000;
+  pushPresence(true);
+}
+function leaveBoat(why = '') {
+  if (!voyage) return;
+  const i = Math.max(0, voyageCrew.indexOf(myWireId()));
+  voyage = 0; voyageCast = 0;
+  const a = yard.ashore(i);
+  me.x = a.x; me.z = a.z; vel.x = vel.z = 0; moveTarget = null;
+  setMode('stand'); playEmote('hop');
+  if (why === 'home') {
+    sailed += 1; store('ember.sailed', sailed);
+    flash('Home again', sailed === 1 ? 'You have sailed round the island' : `${sailed} times round the island`);
+    addLog('', sailed === 1 ? 'Home again. You have sailed right round the island, and a small sail by your name says so.' : `Home again. That is ${sailed} times round the island.`, 'sys');
+    audio.pop(880); me.setName(me.name, mySub());
+    net.note('sail');
+  } else addLog('', 'You stepped back onto the sand.', 'sys');
+  pushPresence(true);
+}
+function updateVoyage(dt) {
+  // Which voyage is on: mine, or the earliest one anybody near is on.
+  const now = Date.now();
+  let g = voyage, cast = voyageCast;
+  const ids = [];
+  for (const [id, p] of peers) {
+    const v = p.data.voyage;
+    if (!v || now - v.cast > 200000) continue;
+    if (!g || v.id < g) { g = v.id; cast = v.cast; ids.length = 0; }
+    if (v.id === g) { ids.push(id); cast = Math.min(cast, v.cast); }
+  }
+  if (voyage && g !== voyage) { voyage = g; pushPresence(true); }           // two were called at once: the earlier one stands
+  if (voyage && cast < voyageCast) { voyageCast = cast; pushPresence(true); }
+  seenVoyage = g; seenCast = cast;
+  voyageCrew = g ? [...(voyage ? [myWireId()] : []), ...ids].sort() : [];
+  voyageNow = g && voyageCrew.length ? voyageAt(g, cast, now) : null;
+  if (voyageNow && voyageNow.phase === 'done' && !voyage) voyageNow = null;
+  const v = voyageNow;
+  yard.setHull(v && v.pose, (x, z) => world.seaY(x, z), t);
+  if (v && v.phase !== voyageWas) {
+    if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'The boat slides down the sand and into the water.', 'sys'); } }
+  }
+  voyageWas = v ? v.phase : '';
+  if (!seenVoyage && voyageCalled) voyageCalled = 0;
+  if (v && v.phase === 'board' && !voyage && !voyageCalled && entered && boatDist() < 16 && ids.length) {
+    voyageCalled = g;
+    flash(`${peers.get(ids[0]).data.name} is taking the boat out`, 'Climb in at the boat before she goes');
+    audio.pop(620);
+  }
+  if (voyage && v) {
+    if (v.phase === 'done') leaveBoat('home');
+    else if (!entered) leaveBoat();
+    else {
+      // Sit in your place: the crew in a fixed order, bow to stern.
+      const seat = yard.seat(voyageCrew.indexOf(myWireId()));
+      const k = v.phase === 'sail' ? 1 : 1 - Math.exp(-dt * 7);
+      me.x = lerp(me.x, seat.x, k); me.z = lerp(me.z, seat.z, k); me.y = lerp(me.y, seat.y, k);
+      const hx = v.pose ? v.pose.hx : Math.sin(yard.heading), hz = v.pose ? v.pose.hz : Math.cos(yard.heading);
+      me.targetYaw = Math.atan2(hx, hz);
+      if (me.mode === 'stand') setMode('sit');
+      vel.x = vel.z = 0; moveTarget = null; me.speed = 0; lastInputAt = now;
+      if (v.phase === 'sail') {
+        // Things worth saying on the way round, once each.
+        const say = (n, text) => { if (voyageSaid < n) { voyageSaid = n; addLog('', text, 'sys'); } };
+        if (v.u > 0.2) say(1, 'From out here the whole island fits in one look.');
+        if (v.u > 0.47) say(2, skyNow.dark > 0.55 ? 'The fire is a small warm light across the water.' : 'There is the dock, and the hill behind it.');
+        if (v.u > 0.75) say(3, 'She is turning for home.');
+        if (Math.floor(t * 1.4) !== Math.floor((t - dt) * 1.4)) world.ripple(v.pose.x - v.pose.hx * 2.6, v.pose.z - v.pose.hz * 2.6);
+      }
+    }
+  } else if (v && v.phase === 'sail' && Math.floor(t * 1.4) !== Math.floor((t - dt) * 1.4)) world.ripple(v.pose.x - v.pose.hx * 2.6, v.pose.z - v.pose.hz * 2.6);
+  // The line at the top: for the crew always, for others when they are near and nothing else has it.
+  const el = $('game');
+  const show = v && entered && v.phase !== 'done' && (voyage || (!gameLine && !partyLine && (v.phase === 'board' ? boatDist() < 16 : true)));
+  const n = voyageCrew.length, full = n >= yard.crewMax;
+  const line = !show ? '' : v.phase === 'board'
+    ? `${voyage ? 'In the boat' : 'The boat is going out'}|${n} aboard|${voyage ? 'Step ashore' : full || game || party || boatDist() > 4.2 ? '' : 'Climb in'}`
+    : `${voyage ? 'Sailing round the island' : 'The boat is out'}|${n} aboard|`;
+  if (line) {
+    el.hidden = false;
+    $('game-time').textContent = clockText(v.left);
+    if (line !== voyageLine) { const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; $('game-btn').hidden = !c; el.classList.remove('it'); }
+  } else if (voyageLine) { el.hidden = true; $('game-btn').hidden = false; }
+  voyageLine = line;
+}
 
 // ---------- gestures, friends and whispers ----------
 // Gestures are small things done to the animal beside you, which they can return with one tap.
@@ -1362,7 +1474,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, gs: myGesture, mu: mutedUntil > Date.now() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast] : null, sv: sailed, gs: myGesture, mu: mutedUntil > Date.now() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -1863,7 +1975,7 @@ function leaveIsland(why) {
   const was = entered;
   entered = false; asking = false;
   if (was && why === 'left') net.note('left');
-  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; party = 0; myGesture = null; gestureBack = null; friendInvite = null; ignored.clear();
+  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; party = 0; voyage = 0; voyageCast = 0; myGesture = null; gestureBack = null; friendInvite = null; ignored.clear();
   if (was || why !== 'tide') net.leave();
   wake(false);
   setMode('stand'); setHeld(0);
@@ -1983,12 +2095,21 @@ function updateActions() {
   }
   if (gestureBack && me.mode === 'stand' && !held) { if (!alt && main) alt = main; const gb = gestureBack; main = { label: `${GESTURES[gb.kind].back} (${gb.name})`, run: () => gestureTo(gb.id, gb.kind) }; }
   if (friendInvite && nowSec() < friendInvite.until) { if (!alt && main) alt = main; const fi = friendInvite; main = { label: `Be friends with ${fi.name}`, run: () => askFriend(fi.pid, fi.name) }; } else friendInvite = null;
+  // The boat: climb in when she is built and at home, cast off early, step back out before she goes.
+  if (voyage) {
+    const boarding = voyageNow && voyageNow.phase === 'board';
+    main = boarding && voyageNow.left > 4 ? { label: 'Cast off now', run: castOff } : null;
+    alt = boarding ? { label: 'Step back ashore', run: () => leaveBoat() } : null;
+  } else if (boatBuilt() && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2 && (!seenVoyage || (voyageNow && voyageNow.phase === 'board' && voyageCrew.length < yard.crewMax))) {
+    if (!alt) alt = main; main = { label: seenVoyage ? 'Climb into the boat' : 'Take the boat out', run: boardBoat };
+  }
   // A dance at the fire: start one when resting there in company, join one that is going, step out of yours.
-  if (party) { main = null; alt = { label: 'Step out of the dance', run: () => leaveParty() }; }
+  if (voyage) { /* nothing else from a seat in the boat */ }
+  else if (party) { main = null; alt = { label: 'Step out of the dance', run: () => leaveParty() }; }
   else if (seenParty && !game && fireDist() < 12) { if (!alt && main) alt = main; main = { label: 'Join the dance', run: joinParty }; }
   else if (!seenParty && !game && !seenGame && me.mode !== 'stand' && fireDist() < 5.5 && restingAtFire().length >= 1) { if (!alt) alt = main; main = { label: 'Start a dance', run: startParty }; }
   // Tag: whoever is it tags the nearest animal on its feet. With no game on, anyone close can be asked to play.
-  if (me.mode === 'stand' && !party) {
+  if (me.mode === 'stand' && !party && !voyage) {
     const near = taggable(TAG_REACH, false), prey = taggable(TAG_REACH, true);
     if (itWho === 'me') { if (prey && nowSec() - myItAt > TAG_GRACE) { if (!alt && main) alt = main; main = { label: `Tag ${prey.p.data.name}`, run: () => tagPeer(prey.id) }; } }
     else if (invitedBy) { if (!alt && main) alt = main; main = { label: `Play tag with ${invitedBy.name}`, run: acceptTag }; }
@@ -2059,7 +2180,7 @@ function frame() {
       if (keys.has('d') || keys.has('arrowright')) ix += 1;
       if (keys.has('a') || keys.has('arrowleft')) ix -= 1;
     }
-    if (ix || iy) {
+    if ((ix || iy) && !voyage) {
       if (me.mode !== 'stand') { standUp(); pushPresence(true); }
       moveTarget = null; world.hideMarker();
       const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
@@ -2101,7 +2222,7 @@ function frame() {
   // Warmth: resting by the fire warms you right through, and you carry the glow away with you for a while.
   if (entered) {
     const near = fireDist() < 4.4, heat = clamp(fuelNow(), 0.15, 1.2);
-    if (world.surface(me.x, me.z) === 'water') warmth = Math.max(0, warmth - dt / 10);
+    if (world.surface(me.x, me.z) === 'water' && !voyage) warmth = Math.max(0, warmth - dt / 10);
     else if (near && me.mode !== 'stand') {
       // Warmer together: each animal resting at the fire with you (up to two) adds as much again.
       let company = 0, friend = null;
@@ -2132,7 +2253,8 @@ function frame() {
     stillFor = mn.flying && mn.dist < 3.2 && me.speed < 0.1 && !me.emote && mn.meadow.scare < 0.1 ? stillFor + dt : 0;
     if (!hasButterfly && stillFor > 5) { hasButterfly = true; me.setButterfly(true); addLog('', 'A butterfly has landed on your nose. Keep still.', 'sys'); did('butterfly'); pushPresence(true); }
     if (hasButterfly && (me.speed > 0.5 || !mn.flying || mn.dist > 4.5 || me.emote === 'shake' || me.emote === 'hop' || me.emote === 'call')) { hasButterfly = false; me.setButterfly(false); pushPresence(true); }
-    if (world.surface(me.x, me.z) === 'water') wet = Math.min(1, wet + dt / 1.8);
+    if (voyage) wet = Math.max(0, wet - dt / 150);
+    else if (world.surface(me.x, me.z) === 'water') wet = Math.min(1, wet + dt / 1.8);
     else if (rainNow > 0.3 && !sheltered) wet = Math.min(1, wet + dt / 7);
     else wet = Math.max(0, wet - dt / (near ? 14 : 150));
     if (wet > 0.8 && !wetSaid && world.surface(me.x, me.z) !== 'water') { wetSaid = true; addLog('', rainNow > 0.3 ? 'Your coat is soaked. Get under a tree and shake it off.' : 'Your coat is soaked. Shake it off, or dry out by the fire.', 'sys'); }
@@ -2141,8 +2263,11 @@ function frame() {
   }
   world.setFuel(fuelNow());
   me.look = speaker && speaker.until > t && speaker.av !== me ? speaker.av : null;
+  const yWas = me.y;
   me.y = groundHeight(me.x, me.z);
   updateParty(dt);
+  if (voyage) me.y = yWas;
+  updateVoyage(dt);
   updateWith();
   me.update(dt, t);
 
@@ -2165,7 +2290,7 @@ function frame() {
 
   viewFrustum.setFromProjectionMatrix(viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   // Other visitors glide toward where they last said they were.
-  for (const p of peers.values()) {
+  for (const [id, p] of peers) {
     const av = p.av, d = p.data;
     const k = 1 - Math.exp(-dt * 8);
     const px = av.x, pz = av.z;
@@ -2173,6 +2298,14 @@ function frame() {
     av.speed = lerp(av.speed, Math.hypot(av.x - px, av.z - pz) / dt, 0.25);
     av.targetYaw = d.yaw;
     av.y = groundHeight(av.x, av.z);
+    const crewAt = voyageNow && d.voyage && d.voyage.id === seenVoyage ? voyageCrew.indexOf(id) : -1;
+    if (crewAt >= 0 && voyageNow.phase !== 'done') {
+      // Aboard: in their place in the boat, wherever the boat is, rather than where they last said they were.
+      const seat = yard.seat(crewAt), kk = voyageNow.phase === 'sail' && p.aboard ? 1 : 1 - Math.exp(-dt * 7);
+      av.x = lerp(px, seat.x, kk); av.z = lerp(pz, seat.z, kk); av.y = lerp(p.aboardY ?? av.y, seat.y, kk); p.aboardY = av.y;
+      if (Math.hypot(av.x - seat.x, av.z - seat.z) < 0.1) p.aboard = true;
+      av.speed = 0;
+    } else { p.aboard = false; p.aboardY = undefined; }
     const dist = Math.hypot(av.x - me.x, av.z - me.z);
     const bothAtFire = mySeat >= 0 && d.mode !== 'stand' && d.seat >= 0;
     p.fade = bothAtFire ? 1 : 1 - smoothstep(8, 12, dist);
@@ -2308,6 +2441,9 @@ window.__ember = {
   get keptBy() { return keptBy; },
   get code() { return myCode; },
   startParty, joinParty, leaveParty,
+  boardBoat, castOff, leaveBoat,
+  get voyage() { return { mine: voyage, seen: seenVoyage, cast: seenCast, crew: voyageCrew.slice(), phase: voyageNow ? voyageNow.phase : '', left: voyageNow ? voyageNow.left : 0, u: voyageNow ? voyageNow.u : 0, sailed, line: voyageLine }; },
+  set voyageCast(v) { if (voyage) { voyageCast = v; pushPresence(true); } },
   get party() { return party; },
   get seenParty() { return seenParty; },
   askKeeper, K,

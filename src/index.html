@@ -106,6 +106,11 @@
   }
   .primary:hover { background: var(--amber); }
   .hint { color: var(--ink-quiet); font-size: 13.5px; }
+  .when { color: var(--ink); font-size: 14px; font-weight: 700; margin: 2px 0 6px; }
+  .when:empty { display: none; }
+  #camp { font-size: 13.5px; color: var(--ink); opacity: 0.9; margin-top: 4px; }
+  #camp:empty { display: none; }
+  #tasks[data-closed="true"] #camp { display: none; }
   /* Choosing an animal and its coat: plain words and small dots of fur colour. */
   #picker { display: flex; flex-direction: column; gap: 10px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); }
   #picker[hidden] { display: none; }
@@ -411,6 +416,7 @@
     </div>
     <button class="primary" id="enter" type="button">Step ashore</button>
     <div id="queue" hidden role="status" aria-live="polite"><span class="ember" aria-hidden="true"></span><div><strong id="queue-text"></strong><span id="queue-note"></span></div></div>
+    <div class="when" id="campfire-note" role="status"></div>
     <div class="hint" id="hint">Walk with WASD or tap the ground. Drag to look around.</div>
   </div>
 </section>
@@ -436,6 +442,7 @@
 <aside id="tasks" class="hud" aria-label="The keeper's list for today">
   <button id="tasks-head" type="button" aria-expanded="true">The keeper's list <span id="tasks-count"></span></button>
   <ul id="tasks-list"></ul>
+  <div id="camp"></div>
 </aside>
 
 <aside id="help" hidden>

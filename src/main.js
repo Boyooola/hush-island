@@ -14,6 +14,7 @@ import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
 import { voyageAt, BOARD_MS } from './voyage.js';
 import { timeNow, clockSkew } from './now.js';
+import { campfireAt, clockTime, inWords, bothTimes } from './campfire.js';
 import { buildTraces } from './traces.js';
 import { judge } from './words.js';
 
@@ -84,10 +85,11 @@ if (typeof myKey !== 'string' || !/^[a-z0-9]{24,40}$/.test(myKey)) { const b = n
 let myCode = store('ember.code');
 if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.random() * 9000)); store('ember.code', myCode); }
 const fullName = (name, code) => (code ? `${name} #${code}` : name);
+let fires = (() => { const r = store('ember.fires'); return r && Number.isFinite(r.count) ? r : { count: 0, last: 0 }; })();      // campfire hours been at, and the last one
 let sailed = Number(store('ember.sailed')) || 0;      // times round the island in the boat
-const withMarks = (muted, away, it, text, code, sailor) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${sailor ? '§s' : ''}${String(text || '').replace(/§/g, '')}`;
-const mySub = () => withMarks(mutedUntil > timeNow(), !!asleepSince, itWho === 'me', originText(), myCode, sailed > 0);
-const peerSub = (id, data) => withMarks(data.muted > timeNow(), data.asleep, itWho === id, data.sub, data.code, data.sailed > 0);
+const withMarks = (muted, away, it, text, code, sailor, flame) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${sailor ? '§s' : ''}${flame ? '§f' : ''}${String(text || '').replace(/§/g, '')}`;
+const mySub = () => withMarks(mutedUntil > timeNow(), !!asleepSince, itWho === 'me', originText(), myCode, sailed > 0, fires.count > 0);
+const peerSub = (id, data) => withMarks(data.muted > timeNow(), data.asleep, itWho === id, data.sub, data.code, data.sailed > 0, data.fires > 0);
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -1505,7 +1507,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, cf: fires.count, gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -2055,6 +2057,8 @@ function comeAshore(q = {}) {
   document.body.classList.add('playing');
   me.targetYaw = Math.PI;      // turn to face the fire
   addLog('', 'You came ashore. The fire is straight ahead.', 'sys');
+  // When to find company: said to everyone on arrival, since the beach is often empty.
+  setTimeout(() => { if (entered) addLog('', campLine(), 'sys'); }, 3500);
   // Signs of the others: how many have been here today, and whose tracks are still on the ground.
   // The island knows which country the connection comes from, which beats guessing from the time zone.
   if (/^[A-Z]{2}$/.test(String(q.cc || ''))) { try { COUNTRY = new Intl.DisplayNames(['en'], { type: 'region' }).of(q.cc) || COUNTRY; } catch (e) { /* keep the guess */ } me.setName(me.name, mySub()); }
@@ -2165,6 +2169,63 @@ function updateActions() {
   actions = next;
 }
 
+// ---------- campfire hour ----------
+// Twice a day (see campfire.js) the island has a set hour for gathering. The fire roars, the keeper has a few
+// things to say, and whoever sits in for a while carries a small flame by their name afterwards.
+let campShift = 0, campWas = null, campCheck = 0, campSecs = 0, campSaid = -1, campWarned = 0;
+const campNow = () => campfireAt(timeNow() + campShift);
+const KEEPER_AT_CAMPFIRE = [
+  'Campfire hour. Pull in close, there is room for everyone.',
+  'Say where you have come from tonight. The fire likes to know.',
+  'Somebody start a dance. I will mind the fire.',
+  'The boat is at the water, if a few of you want to take her round.',
+  'A howl goes further when it is not alone.',
+  'Leave a mark on the wall before you go, so the next ones know you were here.',
+  'Good company. Stay as long as you like.',
+  'Not long now. The fire will burn down, and so will I.',
+  'One more log, and then the hour is done.',
+  'Same time tomorrow. I will keep your place.',
+];
+function campLine() {
+  const c = campNow(), now = timeNow() + campShift;
+  return c.on ? `Campfire hour is on now: ${inWords(c.ends - now)} left. Animals gather at the fire.` : `Campfire hour is every day at ${bothTimes()}. The next starts in ${inWords(c.next - now)}.`;
+}
+function updateCampfire(dt) {
+  const c = campNow(), now = timeNow() + campShift;
+  world.setGathering(c.on);
+  if (c.on && entered && !asleepSince && fireDist() < 9) campSecs += dt;
+  if (t - campCheck < 1) return;
+  campCheck = t;
+  $('campfire-note').textContent = campLine();
+  $('camp').textContent = c.on ? `Campfire hour is on: ${inWords(c.ends - now)} left` : `Campfire hour in ${inWords(c.next - now)} (${clockTime(c.next)})`;
+  if (!entered) { campWas = c.on ? c.id : 0; return; }
+  if (campWas === null) campWas = c.on ? c.id : 0;
+  if (c.on && campWas !== c.id) {
+    campWas = c.id; campSecs = 0; campSaid = -1;
+    flash('Campfire hour', 'Come and sit by the fire'); audio.pop(620);
+    addLog('', 'It is campfire hour. For the next hour this is where everyone gathers.', 'sys');
+  } else if (!c.on && campWas) {
+    campWas = 0; campSecs = 0;
+    addLog('', `Campfire hour is over. The next is at ${clockTime(c.next)}, in ${inWords(c.next - now)}.`, 'sys');
+  }
+  if (!c.on && c.next - now < 600000 && campWarned !== c.next) { campWarned = c.next; addLog('', `Campfire hour starts in ${inWords(c.next - now)}. Others may be on their way.`, 'sys'); }
+  if (c.on) {
+    // The keeper speaks every six minutes of the hour, the same words for everyone.
+    const n = Math.min(KEEPER_AT_CAMPFIRE.length - 1, Math.floor((now - c.id) / 360000));
+    if (n !== campSaid) { const firstSight = campSaid === -1 && now - c.id > 20000; campSaid = n; if (!firstSight || n === 0) keeperSays(KEEPER_AT_CAMPFIRE[n]); else keeperSays('Campfire hour. Pull in close, there is room for everyone.'); }
+    // Three quarters of a minute by the fire and you were there.
+    if (campSecs >= 45 && fires.last !== c.id) {
+      fires = { count: fires.count + 1, last: c.id }; store('ember.fires', fires);
+      flash('You were at the campfire', fires.count === 1 ? 'A small flame by your name says so' : `${fires.count} campfire hours`);
+      addLog('', fires.count === 1 ? 'You were at the campfire. A small flame by your name says so.' : `That is ${fires.count} campfire hours you have been at.`, 'sys');
+      audio.pop(880); me.setName(me.name, mySub()); pushPresence(true);
+      net.note('campfire'); net.note('cf' + String(c.hour).padStart(2, '0'));
+    }
+  }
+}
+// The title screen says when the next one is, before anyone has stepped ashore.
+setInterval(() => { if (!entered) $('campfire-note').textContent = campLine(); }, 15000);
+setTimeout(() => { $('campfire-note').textContent = campLine(); }, 0);
 function keeperSays(line) {
   keeper.say(line);
   speaker = { av: keeper, until: t + 5 };
@@ -2300,6 +2361,7 @@ function frame() {
   if (voyage && voyageSeated) me.y = yWas;
   updateVoyage(dt);
   if (hop) updateHop();
+  updateCampfire(dt);
   updateWith();
   me.update(dt, t);
 
@@ -2475,6 +2537,8 @@ window.__ember = {
   get boatTotal() { return boatTotal; }, get carvings() { return carvings; }, store: saved,
   startParty, joinParty, leaveParty,
   boardBoat, castOff, leaveBoat,
+  get campfire() { const c = campNow(); return { on: c.on, id: c.id, next: c.next, secs: campSecs, fires: fires.count, line: campLine(), top: $('camp').textContent }; },
+  set campShift(ms) { campShift = ms; campCheck = 0; }, set campSecs(v) { campSecs = v; },
   surface: (x, z) => world.surface(x, z), get moving() { return !!moveTarget || !!hop; },
   get voyage() { return { mine: voyage, seen: seenVoyage, cast: seenCast, crew: voyageCrew.slice(), seated: voyageSeated, dolphins: life.escorting, phase: voyageNow ? voyageNow.phase : '', left: voyageNow ? voyageNow.left : 0, u: voyageNow ? voyageNow.u : 0, sailed, line: voyageLine }; },
   set voyageCast(v) { if (voyage) { voyageCast = v; pushPresence(true); } },

@@ -21,7 +21,7 @@ const MAX_PER_SECOND = 12;       // messages accepted from one visitor each seco
 const DEFAULT_SLEEP_OUT = 600;   // seconds asleep before a visitor can be moved on, and only when others are waiting
 const TRACKS_KEPT = 8;           // how many departed visitors' tracks stay on the island
 const TRACK_AGE = 36 * 3600000;  // and for how long
-const NOTES = /^(g[1-4]|answer|duo|sniff|left|tag|game|dance|gesture|sail)$/;   // things the game may ask to have counted
+const NOTES = /^(g[1-4]|answer|duo|sniff|left|tag|game|dance|gesture|sail|campfire|cf(01|13))$/;   // things the game may ask to have counted
 const MUTE_FIRST = 10 * 60000;    // how long a first mute lasts
 const MUTE_AGAIN = 60 * 60000;    // and any further one within a day
 const REPORTS_TO_MUTE = 3;       // reports from different visitors, within an hour, that mute someone
@@ -983,6 +983,9 @@ const STATS_PAGE = `<!DOCTYPE html>
       ['Notes left for absent friends', sum('notes'), ''],
       ['Times an animal joined a dance', sum('dance'), ''],
       ['Voyages round the island, counted per animal', sum('sail'), ''],
+      ['Animals who came to a campfire hour', sum('campfire'), ''],
+      ['of those, at the 01:00 UTC hour', sum('cf01'), ''],
+      ['and at the 13:00 UTC hour', sum('cf13'), ''],
       ['Games of tag begun', sum('game'), ''],
       ['Tags made playing tag', sum('tag'), ''],
       ['Tracks sniffed at', sum('sniff'), ''],

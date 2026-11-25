@@ -65,12 +65,12 @@ export function makeNameTag(name, sub, isYou) {
     const marks = [];
     let text = String(s || ''), code = '';
     { const c = /^§#(\d{4})/.exec(text); if (c) { code = c[1]; text = text.slice(6); } }
-    for (let m = /^§([mzis])/.exec(text); m; m = /^§([mzis])/.exec(text)) { marks.push(m[1]); text = text.slice(2); }
+    for (let m = /^§([mzisf])/.exec(text); m; m = /^§([mzisf])/.exec(text)) { marks.push(m[1]); text = text.slice(2); }
     text = text.trim();
     if (text || marks.length) {
       ctx.font = `700 30px ${FONT}`;
       ctx.lineWidth = 6;
-      const MW = { m: 40, z: 46, i: 44, s: 36 }, gap = 10;
+      const MW = { m: 40, z: 46, i: 44, s: 36, f: 28 }, gap = 10;
       const tw = text ? ctx.measureText(text).width : 0;
       const mw = marks.reduce((a, k) => a + MW[k] + gap, 0) - (text ? 0 : gap);
       let x = 256 - (tw + mw) / 2;
@@ -89,6 +89,11 @@ export function makeNameTag(name, sub, isYou) {
           ctx.strokeText('z', cx - 11, cy + 3); ctx.fillStyle = '#a9c8ff'; ctx.fillText('z', cx - 11, cy + 3);
           ctx.font = `800 italic 22px ${FONT}`; ctx.strokeText('z', cx + 5, cy - 6); ctx.fillText('z', cx + 5, cy - 6);
           ctx.font = `800 italic 16px ${FONT}`; ctx.strokeText('z', cx + 17, cy - 14); ctx.fillText('z', cx + 17, cy - 14);
+        } else if (k === 'f') {
+          // A small flame: this animal has been at a campfire hour.
+          const flame = (w, h, dy) => { ctx.beginPath(); ctx.moveTo(cx, cy - h + dy); ctx.bezierCurveTo(cx + w * 1.3, cy - h * 0.2 + dy, cx + w, cy + h * 0.75 + dy, cx, cy + h * 0.75 + dy); ctx.bezierCurveTo(cx - w, cy + h * 0.75 + dy, cx - w * 1.3, cy - h * 0.2 + dy, cx, cy - h + dy); ctx.closePath(); };
+          ctx.lineWidth = 7; flame(11, 21, 3); ctx.stroke();
+          ctx.fillStyle = '#ff8a3d'; flame(11, 21, 3); ctx.fill(); ctx.fillStyle = '#ffd86b'; flame(5.5, 11, 9); ctx.fill();
         } else if (k === 's') {
           // A small sail: this animal has been round the island in the boat.
           const sail = () => { ctx.beginPath(); ctx.moveTo(cx - 3, cy - 17); ctx.lineTo(cx + 14, cy + 6); ctx.lineTo(cx - 3, cy + 6); ctx.closePath(); };

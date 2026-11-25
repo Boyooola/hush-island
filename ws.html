@@ -1,0 +1,11 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Hush Island room test</title></head><body><h1>room test</h1><pre id="out">starting</pre><script>
+const out = document.getElementById('out'), R = { a: 'new', b: 'new', bGot: [], aGot: [], errors: [] };
+const draw = () => { out.textContent = JSON.stringify(R); };
+const mk = (tag) => { const ws = new WebSocket('wss://www.hush-island.dev/room'); ws.onerror = () => { R.errors.push(tag + ' socket error'); draw(); }; ws.onclose = (e) => { R[tag] = 'closed ' + e.code; draw(); };
+  ws.onmessage = (e) => { if (e.data === 'pong') return; const m = JSON.parse(e.data); if (m.t === 'in' || m.t === 'wait') R[tag] = m.t + (m.cap ? ' cap ' + m.cap : ''); else R[tag + 'Got'].push(m.t + (m.p ? ':' + m.p.n + ':' + m.p.k : '')); R[tag + 'Got'] = R[tag + 'Got'].slice(-4); draw(); };
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join' })); return ws; };
+const a = mk('a'), b = mk('b');
+let k = 0;
+setInterval(() => { if (a.readyState === 1) a.send(JSON.stringify({ t: 'p', p: { v: 1, n: 'TestA', k: k++ } })); }, 1000);
+draw();
+</script></body></html>

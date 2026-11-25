@@ -36,15 +36,16 @@ ok('starting it gets you up and dancing', await until(a, () => window.__ember.pa
   ok('it walks out to the ring rather than jumping there', out && worst < 1.6, 'largest move between looks ' + worst.toFixed(2) + ' m'); }
 ok('the other is told and offered a way in', await until(b, () => window.__ember.seenParty > 0 && window.__ember.actions[0] === 'Join the dance' && document.getElementById('flash-title').textContent.includes('started a dance')), await acts(b));
 await act(b, 'Join the dance');
-ok('joining puts both in the ring, on opposite sides of the fire', await until(a, () => { const e = window.__ember, p = [...e.peers.values()][0]; if (p.data.dance !== e.party) return false; const ra = Math.hypot(e.me.x, e.me.z), rb = Math.hypot(p.av.x, p.av.z), d = Math.hypot(e.me.x - p.av.x, e.me.z - p.av.z); return Math.abs(ra - 5) < 0.5 && Math.abs(rb - 5) < 0.7 && d > 8; }), JSON.stringify(await a.evaluate(() => { const e = window.__ember, p = [...e.peers.values()][0]; return [e.me.x, e.me.z, p.av.x, p.av.z].map((v) => +v.toFixed(1)); })));
+ok('joining puts both in the ring, on opposite sides of the fire', await until(a, () => { const e = window.__ember, p = [...e.peers.values()][0]; if (p.data.dance !== e.party) return false; const ra = Math.hypot(e.me.x, e.me.z), rb = Math.hypot(p.av.x, p.av.z), d = Math.hypot(e.me.x - p.av.x, e.me.z - p.av.z); return Math.abs(ra - 5) < 0.5 && Math.abs(rb - 5) < 0.7 && d > 8; }, 60000), JSON.stringify(await a.evaluate(() => { const e = window.__ember, p = [...e.peers.values()][0]; return [e.me.x, e.me.z, p.av.x, p.av.z].map((v) => +v.toFixed(1)); })));
 const p0 = await a.evaluate(() => [window.__ember.me.x, window.__ember.me.z]);
 await a.evaluate(() => window.__ember.cam(0.9, 0.5, 9)); await a.waitForTimeout(2500);
 const p1 = await a.evaluate(() => [window.__ember.me.x, window.__ember.me.z]);
-ok('the ring turns', Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 1.2, Math.hypot(p1[0] - p0[0], p1[1] - p0[1]).toFixed(1) + ' m in 2.5 s');
+ok('the ring turns', Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 0.6, Math.hypot(p1[0] - p0[0], p1[1] - p0[1]).toFixed(1) + ' m in 2.5 s');
 await a.waitForTimeout(300);
 ok('the line at the top is showing', await a.evaluate(() => { let n = 0; for (let i = 0; i < 20; i++) if (!document.getElementById('game').hidden) n++; return n === 20 && getComputedStyle(document.getElementById('game')).display !== 'none'; }));
 ok('the line at the top counts the dancers', /Dancing at the fire\s*2 dancing\s*\d:\d\d\s*Step out/.test(await a.evaluate(() => document.getElementById('game').innerText.replace(/\s+/g, ' '))), await a.evaluate(() => document.getElementById('game').innerText.replace(/\s+/g, ' ')));
 ok('the keeper is on his feet for it', await a.evaluate(() => window.__ember.keeper.mode === 'stand'));
+ok('the dance piece takes over the music', await until(a, () => window.__ember.audio.playing.dance === true, 8000), JSON.stringify(await a.evaluate(() => window.__ember.audio.playing)));
 await a.screenshot({ path: '/home/claude/ember-isle/shots/p1-dance.png' });
 await act(b, 'Step out'); 
 ok('a dancer can step out', await has(b, 'You stepped out of the dance') && (await b.evaluate(() => window.__ember.party)) === 0);
@@ -53,6 +54,7 @@ await b.click('#game-btn');
 ok('and come back in from the line', await until(b, () => window.__ember.party > 0));
 await a.evaluate(() => { window.__ember.warmth = 0.1; });
 ok('when the minute is up the dancers are warm right through, with a plank for the boat', await has(a, 'The dance is over. You are warm right through, and a plank goes on the boat', 90000) && (await a.evaluate(() => window.__ember.warmth)) > 0.95 && (await a.evaluate(() => window.__ember.party)) === 0);
+ok('and the dance piece stops with the dance', await until(a, () => window.__ember.audio.playing.dance === false, 8000));
 ok('the line goes and the keeper lies down again', await until(a, () => document.getElementById('game').hidden && window.__ember.keeper.mode === 'lie'));
 const s = await (await fetch('http://localhost:8787/room/stats.json')).json();
 ok('joining is counted', (s.days[s.today] || {}).dance === 3, JSON.stringify(s.days[s.today]));

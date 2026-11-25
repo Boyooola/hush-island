@@ -1,0 +1,11 @@
+{
+  "credit": "Music made with Suno.",
+  "tracks": [
+    { "file": "day-1.mp3", "mood": "day" },
+    { "file": "day-2.mp3", "mood": "day" },
+    { "file": "day-3.mp3", "mood": "day" },
+    { "file": "night-1.mp3", "mood": "night" },
+    { "file": "night-2.mp3", "mood": "night" },
+    { "file": "dance.mp3", "mood": "dance" }
+  ]
+}

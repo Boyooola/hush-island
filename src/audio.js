@@ -51,6 +51,69 @@ export function createAudio() {
     o.start();
   }
 
+  // ---- recorded music ----
+  // If the site has a list of tracks (music/tracks.json), they are played in place of the generated loop: day pieces
+  // by day and night pieces by night, in shuffled order, each fading in and out with a quiet stretch between them so
+  // the island itself can be heard. A dance at the fire has its own piece.
+  // The list: { "tracks": [ { "file": "day-1.mp3", "mood": "day" | "night" | "dance", "title": "", "artist": "" } ] }
+  let tracks = [], credit = '', scene = { dark: false, dance: false };
+  // How loud each kind of piece sits: the background stays under the fire and the sea, the dance comes forward.
+  const LEVEL = { day: 0.5, night: 0.42, dance: 0.85 };
+  const deck = { bg: null, dance: null };          // two players: the background, and the dance
+  let bgState = 'gap', bgUntil = 0, bgTrack = null, lastFile = '', danceOn = false;
+  const listReady = fetch('music/tracks.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+    credit = d && typeof d.credit === 'string' ? d.credit.slice(0, 200) : '';
+    tracks = d && Array.isArray(d.tracks) ? d.tracks.filter((x) => x && typeof x.file === 'string' && /^[\w .-]+\.(mp3|ogg|m4a)$/i.test(x.file)) : [];
+    return tracks;
+  }).catch(() => []);
+  function makeDeck() {
+    // Made inside the visitor's first click, and started once there and then, so that phones let it play later.
+    const el = new Audio();
+    el.preload = 'none'; el.crossOrigin = 'anonymous';
+    const gain = ctx.createGain(); gain.gain.value = 0;
+    try { ctx.createMediaElementSource(el).connect(gain).connect(musicBus); } catch (e) { return null; }
+    try { el.muted = true; const p = el.play(); if (p && p.catch) p.catch(() => {}); el.pause(); el.muted = false; } catch (e) { /* no matter */ }
+    return { el, gain, file: '' };
+  }
+  const fade = (d, to, secs) => { if (d && ctx) { d.gain.gain.cancelScheduledValues(ctx.currentTime); d.gain.gain.setTargetAtTime(to, ctx.currentTime, secs / 3); } };
+  function play(d, tr, loop) {
+    if (!d || !tr) return false;
+    try {
+      d.el.src = 'music/' + encodeURIComponent(tr.file); d.el.loop = !!loop; d.file = tr.file;
+      const p = d.el.play(); if (p && p.catch) p.catch(() => { d.failed = Date.now(); });
+      return true;
+    } catch (e) { return false; }
+  }
+  function pick(mood) {
+    const pool = tracks.filter((x) => x.mood === mood), any = pool.length ? pool : tracks.filter((x) => x.mood !== 'dance');
+    if (!any.length) return null;
+    const fresh = any.filter((x) => x.file !== lastFile);
+    return (fresh.length ? fresh : any)[Math.floor(Math.random() * (fresh.length ? fresh.length : any.length))];
+  }
+  function runMusic() {
+    if (!ctx || ctx.state !== 'running' || !tracks.length) return;
+    if (!deck.bg) { deck.bg = makeDeck(); deck.dance = makeDeck(); bgUntil = Date.now() + 6000; }
+    const now = Date.now(), bg = deck.bg, dn = deck.dance;
+    if (!bg) return;
+    // The dance piece comes in over everything while a dance is on.
+    const danceTrack = tracks.find((x) => x.mood === 'dance');
+    if (scene.dance && danceTrack && dn && !danceOn) { danceOn = true; play(dn, danceTrack, true); fade(dn, LEVEL.dance, 1.5); fade(bg, 0, 2); }
+    if (!scene.dance && danceOn) { danceOn = false; fade(dn, 0, 3); setTimeout(() => { if (!danceOn) dn.el.pause(); }, 4000); if (bgState === 'play') fade(bg, LEVEL[bgTrack && bgTrack.mood === 'night' ? 'night' : 'day'], 4); }
+    const mood = scene.dark ? 'night' : 'day';
+    if (bgState === 'gap' && now > bgUntil && !danceOn) {
+      bgTrack = pick(mood);
+      if (bgTrack && play(bg, bgTrack, false)) { lastFile = bgTrack.file; bgState = 'play'; bg.since = now; fade(bg, LEVEL[bgTrack.mood === 'night' ? 'night' : 'day'], 5); }
+      else bgUntil = now + 20000;
+    } else if (bgState === 'play') {
+      const el = bg.el, left = Number.isFinite(el.duration) ? el.duration - el.currentTime : 999;
+      const wrongMood = bgTrack && bgTrack.mood !== mood && tracks.some((x) => x.mood === mood) && now - bg.since > 45000;
+      if (left < 7 || wrongMood || el.ended || (bg.failed && bg.failed > bg.since)) { bgState = 'out'; bgUntil = now + (el.ended || bg.failed > bg.since ? 0 : 7000); fade(bg, 0, 6); }
+    } else if (bgState === 'out' && now > bgUntil) {
+      try { bg.el.pause(); } catch (e) { /* stopped already */ }
+      bgState = 'gap'; bgUntil = now + 35000 + Math.random() * 45000;        // a quiet stretch: just the island
+    }
+  }
+
   function start() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -104,6 +167,9 @@ export function createAudio() {
 
     scheduledTo = Date.now() + 100;
     timer = setInterval(scheduleMusic, 200);
+    // Recorded tracks, if the site has any: the players are made now, inside the click that started the sound.
+    if (tracks.length) { deck.bg = makeDeck(); deck.dance = makeDeck(); bgUntil = Date.now() + 6000; }
+    setInterval(runMusic, 500);
   }
 
   function crackle() {
@@ -158,7 +224,7 @@ export function createAudio() {
 
   // Schedule every musical event whose wall-clock time falls in the next stretch.
   function scheduleMusic() {
-    if (!ctx || ctx.state !== 'running') { scheduledTo = Date.now() + 100; return; }
+    if (!ctx || ctx.state !== 'running' || tracks.length) { scheduledTo = Date.now() + 100; return; }       // recorded tracks take the place of the generated loop
     const now = Date.now();
     if (scheduledTo < now) scheduledTo = now;
     const until = now + 700;
@@ -347,6 +413,12 @@ export function createAudio() {
       musicOn = v;
       if (ctx) musicBus.gain.setTargetAtTime(musicOn ? 0.55 : 0, ctx.currentTime, 0.3);
     },
+    // What the music should suit just now: night or day, and whether a dance is on.
+    setScene(dark, dance) { scene.dark = !!dark; scene.dance = !!dance; },
+    listReady,
+    get tracks() { return tracks; },
+    get credit() { return credit; },
+    get playing() { return { state: bgState, file: deck.bg ? deck.bg.file : '', dance: danceOn, paused: deck.bg ? deck.bg.el.paused : true, at: deck.bg ? deck.bg.el.currentTime : 0 }; },
     get soundOn() { return on; },
     get musicOn() { return musicOn; },
     get running() { return !!ctx && ctx.state === 'running'; },

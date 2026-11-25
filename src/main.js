@@ -962,7 +962,7 @@ function updateParty(dt) {
     // Your place in the ring: the dancers in a fixed order, evenly spaced, all turning together.
     const order = [myWireId(), ...ids].sort(), i = order.indexOf(myWireId());
     const slot = (i / order.length) * Math.PI * 2 + ((Date.now() - party) / 1000) * 0.5;
-    const rdt = Math.min(0.1, Math.max(0, (performance.now() - partyTick) / 1000)); partyTick = performance.now();
+    const rdt = Math.min(0.25, Math.max(0, (performance.now() - partyTick) / 1000)); partyTick = performance.now();
     const r = Math.hypot(me.x - FIRE.x, me.z - FIRE.z);
     lastInputAt = Date.now();
     if (partyPhase === 'walk') {
@@ -971,11 +971,11 @@ function updateParty(dt) {
     } else {
       // Then go round with the ring, catching up along it to your own place rather than jumping there.
       const gap = Math.atan2(Math.sin(slot - partyAng), Math.cos(slot - partyAng));
-      partyAng += 0.5 * rdt + clamp(gap, -0.45 * rdt, 0.9 * rdt);
+      partyAng += 0.5 * rdt + clamp(gap, -0.3 * rdt, 0.4 * rdt);        // never quite standing still, never sprinting
       const rr = lerp(r, PARTY_R, 1 - Math.exp(-rdt * 3));
       me.x = FIRE.x + Math.sin(partyAng) * rr; me.z = FIRE.z + Math.cos(partyAng) * rr;
       me.targetYaw = Math.atan2(Math.cos(partyAng), -Math.sin(partyAng));
-      me.speed = lerp(me.speed, PARTY_R * (0.5 + clamp(gap, -0.45, 0.9)), 0.2);
+      me.speed = lerp(me.speed, PARTY_R * (0.5 + clamp(gap, -0.3, 0.4)), 0.2);
       vel.x = vel.z = 0; moveTarget = null;
     }
     if (newBeat && beat % 2 === 0 && partyPhase === 'ring') playEmote('hop');
@@ -1286,6 +1286,14 @@ function openFeedback() {
   });
 }
 $('btn-feedback').addEventListener('click', () => { openFeedback(); });
+// Credit for the music, when the site has recorded tracks.
+audio.listReady.then((list) => {
+  const named = list.filter((x) => x.title);
+  if (!named.length && !audio.credit) return;
+  const el = $('music-credit');
+  el.textContent = named.length ? 'Music: ' + named.map((x) => (x.artist ? `"${x.title}" by ${x.artist}` : `"${x.title}"`)).join(', ') + '.' : audio.credit;
+  el.hidden = false;
+});
 // Another visitor: stop hearing them, or tell the keeper what they said.
 function openVisitor(id) {
   const p = peers.get(id);
@@ -2274,6 +2282,7 @@ function frame() {
   frame.players.push(me);
   for (const p of peers.values()) frame.players.push(p.av);
   critters.update(dt, t, { dark: skyNow.dark, rain: rainNow, players: frame.players, me });
+  audio.setScene(skyNow.dark > 0.55, !!seenParty && fireDist() < 30);
   audio.tick(dt, { fireDist: Math.hypot(camPos.x - FIRE.x, camPos.z - FIRE.z), shore: shoreProximity(me.x, me.z), heat: world.heat });
   if (entered) { updateActions(); pushPresence(false); }
   renderer.render(scene, camera);
@@ -2308,6 +2317,7 @@ window.__ember = {
   set tagTime(v) { tagTime = v; },
   get netId() { return net.id; },
   get mutedUntil() { return mutedUntil; },
+  audio,
   get country() { return COUNTRY; },
   setBoat(total, crew) { boatTotal = total; boatCrew = crew || boatCrew; yard.setProgress(total); },
   lookAtBoat, setOwnName,

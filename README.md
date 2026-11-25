@@ -30,7 +30,7 @@ As a Worker (the repo's `wrangler.jsonc` points it at `dist`):
 
 **Live visitors** (positions, chat, gestures), first that works:
 
-1. **The island's own room on Cloudflare** (`worker/index.js`, a Durable Object reached at `/room`). It relays what each visitor does to the others, and it keeps a queue: only so many animals fit ashore at once (`CAP` in `wrangler.jsonc`, 40 by default), and anyone arriving after that waits on the title screen and steps ashore when someone leaves. `/room/status` answers with a head count.
+1. **The island's own room on Cloudflare** (`worker/index.js`, a Durable Object reached at `/room`). It relays what each visitor does to the others, and it keeps a queue: only so many animals fit ashore at once (`CAP` in `wrangler.jsonc`, 40 by default), and anyone arriving after that waits on the title screen and steps ashore when someone leaves. `/room/status` is a small page showing how many are ashore and waiting (the numbers alone are at `/room/status.json`).
 2. **Supabase Realtime**, if the room cannot be reached. Fine for a handful of visitors; the free plan's message allowance runs out quickly with more.
 3. **This browser only**: tabs of the same browser see each other.
 

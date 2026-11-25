@@ -891,12 +891,18 @@ $('game-btn').addEventListener('click', () => { if (game) leaveTag(); else if (s
 // there are, and the keeper gets up and joins in. Like tag, there is no referee: each dancer says which dance they
 // are in (its number is the moment it began) and works out their own place in the ring from the list of dancers.
 const PARTY_MS = 60000, PARTY_R = 5.0, BEAT_MS = 800;
-let party = 0, seenParty = 0, partyBeat = -1, partyAlone = 0, partyJoinedAt = 0, partyLine = '', partyCalled = 0;
+let party = 0, seenParty = 0, partyBeat = -1, partyAlone = 0, partyJoinedAt = 0, partyLine = '', partyCalled = 0, partyPhase = 'ring', partyAng = 0, partyTick = 0;
+// Getting to the ring: a walked path from where you are, out between the logs, to the nearest point on it.
+function walkToRing() {
+  const dx = me.x - FIRE.x, dz = me.z - FIRE.z, d = Math.hypot(dx, dz) || 1;
+  moveTarget = findPath(me.x, me.z, FIRE.x + (dx / d) * PARTY_R, FIRE.z + (dz / d) * PARTY_R);
+  stuckFor = 0; partyPhase = 'walk'; partyTick = performance.now();
+}
 const restingAtFire = () => [...peers.values()].filter((p) => p.data.mode !== 'stand' && !p.data.asleep && Math.hypot(p.av.x - FIRE.x, p.av.z - FIRE.z) < 5.5);
 function startParty() {
   if (party || seenParty || game || !entered) return;
   party = Math.max(Date.now(), tagSeen + 1); partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
-  standUp(); setHeld(0);
+  standUp(); setHeld(0); walkToRing();
   flash('Dance!', 'Round the fire');
   addLog('', 'You started a dance at the fire. Anyone near can join in.', 'sys');
   audio.pop(760); world.flareUp();
@@ -907,7 +913,7 @@ function joinParty() {
   if (party || !seenParty || game || !entered) return;
   party = seenParty; partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
   if (me.mode !== 'stand') standUp();
-  setHeld(0);
+  setHeld(0); walkToRing();
   flash('You are in', 'Round the fire');
   audio.pop(700);
   net.note('dance');
@@ -946,7 +952,7 @@ function updateParty(dt) {
     partyAlone = ids.length ? 0 : partyAlone || Date.now();
     if (left <= 0) leaveParty('done');
     else if (asleepSince || !entered) leaveParty();
-    else if (partyAlone && Date.now() - partyAlone > 9000) leaveParty('alone');
+    else if (partyAlone && Date.now() - partyAlone > 25000) leaveParty("alone");      // time for others to notice and join
   }
   const on = !!g && left > 0 && entered;
   const n = ids.length + (party ? 1 : 0);
@@ -955,14 +961,24 @@ function updateParty(dt) {
   if (party) {
     // Your place in the ring: the dancers in a fixed order, evenly spaced, all turning together.
     const order = [myWireId(), ...ids].sort(), i = order.indexOf(myWireId());
-    const ang = (i / order.length) * Math.PI * 2 + ((Date.now() - party) / 1000) * 0.5;
-    // Eased in over the first second, then exactly on the ring whatever the frame rate.
-    const tx = FIRE.x + Math.sin(ang) * PARTY_R, tz = FIRE.z + Math.cos(ang) * PARTY_R, k = Math.min(1, (Date.now() - partyJoinedAt) / 1000) ** 2;
-    me.x = lerp(me.x, tx, k); me.z = lerp(me.z, tz, k);
-    me.targetYaw = Math.atan2(Math.cos(ang), -Math.sin(ang));
-    me.speed = lerp(me.speed, PARTY_R * 0.5, 0.2);
-    vel.x = vel.z = 0; moveTarget = null; world.hideMarker(); lastInputAt = Date.now();
-    if (newBeat && beat % 2 === 0) playEmote('hop');
+    const slot = (i / order.length) * Math.PI * 2 + ((Date.now() - party) / 1000) * 0.5;
+    const rdt = Math.min(0.1, Math.max(0, (performance.now() - partyTick) / 1000)); partyTick = performance.now();
+    const r = Math.hypot(me.x - FIRE.x, me.z - FIRE.z);
+    lastInputAt = Date.now();
+    if (partyPhase === 'walk') {
+      // First walk out between the logs to the ring, on your own feet.
+      if (!moveTarget || Math.abs(r - PARTY_R) < 0.45 || Date.now() - partyJoinedAt > 8000) { partyPhase = 'ring'; partyAng = Math.atan2(me.x - FIRE.x, me.z - FIRE.z); moveTarget = null; world.hideMarker(); }
+    } else {
+      // Then go round with the ring, catching up along it to your own place rather than jumping there.
+      const gap = Math.atan2(Math.sin(slot - partyAng), Math.cos(slot - partyAng));
+      partyAng += 0.5 * rdt + clamp(gap, -0.45 * rdt, 0.9 * rdt);
+      const rr = lerp(r, PARTY_R, 1 - Math.exp(-rdt * 3));
+      me.x = FIRE.x + Math.sin(partyAng) * rr; me.z = FIRE.z + Math.cos(partyAng) * rr;
+      me.targetYaw = Math.atan2(Math.cos(partyAng), -Math.sin(partyAng));
+      me.speed = lerp(me.speed, PARTY_R * (0.5 + clamp(gap, -0.45, 0.9)), 0.2);
+      vel.x = vel.z = 0; moveTarget = null;
+    }
+    if (newBeat && beat % 2 === 0 && partyPhase === 'ring') playEmote('hop');
   }
   if (newBeat) {
     partyBeat = beat;

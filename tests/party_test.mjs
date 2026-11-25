@@ -30,6 +30,10 @@ await act(b, 'by the fire');
 ok('with another animal resting there, a dance can be started', await until(a, () => window.__ember.actions[0] === 'Start a dance'), await acts(a));
 await a.evaluate(() => window.__ember.run(0));
 ok('starting it gets you up and dancing', await until(a, () => window.__ember.party > 0 && window.__ember.me.mode === 'stand'));
+// No jump: from the seat to the ring the animal covers the ground a step at a time.
+{ let prev = await a.evaluate(() => [window.__ember.me.x, window.__ember.me.z]), worst = 0, out = false;
+  for (let i = 0; i < 90 && !out; i++) { await a.waitForTimeout(150); const q = await a.evaluate(() => [window.__ember.me.x, window.__ember.me.z]); worst = Math.max(worst, Math.hypot(q[0] - prev[0], q[1] - prev[1])); prev = q; out = Math.abs(Math.hypot(q[0], q[1]) - 5) < 0.3; }
+  ok('it walks out to the ring rather than jumping there', out && worst < 1.6, 'largest move between looks ' + worst.toFixed(2) + ' m'); }
 ok('the other is told and offered a way in', await until(b, () => window.__ember.seenParty > 0 && window.__ember.actions[0] === 'Join the dance' && document.getElementById('flash-title').textContent.includes('started a dance')), await acts(b));
 await act(b, 'Join the dance');
 ok('joining puts both in the ring, on opposite sides of the fire', await until(a, () => { const e = window.__ember, p = [...e.peers.values()][0]; if (p.data.dance !== e.party) return false; const ra = Math.hypot(e.me.x, e.me.z), rb = Math.hypot(p.av.x, p.av.z), d = Math.hypot(e.me.x - p.av.x, e.me.z - p.av.z); return Math.abs(ra - 5) < 0.5 && Math.abs(rb - 5) < 0.7 && d > 8; }), JSON.stringify(await a.evaluate(() => { const e = window.__ember, p = [...e.peers.values()][0]; return [e.me.x, e.me.z, p.av.x, p.av.z].map((v) => +v.toFixed(1)); })));

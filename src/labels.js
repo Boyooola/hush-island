@@ -47,12 +47,47 @@ export function makeNameTag(name, sub, isYou) {
     ctx.strokeText(n, 256, 44);
     ctx.fillStyle = isYou ? '#ffc978' : '#f6ead2';
     ctx.fillText(n, 256, 44);
-    if (s) {
+    // The second line may begin with marks (§m muted, §z away, §i it), drawn as small signs before the words.
+    const marks = [];
+    let text = String(s || '');
+    for (let m = /^§([mzi])/.exec(text); m; m = /^§([mzi])/.exec(text)) { marks.push(m[1]); text = text.slice(2); }
+    text = text.trim();
+    if (text || marks.length) {
       ctx.font = `700 30px ${FONT}`;
       ctx.lineWidth = 6;
-      ctx.strokeText(s, 256, 98);
-      ctx.fillStyle = 'rgba(214,226,240,0.92)';
-      ctx.fillText(s, 256, 98);
+      const MW = { m: 40, z: 46, i: 44 }, gap = 10;
+      const tw = text ? ctx.measureText(text).width : 0;
+      const mw = marks.reduce((a, k) => a + MW[k] + gap, 0) - (text ? 0 : gap);
+      let x = 256 - (tw + mw) / 2;
+      for (const k of marks) {
+        const cx = x + MW[k] / 2, cy = 98;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(8,14,30,0.85)'; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        if (k === 'm') {
+          // A speaker, struck through.
+          const body = () => { ctx.beginPath(); ctx.moveTo(cx - 15, cy - 6); ctx.lineTo(cx - 7, cy - 6); ctx.lineTo(cx + 3, cy - 14); ctx.lineTo(cx + 3, cy + 14); ctx.lineTo(cx - 7, cy + 6); ctx.lineTo(cx - 15, cy + 6); ctx.closePath(); };
+          body(); ctx.lineWidth = 7; ctx.stroke(); ctx.fillStyle = '#ff8f7a'; ctx.fill();
+          const slash = () => { ctx.beginPath(); ctx.moveTo(cx - 16, cy + 15); ctx.lineTo(cx + 16, cy - 15); };
+          slash(); ctx.lineWidth = 10; ctx.stroke(); slash(); ctx.lineWidth = 4.5; ctx.strokeStyle = '#ff8f7a'; ctx.stroke();
+        } else if (k === 'z') {
+          ctx.textAlign = 'center'; ctx.font = `800 italic 30px ${FONT}`; ctx.lineWidth = 6;
+          ctx.strokeText('z', cx - 11, cy + 3); ctx.fillStyle = '#a9c8ff'; ctx.fillText('z', cx - 11, cy + 3);
+          ctx.font = `800 italic 22px ${FONT}`; ctx.strokeText('z', cx + 5, cy - 6); ctx.fillText('z', cx + 5, cy - 6);
+          ctx.font = `800 italic 16px ${FONT}`; ctx.strokeText('z', cx + 17, cy - 14); ctx.fillText('z', cx + 17, cy - 14);
+        } else {
+          ctx.textAlign = 'center'; ctx.font = `800 30px ${FONT}`; ctx.lineWidth = 6;
+          ctx.strokeText('it!', cx, cy); ctx.fillStyle = '#ffb04a'; ctx.fillText('it!', cx, cy);
+        }
+        ctx.restore();
+        x += MW[k] + gap;
+      }
+      if (text) {
+        ctx.textAlign = 'left';
+        ctx.strokeText(text, x, 98);
+        ctx.fillStyle = 'rgba(214,226,240,0.92)';
+        ctx.fillText(text, x, 98);
+        ctx.textAlign = 'center';
+      }
     }
     sprite.material.map.needsUpdate = true;
   };
@@ -236,9 +271,12 @@ export function makeSignTexture(title, sub) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fbe7c2';
-  ctx.font = `800 74px "Baloo 2", ${FONT}`;
+  // Each line is set as large as it can be and still fit the board.
+  let size = 74;
+  do { ctx.font = `800 ${size}px "Baloo 2", ${FONT}`; size -= 2; } while (size > 30 && ctx.measureText(title).width > 468);
   ctx.fillText(title, 256, 78);
-  ctx.font = `700 34px ${FONT}`;
+  size = 34;
+  do { ctx.font = `700 ${size}px ${FONT}`; size -= 1; } while (size > 18 && ctx.measureText(sub).width > 468);
   ctx.fillStyle = 'rgba(251,231,194,0.85)';
   ctx.fillText(sub, 256, 146);
   const tex = new THREE.CanvasTexture(canvas);

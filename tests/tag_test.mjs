@@ -28,7 +28,7 @@ await a.evaluate(() => window.__ember.run(1));
 ok('the one who starts is told to run', await has(a, 'a game of tag is on. Run!'));
 ok('the tagged one is told they are it', await has(b, 'tagged you. You are it!'));
 ok('and knows it', await until(b, () => window.__ember.it === 'me'));
-ok('the other sees who is it', await until(a, () => { const e = window.__ember; return e.it && e.it !== 'me' && e.peers.get(e.it) && e.peers.get(e.it).data.sub.startsWith('it!'); }));
+ok('the other sees who is it', await until(a, () => { const e = window.__ember; return e.it && e.it !== 'me' && e.peers.get(e.it) && /§i/.test(e.peers.get(e.it).av.sub); }));
 ok('the guide points the chaser at the runner', await until(b, () => window.__ember.goal && window.__ember.goal.text.startsWith('You are it. Catch')), JSON.stringify(await b.evaluate(() => window.__ember.goal)));
 ok('the starter cannot tag while someone else is it', !/Play tag|"Tag /.test(await acts(a)), await acts(a));
 await b.waitForTimeout(1200);

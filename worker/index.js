@@ -39,6 +39,7 @@ export class Island extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS tracks (at INTEGER PRIMARY KEY, x REAL, z REAL, s INTEGER, n TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS mutes (h TEXT PRIMARY KEY, until INTEGER, n INTEGER, at INTEGER, why TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS reports (at INTEGER PRIMARY KEY, tid TEXT, who TEXT, wh TEXT, by TEXT, note TEXT, lines TEXT, sure INTEGER)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS feedback (at INTEGER PRIMARY KEY, who TEXT, h TEXT, text TEXT)');
     this.said = new Map();        // socket -> the last few things it said, for reports; forgotten when the object sleeps
   }
 
@@ -48,6 +49,29 @@ export class Island extends DurableObject {
   today(k) { try { const r = this.sql.exec('SELECT n FROM tally WHERE day = ? AND k = ?', dayOf(Date.now()), k).toArray(); return r.length ? r[0].n : 0; } catch (e) { return 0; } }
   tracks() {
     try { return this.sql.exec('SELECT at, x, z, s, n FROM tracks WHERE at > ? ORDER BY at DESC LIMIT ?', Date.now() - TRACK_AGE, TRACKS_KEPT).toArray(); } catch (e) { return []; }
+  }
+  async hashOf(request) {
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    if (!ip) return '';
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(['hush-island', ip, request.headers.get('User-Agent') || '', request.headers.get('Accept-Language') || ''].join('|')));
+    return [...new Uint8Array(d)].slice(0, 9).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  // A note for the keeper from a visitor. A handful a day from any one visitor, and the newest thousand are kept.
+  async feedback(request) {
+    const json = (body, status) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    let m = null;
+    try { const raw = await request.text(); if (raw.length <= 4000) m = JSON.parse(raw); } catch (e) { m = null; }
+    const text = m && typeof m === 'object' ? clip(m.text, 600) : '';
+    if (text.length < 3) return json({ error: 'empty' }, 400);
+    const h = await this.hashOf(request), now = Date.now();
+    try {
+      const n = this.sql.exec('SELECT COUNT(*) AS n FROM feedback WHERE h = ? AND at > ?', h, now - 86400000).toArray()[0].n;
+      if (n >= 5) return json({ error: 'enough for today' }, 429);
+      this.sql.exec('INSERT OR REPLACE INTO feedback (at, who, h, text) VALUES (?, ?, ?, ?)', now, clip(m.name, 24), h, text);
+      this.sql.exec('DELETE FROM feedback WHERE at NOT IN (SELECT at FROM feedback ORDER BY at DESC LIMIT 1000)');
+      this.add('feedback');
+    } catch (e) { return json({ error: 'not kept' }, 500); }
+    return json({ ok: true }, 200);
   }
   // Mute a visitor: ten minutes the first time, an hour if it happens again within a day.
   mute(ws, a, why) {
@@ -83,7 +107,8 @@ export class Island extends DurableObject {
     const now = Date.now();
     const reports = this.sql.exec('SELECT at, who, note, lines, sure FROM reports ORDER BY at DESC LIMIT 200').toArray().map((r) => { let lines = []; try { lines = JSON.parse(r.lines); } catch (e) { lines = []; } return { at: r.at, who: r.who, note: r.note, lines, sure: !!r.sure }; });
     const mutes = this.sql.exec('SELECT until, n, why FROM mutes WHERE until > ? ORDER BY until DESC LIMIT 100', now).toArray();
-    return { reports, mutes };
+    const feedback = this.sql.exec('SELECT at, who, text FROM feedback ORDER BY at DESC LIMIT 300').toArray();
+    return { reports, mutes, feedback };
   }
   // Someone has left the island: count how long they stayed and whether they had company, and keep their tracks.
   departed(a) {
@@ -111,6 +136,7 @@ export class Island extends DurableObject {
 
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
+      if (new URL(request.url).pathname === '/room/feedback') return request.method === 'POST' ? this.feedback(request) : new Response('Feedback is sent from inside the game.', { status: 405 });
       if (new URL(request.url).pathname === '/room/reports.json') {
         // For the keeper of the island only: the key is a secret set on the Worker, sent in a header.
         const json = (body, status) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -129,11 +155,9 @@ export class Island extends DurableObject {
     this.ctx.acceptWebSocket(pair[1]);
     // A scrambled form of the visitor's address and browser, kept only so that a mute outlasts a reload. The
     // browser is part of it because many people can share one address (a household, a phone network).
-    const ip = request.headers.get('CF-Connecting-IP') || '';
-    let h = '', mu = 0, mn = 0;
-    if (ip) {
-      const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(['hush-island', ip, request.headers.get('User-Agent') || '', request.headers.get('Accept-Language') || ''].join('|')));
-      h = [...new Uint8Array(d)].slice(0, 9).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const h = await this.hashOf(request);
+    let mu = 0, mn = 0;
+    if (h) {
       try { const r = this.sql.exec('SELECT until, n FROM mutes WHERE h = ?', h).toArray(); if (r.length && r[0].until > Date.now()) { mu = r[0].until; mn = r[0].n; } } catch (e) { /* no mute known */ }
     }
     pair[1].serializeAttachment({ id: crypto.randomUUID().slice(0, 12), role: 'new', at: Date.now(), seen: Date.now(), h, mu, mn });
@@ -218,7 +242,7 @@ export class Island extends DurableObject {
     if (now - a.seen > 5000) {
       a.seen = now;
       // Now and then, note where a visitor is, so their tracks can be left where they were last.
-      if (m.t === 'p' && a.role === 'in' && m.p && Number.isFinite(m.p.x) && Number.isFinite(m.p.z)) { a.x = Math.round(m.p.x * 10) / 10; a.z = Math.round(m.p.z * 10) / 10; a.s = m.p.s | 0; a.n = typeof m.p.n === 'string' ? m.p.n.slice(0, 24) : ''; }
+      if (m.t === 'p' && a.role === 'in' && m.p && Number.isFinite(m.p.x) && Number.isFinite(m.p.z)) { a.x = Math.round(m.p.x * 10) / 10; a.z = Math.round(m.p.z * 10) / 10; a.s = m.p.s | 0; }
       ws.serializeAttachment(a);
     }
     if (m.t === 'join') {
@@ -234,7 +258,10 @@ export class Island extends DurableObject {
       // Remember since when a visitor says they have been asleep (never earlier than a day ago, never in the future).
       const zz = typeof m.p.zz === 'number' && m.p.zz > 0 ? Math.min(now, Math.max(now - 86400000, m.p.zz)) : 0;
       if ((zz > 0) !== ((a.zz || 0) > 0)) { a.zz = zz; ws.serializeAttachment(a); }
-      if (!a.n && typeof m.p.n === 'string') { a.n = clip(m.p.n, 24); ws.serializeAttachment(a); }
+      // Names are chosen by visitors, so they are held to the same words as talk. Each new name is judged once.
+      if (typeof m.p.n === 'string' && m.p.n !== a.n0) { a.n0 = m.p.n.slice(0, 40); a.nb = judge(a.n0) ? 1 : 0; a.n = a.nb ? 'Guest' : clip(a.n0, 24); ws.serializeAttachment(a); }
+      if (a.nb) m.p.n = 'Guest';
+      if (typeof m.p.t === 'string' && judge(m.p.t)) m.p.t = '';
       // What they say: nothing from the muted is passed on, and a message with words not said here is dropped
       // and mutes its sender (or, for milder words, is only dropped).
       if (Array.isArray(m.p.m)) {
@@ -398,11 +425,13 @@ const REPORTS_PAGE = `<!DOCTYPE html>
 <body>
 <main>
   <a class="home" href="/">Hush Island</a>
-  <h1>Reports</h1>
-  <p id="lead">What visitors have reported, newest first. Only the keeper of the island can read this.</p>
+  <h1>Reports and feedback</h1>
+  <p id="lead">What visitors have reported and what they have told you, newest first. Only the keeper of the island can read this.</p>
   <form id="door"><input id="key" type="password" autocomplete="off" placeholder="The keeper's key" aria-label="The keeper's key"><button type="submit">Open</button></form>
   <p id="state" class="quiet" role="status"></p>
   <div id="list"></div>
+  <h2 id="fb-head" hidden>Feedback</h2>
+  <div id="fb"></div>
   <h2 id="mutes-head" hidden>Muted now</h2>
   <div id="mutes"></div>
 </main>
@@ -434,6 +463,10 @@ const REPORTS_PAGE = `<!DOCTYPE html>
       if (!rp.lines.length) { const li = document.createElement('li'); li.textContent = 'No lines were attached.'; ul.append(li); }
       a.append(h, p, ul); list.append(a);
     }
+    el('fb-head').hidden = false;
+    const fb = el('fb'); fb.textContent = '';
+    if (!d.feedback.length) { const p = document.createElement('p'); p.className = 'quiet'; p.textContent = 'Nobody has left a note yet.'; fb.append(p); }
+    for (const f of d.feedback) { const a = document.createElement('article'), p = document.createElement('p'), q = document.createElement('p'); p.textContent = f.text; p.style.overflowWrap = 'anywhere'; q.className = 'quiet'; q.textContent = (f.who || 'A visitor') + ', ' + when(f.at); a.append(p, q); fb.append(a); }
     el('mutes-head').hidden = !d.mutes.length;
     const m = el('mutes'); m.textContent = '';
     for (const mu of d.mutes) { const p = document.createElement('p'); p.textContent = 'A visitor is muted ' + (WHY[mu.why] || '') + ' until ' + when(mu.until) + (mu.n > 1 ? ' (not the first time).' : '.'); m.append(p); }
@@ -595,6 +628,7 @@ const STATS_PAGE = `<!DOCTYPE html>
       ['Tracks sniffed at', sum('sniff'), ''],
       ['Mutes for bad language or reports', sum('muted'), ''],
       ['Reports made by visitors', sum('reports'), ''],
+      ['Notes left for the keeper', sum('feedback'), ''],
       ['Waited in line to get ashore', sum('queued'), ''],
       ['Left with the Leave button', sum('left'), ''],
       ['Carried out by the tide while away', sum('tide'), ''],
@@ -621,7 +655,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const room = () => env.ISLAND.get(env.ISLAND.idFromName('main')).fetch(request);
-    if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json') return room();
+    if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback') return room();
     if (url.pathname === '/room/reports' || url.pathname === '/room/reports/') return new Response(REPORTS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room/stats' || url.pathname === '/room/stats/') return new Response(STATS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room' || url.pathname === '/room/' || url.pathname === '/room/status' || url.pathname === '/room/status/') {

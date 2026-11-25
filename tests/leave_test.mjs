@@ -38,7 +38,7 @@ ok('back ashore as a different animal', await a.evaluate(() => document.body.cla
 await a.evaluate(() => { window.__ember.idleAfter = 1500; });
 await a.waitForTimeout(9500);
 const nap = await a.evaluate(() => ({ asleep: window.__ember.asleep, mode: window.__ember.me.mode, tag: window.__ember.me.sub }));
-ok('left alone, the animal lies down asleep and its tag says so', nap.asleep && nap.mode === 'lie' && nap.tag.startsWith('away'), JSON.stringify(nap));
+ok('left alone, the animal lies down asleep and its tag says so', nap.asleep && nap.mode === 'lie' && nap.tag.startsWith('§z'), JSON.stringify(nap));
 await a.screenshot({ path: '/home/claude/ember-isle/shots/lv3-asleep.png' });
 // Someone arrives while the island (room for one) is full.
 const b = await open();

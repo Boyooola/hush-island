@@ -73,10 +73,13 @@ const COUNTRY = countryName();
 let asleepSince = 0, lastInputAt = Date.now(), laidByNap = false, idleAfter = 120000;
 let mutedUntil = 0;                // until when the island will not pass on what you say
 const ignored = new Set();         // visitors you have chosen not to hear, until you leave
-const muteText = () => { const m = Math.ceil((mutedUntil - Date.now()) / 60000); return m <= 1 ? 'muted' : `muted, ${m} min`; };
 let itWho = null;                  // who is "it" in a game of tag: 'me', another visitor's id, or nobody
-const napText = () => { const m = Math.floor((Date.now() - asleepSince) / 60000); return m < 1 ? 'away' : `away, ${m} min`; };
-const mySub = () => (mutedUntil > Date.now() ? muteText() : asleepSince ? napText() : itWho === 'me' ? 'it! catch someone' : showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
+// The line under a name stays what it was (country and local time). Being muted, away or "it" adds a small sign
+// in front of it: §m, §z and §i are drawn as pictures by the name tag.
+const originText = () => (showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
+const withMarks = (muted, away, it, text) => `${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${String(text || '').replace(/§/g, '')}`;
+const mySub = () => withMarks(mutedUntil > Date.now(), !!asleepSince, itWho === 'me', originText());
+const peerSub = (id, data) => withMarks(data.muted > Date.now(), data.asleep, itWho === id, data.sub);
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -165,7 +168,7 @@ let warmth = 0, warmSaid = false, companySaid = false;   // how warmed through y
 let stargazing = false;
 let wet = 0, wetSaid = false;        // how soaked your coat is, 0 to 1
 let fishTonight = 0;
-let boatTotal = 0;
+let boatTotal = 0, boatCrew = [];
 let skyNow = { dark: 1 }, rainNow = 0, rainForce = null, raining = false;
 let hasButterfly = false, stillFor = 0, stoneFor = 0, stoneSaid = false;
 let treeList = null;
@@ -435,6 +438,7 @@ function addToBoat() {
     if (mate) net.note('duo');
     addLog('', mate
       ? `With ${mate.data.name} beside you, the driftwood counts twice. ${Math.min(BOAT_GOAL, boatTotal + 2)} of ${BOAT_GOAL} planks.`
+      : boatTotal >= BOAT_GOAL ? 'The boat is built, so your driftwood goes into the stores for the first voyage. Your name is on her all the same.'
       : `Your driftwood is part of the boat now. ${Math.min(BOAT_GOAL, boatTotal + 1)} of ${BOAT_GOAL} planks.${peers.size ? ' It counts twice when another animal is beside you.' : ''}`, 'sys');
     did('wood');
   }, 300);
@@ -448,8 +452,21 @@ function sniffTracks(tr) {
   if (!sniffTracks.seen) sniffTracks.seen = new Set();
   if (!sniffTracks.seen.has(tr.at)) { sniffTracks.seen.add(tr.at); net.note('sniff'); }
 }
+// The boat and the names of everyone who put a plank on it.
 function lookAtBoat() {
-  addLog('', boatTotal >= BOAT_GOAL ? 'The hull is planked. The keeper says it sails soon, to the next island.' : `The keeper is building a boat for the next island. ${boatTotal} of ${BOAT_GOAL} planks so far. Driftwood washes up on the beaches, and it counts twice when another animal is beside you.`, 'sys');
+  const built = boatTotal >= BOAT_GOAL;
+  const crew = boatCrew.slice(0, 40).map((c) => ({ text: c.name, meta: c.n === 1 ? '1 plank' : `${c.n} planks` }));
+  const more = boatCrew.length > 40 ? [{ text: `and ${boatCrew.length - 40} more` }] : [];
+  openSheet({
+    title: built ? 'The boat is built' : 'The keeper\'s boat',
+    lines: [
+      { text: built
+        ? `All ${BOAT_GOAL} planks are on. This boat will carry animals to the other islands. The voyages are still under construction, so for now she waits on the beach.`
+        : `${boatTotal} of ${BOAT_GOAL} planks so far. When she is built she will carry animals to the other islands. Driftwood washes up on the beaches, and it counts twice with another animal beside you.` },
+      ...(crew.length ? [{ text: built ? 'Built by' : 'Built so far by', kind: 'head' }, ...crew, ...more] : [{ text: 'Nobody has added a plank yet. Yours could be the first.' }]),
+    ],
+    note: built ? 'More driftwood still helps: it goes into the stores for the first voyage.' : '',
+  });
 }
 
 // Fish: watch the shadows from the end of the dock and bring a paw down when one passes underneath.
@@ -554,7 +571,7 @@ function updateTag() {
   }
   let who = myIt && (!myTag || myIt > myTag[1]) ? 'me' : null, at = who ? myIt : 0;
   for (const [id, p] of peers) if (p.data.it > p.data.tagAt && p.data.it > at && !p.data.asleep) { who = id; at = p.data.it; }
-  if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); pushPresence(true); }
+  if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); for (const [id, p] of peers) p.av.setName(p.data.name, peerSub(id, p.data)); pushPresence(true); }
   if (who) { gameOn = true; noItSince = 0; }
   else if (gameOn) {
     // Between a tag and the tagged animal saying so, nobody is it for a moment. Only a longer gap ends the game.
@@ -648,7 +665,7 @@ function addLog(name, text, kind, peerId) {
     const b = document.createElement('b');
     b.textContent = name;
     // Another visitor's name can be pressed, to stop hearing them or report them.
-    if (peerId) { b.className = 'who'; b.tabIndex = 0; b.setAttribute('role', 'button'); b.title = 'Stop hearing or report'; b.onclick = () => openVisitor(peerId); b.onkeydown = (e) => { if (e.key === 'Enter') openVisitor(peerId); }; }
+    if (peerId) { b.className = 'whom'; b.tabIndex = 0; b.setAttribute('role', 'button'); b.title = 'Stop hearing or report'; b.onclick = () => openVisitor(peerId); b.onkeydown = (e) => { if (e.key === 'Enter') openVisitor(peerId); }; }
     row.appendChild(b);
     row.appendChild(document.createTextNode(' ' + text));
   } else {
@@ -670,6 +687,22 @@ function setMuted(until, why) {
   pushPresence(true);
 }
 { const m = store('ember.mute'); if (Number.isFinite(m) && m > Date.now()) mutedUntil = Math.min(m, Date.now() + 3600000); }
+// A note for whoever looks after the island.
+function openFeedback() {
+  openSheet({
+    title: 'Tell the keeper',
+    lines: [{ text: 'What did you like? What was confusing, broken or missing? Whoever looks after the island reads every note.' }],
+    input: { free: true, max: 500, placeholder: 'Your note', button: 'Send it', submit: async (text) => {
+      if (text.length < 3) { $('sheet-note').textContent = 'Write a few words first.'; return; }
+      let status = 0;
+      try { status = (await fetch('/room/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, name: me.name }) })).status; } catch (e) { status = 0; }
+      if (status === 200) { closeSheet(); addLog('', 'Your note is with the keeper. Thank you.', 'sys'); }
+      else $('sheet-note').textContent = status === 429 ? 'That is plenty for one day, thank you. Come back tomorrow with more.' : 'That did not go through. Try again in a moment.';
+    } },
+    note: 'No name or address is attached, only the animal you are today.',
+  });
+}
+$('btn-feedback').addEventListener('click', () => { openFeedback(); });
 // Another visitor: stop hearing them, or tell the keeper what they said.
 function openVisitor(id) {
   const p = peers.get(id);
@@ -678,7 +711,7 @@ function openVisitor(id) {
   openSheet({
     title: name,
     lines: (p.lines && p.lines.length ? p.lines.map((x) => ({ text: `"${x}"` })) : [{ text: 'Nothing said since you have been near.' }]),
-    input: p.reported ? null : { max: 200, placeholder: 'What happened? (optional)', button: `Report ${name}`, submit: async (note) => {
+    input: p.reported ? null : { free: true, max: 200, placeholder: 'What happened? (optional)', button: `Report ${name}`, submit: async (note) => {
       const sent = net.report(id, p.lines || [], note);
       p.reported = true; ignored.add(id);
       closeSheet();
@@ -688,8 +721,8 @@ function openVisitor(id) {
     note: p.reported ? 'You have reported this animal.' : 'A report sends the keeper the last things this animal said. Animals reported by several others are muted.',
   });
 }
-function tidyMessage(text) {
-  return text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/(https?:\/\/|www\.)\S+/gi, '[link removed]').replace(/\s+/g, ' ').trim().slice(0, 200);
+function tidyMessage(text, max = 200) {
+  return text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/(https?:\/\/|www\.)\S+/gi, '[link removed]').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 function sendChat(raw) {
   const text = tidyMessage(raw);
@@ -729,7 +762,7 @@ function playEmote(name) {
 // ---------- other people ----------
 function presenceState() {
   return {
-    v: 1, n: me.name, s: me.species, c: me.palette, t: mySub(),
+    v: 1, n: me.name, s: me.species, c: me.palette, t: originText(),
     x: Math.round(me.x * 100) / 100, z: Math.round(me.z * 100) / 100, r: Math.round(me.targetYaw * 100) / 100,
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
@@ -761,7 +794,7 @@ const net = createNet({
       p.data = data;
       heardTag(id, p, data);
       p.av.setLook(data.species, data.palette);
-      p.av.setName(data.name, data.muted > Date.now() ? 'muted' : data.sub);
+      p.av.setName(data.name, peerSub(id, data));
       p.av.mode = data.mode;
       p.av.stargaze = data.gaze;
       if (data.say && data.say.id !== p.sayId) {
@@ -827,9 +860,9 @@ updateCount();
 
 // ---------- what the island remembers ----------
 const saved = createStore();
-saved.watchBoat((total) => { boatTotal = total; yard.setProgress(total); });
+saved.watchBoat((total, state, crew) => { boatTotal = total; if (crew) boatCrew = crew; else if (total && !boatCrew.length) boatCrew = [{ name: me.name, n: total }]; yard.setProgress(total); });
 const sheet = $('sheet');
-let sheetSubmit = null, stopCarvings = null;
+let sheetSubmit = null, stopCarvings = null, sheetFree = false;
 function closeSheet() {
   sheet.hidden = true;
   sheetSubmit = null;
@@ -848,7 +881,7 @@ function openSheet({ title, lines = [], input = null, extra = null, note = '' })
     box.maxLength = input.max;
     box.placeholder = input.placeholder;
     $('sheet-send').textContent = input.button;
-    sheetSubmit = input.submit;
+    sheetSubmit = input.submit; sheetFree = !!input.free;
   } else sheetSubmit = null;
   const ex = $('sheet-extra');
   ex.hidden = !extra;
@@ -883,8 +916,8 @@ $('sheet-form').addEventListener('submit', async (e) => {
   const box = $('sheet-input'), btn = $('sheet-send');
   btn.disabled = true;
   // Marks on the wall and notes in bottles are held to the same words as talk.
-  if (judge(box.value) && !$('sheet-send').textContent.startsWith('Report ')) { $('sheet-note').textContent = 'Those words are not left on this island. Try it another way.'; btn.disabled = false; return; }
-  try { await sheetSubmit(tidyMessage(box.value)); } finally { btn.disabled = false; }
+  if (judge(box.value) && !sheetFree) { $('sheet-note').textContent = 'Those words are not left on this island. Try it another way.'; btn.disabled = false; return; }
+  try { await sheetSubmit(tidyMessage(box.value, Math.max(200, box.maxLength || 0))); } finally { btn.disabled = false; }
 });
 $('sheet-close').addEventListener('click', closeSheet);
 
@@ -1167,7 +1200,7 @@ function drawPicker() {
 }
 function pickLook(species, palette) {
   const word = identity.name.split(' ')[0];
-  identity = { species, palette, name: `${word} ${SPECIES[species].label}` };
+  identity = identity.own ? { ...identity, species, palette } : { species, palette, name: `${word} ${SPECIES[species].label}` };
   showIdentity();
   me.play('hop');
 }
@@ -1175,8 +1208,28 @@ drawPicker();
 $('reroll').addEventListener('click', () => {
   let word = identity.name.split(' ')[0];
   for (let k = 0; k < 8 && word === identity.name.split(' ')[0]; k++) word = NAME_WORDS[Math.floor(Math.random() * NAME_WORDS.length)];
-  identity = { ...identity, name: `${word} ${SPECIES[identity.species].label}` };
+  identity = { species: identity.species, palette: identity.palette, name: `${word} ${SPECIES[identity.species].label}` };
   showIdentity();
+  $('name-form').hidden = true;
+});
+// A name of your own: letters, numbers and spaces, held to the same words as talk.
+const TAKEN = /^(the )?(keeper|clover|island keeper|admin|moderator|mod|guest|a visitor)$/i;
+function setOwnName(raw) {
+  const name = String(raw || '').normalize('NFKC').replace(/[^\p{L}\p{N} '\-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 20);
+  if (name.length < 2) return 'A name needs at least two letters.';
+  if (judge(name)) return 'Not that one. Try another name.';
+  if (TAKEN.test(name)) return 'That name belongs to someone on the island already.';
+  identity = { ...identity, name, own: true };
+  showIdentity();
+  if (entered) { store('ember.identity', identity); pushPresence(true); }
+  return '';
+}
+$('rename').addEventListener('click', () => { const f = $('name-form'); f.hidden = !f.hidden; $('name-note').textContent = ''; if (!f.hidden) { $('name-input').value = identity.own ? identity.name : ''; $('name-input').focus(); } });
+$('name-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const problem = setOwnName($('name-input').value);
+  $('name-note').textContent = problem;
+  if (!problem) { $('name-form').hidden = true; me.play('wag'); }
 });
 // Stepping ashore asks the island for a place. If it is full you wait in line, on the title screen,
 // and step ashore by yourself when your turn comes.
@@ -1626,6 +1679,8 @@ window.__ember = {
   set tagTime(v) { tagTime = v; },
   get netId() { return net.id; },
   get mutedUntil() { return mutedUntil; },
+  setBoat(total, crew) { boatTotal = total; boatCrew = crew || boatCrew; yard.setProgress(total); },
+  lookAtBoat, setOwnName,
   openVisitor, ignored,
   get room() { return `${net.mode} ${net.status}`; },
   get log() { return [...document.querySelectorAll('#log > *')].map((e) => e.textContent); },

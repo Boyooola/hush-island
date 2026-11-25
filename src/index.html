@@ -83,6 +83,12 @@
     color: var(--amber); text-shadow: 0 0 34px rgba(255, 140, 60, 0.45); text-wrap: balance;
   }
   .card p { margin: 0; color: var(--ink); font-size: 17px; max-width: 34ch; }
+  .namers { display: flex; gap: 4px 16px; flex-wrap: wrap; }
+  #name-form { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; }
+  #name-form[hidden] { display: none; }
+  #name-input { flex: 1 1 180px; min-width: 0; font: inherit; color: var(--ink); background: rgba(5, 9, 20, 0.45); border: 0; border-bottom: 1.5px solid rgba(246, 234, 210, 0.45); padding: 6px 2px; }
+  #name-input:focus-visible { outline: none; border-bottom-color: var(--amber); }
+  #name-note { flex: 1 1 100%; font-size: 14px; color: var(--amber); min-height: 0; }
   .who { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); }
   .who small { display: block; color: var(--ink-quiet); font-size: 13px; }
   .who strong { font-family: var(--display); font-size: 24px; font-weight: 800; line-height: 1.1; }
@@ -197,8 +203,8 @@
     user-select: text; -webkit-user-select: text;
   }
   #log .line { transition: opacity 3s ease; overflow-wrap: anywhere; }
-  #log b.who { pointer-events: auto; cursor: pointer; text-decoration: underline; text-decoration-color: rgba(246, 234, 210, 0.35); text-underline-offset: 3px; }
-  #log b.who:hover, #log b.who:focus-visible { color: var(--amber); outline: none; text-decoration-color: var(--amber); }
+  #log b.whom { pointer-events: auto; cursor: pointer; text-decoration: underline; text-decoration-color: rgba(246, 234, 210, 0.35); text-underline-offset: 3px; }
+  #log b.whom:hover, #log b.whom:focus-visible { color: var(--amber); outline: none; text-decoration-color: var(--amber); }
   #log .line.old { opacity: 0.38; }
   #log .line b { color: var(--amber); font-weight: 800; }
   #log .line.you b { color: var(--sea); }
@@ -276,6 +282,7 @@
   #sheet-body .row { display: flex; flex-direction: column; gap: 1px; }
   #sheet-body .row .text { font-size: 18px; overflow-wrap: anywhere; }
   #sheet-body .row .meta { font-size: 13px; color: var(--paper-quiet); }
+  #sheet-body .row.head .text { font-size: 14px; font-weight: 800; color: var(--paper-quiet); margin-top: 8px; }
   #sheet-body .row.quiet .text { font-size: 15px; color: var(--paper-quiet); font-style: italic; }
   #sheet-form { display: flex; gap: 12px; align-items: baseline; }
   #sheet-form[hidden] { display: none; }
@@ -339,8 +346,13 @@
     <p>Somewhere quiet. Sit by the fire, fish off the dock, howl at the stars, and help build the boat with whoever else is here.</p>
     <div class="who">
       <div><small>You arrive as</small><strong id="who-name">Sleepy Otter</strong></div>
-      <button class="ghost" id="reroll" type="button">Another name</button>
+      <div class="namers"><button class="ghost" id="reroll" type="button">Another name</button><button class="ghost" id="rename" type="button">Choose my own</button></div>
     </div>
+    <form id="name-form" autocomplete="off" hidden>
+      <input id="name-input" name="name-input" type="text" maxlength="20" placeholder="Your name on the island" aria-label="Your name on the island">
+      <button class="ghost" type="submit">Use it</button>
+      <div id="name-note" role="status"></div>
+    </form>
     <div id="picker">
       <div class="pick" id="pick-animal" role="group" aria-label="Choose your animal"></div>
       <div class="pick coats" id="pick-coat" role="group" aria-label="Choose your coat"></div>
@@ -358,6 +370,7 @@
     <button class="chip" id="btn-music" type="button" aria-pressed="true">Music on</button>
     <button class="chip" id="btn-sound" type="button" aria-pressed="true">Sound on</button>
     <button class="chip" id="btn-help" type="button" aria-pressed="false">Help</button>
+    <button class="chip" id="btn-feedback" type="button">Feedback</button>
     <button class="chip" id="btn-leave" type="button">Leave</button>
   </div>
 </div>

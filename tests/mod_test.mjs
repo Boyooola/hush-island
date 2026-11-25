@@ -29,7 +29,7 @@ const aName = await a.evaluate(() => window.__ember.me.name);
 await say(a, 'hello there');
 ok('ordinary talk is heard', await has(b, 'hello there'));
 // Stop hearing, and hear again.
-await b.click('#log b.who');
+await b.click('#log b.whom');
 ok('pressing a name opens that visitor', (await b.evaluate(() => document.getElementById('sheet-title').textContent)) === aName && (await b.evaluate(() => document.getElementById('sheet').innerText)).includes('hello there'));
 await b.screenshot({ path: '/home/claude/ember-isle/shots/m1-visitor.png' });
 await b.click('#sheet-extra'); await say(a, 'second line');
@@ -39,9 +39,9 @@ ok('and they can be heard again', await has(b, 'third line'));
 // Words not said here.
 await say(a, 'wanna fuck?');
 ok('the sender is told and muted', await has(a, 'That is not said on this island. You are muted for 10 minutes') && (await a.evaluate(() => window.__ember.mutedUntil)) > Date.now());
-ok('their own tag says muted', (await a.evaluate(() => window.__ember.me.sub)).startsWith('muted'), await a.evaluate(() => window.__ember.me.sub));
+ok('their own tag says muted', /^§m/.test(await a.evaluate(() => window.__ember.me.sub)) && (await a.evaluate(() => window.__ember.me.sub)).includes('·'), await a.evaluate(() => window.__ember.me.sub));
 ok('the words reach nobody', !(await has(b, 'wanna', 3000)));
-ok('others see them as muted', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return p.data.muted > Date.now() && p.av.sub === 'muted'; }));
+ok('others see them as muted', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return p.data.muted > Date.now() && /^§m.+·/.test(p.av.sub); }));
 await b.evaluate(() => window.__ember.cam(0.4, 0.3, 4.5)); await b.waitForTimeout(1200);
 await b.screenshot({ path: '/home/claude/ember-isle/shots/m2-muted.png' });
 await say(a, 'hello?');
@@ -58,7 +58,7 @@ ok('the keeper gets the report with the lines the island heard', d.reports.lengt
 // A reload does not lift the mute.
 await a.evaluate(() => localStorage.removeItem('ember.mute'));
 await enter(a, 0);
-ok('reloading, even with the browser\'s memory wiped, does not lift the mute', (await a.evaluate(() => window.__ember.mutedUntil)) > Date.now() && (await a.evaluate(() => window.__ember.me.sub)).startsWith('muted'), await a.evaluate(() => window.__ember.me.sub));
+ok('reloading, even with the browser\'s memory wiped, does not lift the mute', (await a.evaluate(() => window.__ember.mutedUntil)) > Date.now() && /^§m/.test(await a.evaluate(() => window.__ember.me.sub)), await a.evaluate(() => window.__ember.me.sub));
 // The keeper's page.
 const pg = await (await browser.newContext({ viewport: { width: 900, height: 900 } })).newPage();
 await pg.route((u) => new URL(u).hostname !== 'localhost', (r) => r.abort());

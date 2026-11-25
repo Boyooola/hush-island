@@ -1,0 +1,48 @@
+// A name of your own, the signs on name tags, and the finished boat.
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
+const errs = [];
+const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+const open = async (ua) => { const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: ua }); await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort()); const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(1500); await p.evaluate(() => localStorage.setItem('ember.starter', '4')); await p.reload(); await p.waitForTimeout(2500); await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; }); return p; };
+const until = async (p, fn, ms = 25000, arg) => { const end = Date.now() + ms; while (Date.now() < end) { if (await p.evaluate(fn, arg)) return true; await p.waitForTimeout(400); } return false; };
+const a = await open('ua-a');
+await a.click('#rename');
+const tryName = async (v) => { await a.fill('#name-input', v); await a.click('#name-form button'); await a.waitForTimeout(300); return a.evaluate(() => ({ note: document.getElementById('name-note').textContent, name: window.__ember.identity.name })); };
+let r = await tryName('f u c k face');
+ok('a foul name is refused', r.note.includes('Not that one') && !/f u c k/.test(r.name), JSON.stringify(r));
+r = await tryName('The Keeper');
+ok('the keeper\'s name is taken', r.note.includes('belongs to someone'), JSON.stringify(r));
+r = await tryName('  Adrian <b>!!  ');
+ok('a name of your own is kept, tidied', r.name === 'Adrian b' && r.note === '' && (await a.evaluate(() => document.getElementById('who-name').textContent)) === 'Adrian b', JSON.stringify(r));
+await a.click('#rename'); r = await tryName('Adrian');
+await a.screenshot({ path: '/home/claude/ember-isle/shots/n1-name.png' });
+await a.click('#pick-animal button:nth-child(2)'); await a.waitForTimeout(400);
+ok('changing animal keeps your own name', (await a.evaluate(() => window.__ember.identity.name)) === 'Adrian');
+await a.click('#enter'); await a.waitForTimeout(4500);
+await a.evaluate(() => { const e = window.__ember; e.setHour(12); e.setRain(0); });
+const b = await open('ua-b'); await b.click('#enter'); await b.waitForTimeout(4500);
+await b.evaluate(() => { const e = window.__ember; e.setHour(12); e.setRain(0); });
+ok('others see the chosen name', await until(b, () => [...window.__ember.peers.values()].some((p) => p.data.name === 'Adrian')));
+// Signs beside the country and time.
+await a.evaluate(() => window.__ember.teleport(2, 15, Math.PI / 2)); await b.evaluate(() => { const e = window.__ember; e.teleport(4.2, 15, 0); e.cam(1.2, 0.25, 4.2); });
+await a.evaluate(() => { window.__ember.idleAfter = 1; }); await a.waitForTimeout(6000);
+ok('away keeps the country and time, with a sign in front', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return /^§z.+·/.test(p.av.sub); }), await b.evaluate(() => [...window.__ember.peers.values()][0].av.sub));
+await b.waitForTimeout(1500); await b.screenshot({ path: '/home/claude/ember-isle/shots/n2-away.png' });
+await a.evaluate(() => { window.__ember.idleAfter = 3600000; }); await a.mouse.click(640, 300); await a.waitForTimeout(800);
+await a.evaluate(() => window.__ember.sendChat('wanna fuck?'));
+ok('muted keeps them too', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return /^§m[^§]+·/.test(p.av.sub); }), await b.evaluate(() => [...window.__ember.peers.values()][0].av.sub));
+await b.waitForTimeout(1500); await b.screenshot({ path: '/home/claude/ember-isle/shots/n3-muted.png' });
+// The boat.
+const site = await b.evaluate(() => { const y = window.__ember.yard.site; return [y.x, y.z]; });
+await b.evaluate((q) => { const e = window.__ember; e.teleport(q[0] + 3.2, q[1] + 2.6); e.setBoat(64, [{ name: 'Adrian', n: 40 }, { name: 'Misty Husky', n: 24 }]); e.cam(-2.2, 0.3, 9); }, site);
+await b.waitForTimeout(1200); await b.evaluate(() => window.__ember.lookAtBoat()); await b.waitForTimeout(400);
+let txt = await b.evaluate(() => document.getElementById('sheet').innerText);
+ok('a boat half built lists who has built it so far', txt.includes('64 of 120') && txt.includes('Built so far by') && txt.includes('Adrian') && txt.includes('40 planks'), txt.slice(0, 120).replace(/\n+/g, ' / '));
+await b.evaluate(() => { const e = window.__ember; e.closeSheet(); e.setBoat(126, [{ name: 'Adrian', n: 61 }, { name: 'Misty Husky', n: 38 }, { name: 'Easy Stag', n: 26 }, { name: 'Shy Fox', n: 1 }]); });
+await b.waitForTimeout(1500); await b.screenshot({ path: '/home/claude/ember-isle/shots/n4-boat.png' });
+await b.evaluate(() => window.__ember.lookAtBoat()); await b.waitForTimeout(400);
+txt = await b.evaluate(() => document.getElementById('sheet').innerText);
+ok('a finished boat says so, names its builders, and says the voyages are under construction', txt.includes('The boat is built') && txt.includes('under construction') && txt.includes('Built by') && txt.includes('Shy Fox') && txt.includes('1 plank'), txt.slice(0, 160).replace(/\n+/g, ' / '));
+await b.screenshot({ path: '/home/claude/ember-isle/shots/n5-boat-sheet.png' });
+console.log(errs.length ? 'page errors: ' + errs.join(' | ') : 'no page errors');
+await browser.close();

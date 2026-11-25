@@ -3,6 +3,14 @@
 import { clamp } from './terrain.js';
 import { use, mode } from './backend.js';
 import { PLAYABLE } from './avatar.js';
+import { judge } from './words.js';
+
+// Names are chosen by visitors now, so they are held to the same words as talk. Checked once per name.
+const nameOk = new Map();
+function fairName(n) {
+  if (!nameOk.has(n)) { if (nameOk.size > 500) nameOk.clear(); nameOk.set(n, !judge(n)); }
+  return nameOk.get(n) ? n : 'Guest';
+}
 
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '').trim().slice(0, max);
 const num = (v, lo, hi, d = 0) => (Number.isFinite(v) ? clamp(v, lo, hi) : d);
@@ -13,8 +21,8 @@ export function parsePeer(p) {
   const say = Array.isArray(s.m) ? { text: clean(s.m[0], 200), id: num(s.m[1], 0, 1e15) } : null;
   const emote = Array.isArray(s.e) ? { name: clean(s.e[0], 12), id: num(s.e[1], 0, 1e15) } : null;
   return {
-    name: clean(s.n, 22) || 'Guest',
-    sub: clean(s.t, 28),
+    name: fairName(clean(s.n, 22) || 'Guest'),
+    sub: fairName(clean(s.t, 28)) === 'Guest' ? '' : clean(s.t, 28),
     species: Math.floor(num(s.s, 0, PLAYABLE - 1)),
     palette: Math.floor(num(s.c, 0, 8)),
     x: num(s.x, -70, 70),

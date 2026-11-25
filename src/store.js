@@ -181,10 +181,19 @@ export function createStore() {
     ready.then(() => {
       if (!db) { cb(mine(), 'off'); return; }
       try {
-        db.collection('boat').orderBy('at', 'desc').limit(500).onSnapshot((snap) => {
+        db.collection('boat').orderBy('at', 'desc').limit(1000).onSnapshot((snap) => {
+          // The total, and who it came from: every name with the planks given under it, most first.
           let total = 0;
-          for (const d of snap.docs) { const n = Number((d.data() || {}).n); if (Number.isFinite(n)) total += Math.max(0, Math.min(5, Math.floor(n))); }
-          cb(total, 'ok');
+          const by = new Map();
+          for (const d of snap.docs) {
+            const rec = d.data() || {}, n = Number(rec.n);
+            if (!Number.isFinite(n)) continue;
+            const k = Math.max(0, Math.min(5, Math.floor(n)));
+            total += k;
+            const name = clean(rec.name, 22) || 'A visitor';
+            by.set(name, (by.get(name) || 0) + k);
+          }
+          cb(total, 'ok', [...by.entries()].map(([name, n]) => ({ name, n })).sort((p, q) => q.n - p.n));
         }, () => cb(mine(), 'off'));
       } catch (e) { cb(mine(), 'off'); }
     });

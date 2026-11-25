@@ -69,6 +69,19 @@ export function buildSite(scene) {
   lamp.scale.setScalar(1.5); lamp.position.set(3.4, 1.75, 1.9); g.add(lamp);
   const lampLight = new THREE.PointLight(0xffc27a, 6, 9, 1.8); lampLight.position.set(3.4, 1.7, 2.0); g.add(lampLight);
 
+  // Finished: a mast, a furled sail on its yard, two thwarts and a pennant. Hidden until the last plank is on.
+  const rig = new THREE.Group();
+  const sailMat = new THREE.MeshStandardMaterial({ color: 0xefe6d2, roughness: 1, flatShading: true, side: THREE.DoubleSide, emissive: 0xefe6d2, emissiveIntensity: 0.1 });
+  const mast = box(0.13, 3.4, 0.13, frameMat); mast.position.set(0.2, 0.42 + 1.7, 0); rig.add(mast);
+  const yardArm = box(0.09, 0.09, 2.3, frameMat); yardArm.position.set(0.2, 3.25, 0); rig.add(yardArm);
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 1.9, 3, 2), sailMat);
+  { const p = sail.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin((p.getX(i) / 2.1 + 0.5) * Math.PI) * 0.22 * (0.4 + (0.5 - p.getY(i) / 1.9))); sail.geometry.computeVertexNormals(); }
+  sail.rotation.y = Math.PI / 2; sail.position.set(0.24, 2.25, 0); sail.castShadow = true; rig.add(sail);
+  for (const x of [-1.1, 1.2]) { const t = box(0.22, 0.06, 2 * half(x) * 0.9, paleMat); t.position.set(x, 0.42 + 0.62, 0); rig.add(t); }
+  const pennant = new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -0.26, 0, 0.62, -0.13, 0], 3)), new THREE.MeshBasicMaterial({ color: 0xff9d4d, side: THREE.DoubleSide }));
+  pennant.position.set(0.2, 3.82, 0); rig.add(pennant);
+  rig.visible = false; g.add(rig);
+
   // Keep walkers out of the hull.
   g.updateMatrixWorld(true);
   for (const x of [-2, -1, 0, 1, 2]) { const v = new THREE.Vector3(x, 0, 0).applyMatrix4(g.matrixWorld); colliders.push({ x: v.x, z: v.z, r: 0.85 }); }
@@ -119,10 +132,11 @@ export function buildSite(scene) {
     setProgress(total) {
       const n = Math.min(planks.length, Math.round((Math.min(total, BOAT_GOAL) / BOAT_GOAL) * planks.length));
       planks.forEach((p, i) => { p.visible = i < n; });
+      rig.visible = total >= BOAT_GOAL;
       if (total !== shown) {
         shown = total;
         signMat.map.dispose();
-        signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'Nearly ready' : 'Being built', `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);
+        signMat.map = makeSignTexture(total >= BOAT_GOAL ? 'The boat is built' : 'Being built', total >= BOAT_GOAL ? 'Voyages: under construction' : `${Math.min(total, BOAT_GOAL)} of ${BOAT_GOAL} planks`);
         signMat.needsUpdate = true;
       }
     },

@@ -113,7 +113,12 @@ const STATUS_PAGE = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Who is on Hush Island</title>
-<link rel="icon" href="data:,">
+<meta name="description" content="How many animals are on Hush Island right now, and whether there is a line.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#050a1e">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&amp;family=Nunito:wght@600;700&amp;display=swap" rel="stylesheet">

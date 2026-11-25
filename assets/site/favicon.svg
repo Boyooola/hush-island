@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#070d24"/><stop offset="0.62" stop-color="#12264d"/><stop offset="1" stop-color="#1b3562"/></linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.62" r="0.5"><stop offset="0" stop-color="#ff9d4d" stop-opacity="0.55"/><stop offset="1" stop-color="#ff9d4d" stop-opacity="0"/></radialGradient>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd27a"/><stop offset="1" stop-color="#ff8a3c"/></linearGradient>
+    <clipPath id="shape"><rect width="512" height="512" rx="116"/></clipPath>
+  </defs>
+  <g clip-path="url(#shape)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <circle cx="256" cy="318" r="230" fill="url(#glow)"/>
+    <circle cx="118" cy="112" r="7" fill="#fff6dc"/><circle cx="398" cy="150" r="5" fill="#fff6dc"/><circle cx="352" cy="76" r="4" fill="#fff6dc" opacity="0.8"/><circle cx="170" cy="196" r="3.5" fill="#fff6dc" opacity="0.7"/>
+    <!-- the sea, and the island rising out of it -->
+    <rect y="408" width="512" height="104" fill="#16406a"/>
+    <path d="M52 420 C 120 330, 392 330, 460 420 Z" fill="#1d5a40"/>
+    <path d="M52 420 C 120 396, 392 396, 460 420 Z" fill="#d9c48f"/>
+    <!-- the fire -->
+    <path d="M256 118 C 292 186, 344 226, 344 294 A 88 88 0 0 1 168 294 C 168 246, 206 232, 222 186 C 236 206, 246 170, 256 118 Z" fill="url(#flame)"/>
+    <path d="M256 232 C 276 262, 298 280, 298 310 A 42 42 0 0 1 214 310 C 214 282, 240 270, 256 232 Z" fill="#fff3c8"/>
+    <rect x="186" y="366" width="140" height="22" rx="11" fill="#4a3424" transform="rotate(-9 256 377)"/>
+    <rect x="186" y="366" width="140" height="22" rx="11" fill="#5e4430" transform="rotate(9 256 377)"/>
+  </g>
+</svg>

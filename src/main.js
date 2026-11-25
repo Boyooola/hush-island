@@ -13,6 +13,8 @@ import { createStore, todayKey } from './store.js';
 import { buildLife, showerState } from './life.js';
 import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
+import { buildTraces } from './traces.js';
+import { judge } from './words.js';
 
 const $ = (id) => document.getElementById(id);
 const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -69,8 +71,12 @@ if (!identity || !SPECIES[identity.species] || SPECIES[identity.species].npc || 
 let showOrigin = store('ember.origin') !== false;
 const COUNTRY = countryName();
 let asleepSince = 0, lastInputAt = Date.now(), laidByNap = false, idleAfter = 120000;
+let mutedUntil = 0;                // until when the island will not pass on what you say
+const ignored = new Set();         // visitors you have chosen not to hear, until you leave
+const muteText = () => { const m = Math.ceil((mutedUntil - Date.now()) / 60000); return m <= 1 ? 'muted' : `muted, ${m} min`; };
+let itWho = null;                  // who is "it" in a game of tag: 'me', another visitor's id, or nobody
 const napText = () => { const m = Math.floor((Date.now() - asleepSince) / 60000); return m < 1 ? 'away' : `away, ${m} min`; };
-const mySub = () => (asleepSince ? napText() : showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
+const mySub = () => (mutedUntil > Date.now() ? muteText() : asleepSince ? napText() : itWho === 'me' ? 'it! catch someone' : showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -95,6 +101,7 @@ const world = buildWorld(scene, { pixelRatio: PR });
 const life = buildLife(scene, world);
 const yard = buildSite(scene);
 const critters = buildCritters(scene, world);
+const traces = buildTraces(scene, groundHeight, (x, z) => world.surface(x, z));
 // A soft light that travels with the camera, so whoever you look at is readable.
 const viewLight = new THREE.DirectionalLight(0xd6dcf2, 0.28);
 camera.add(viewLight);
@@ -120,7 +127,6 @@ scene.add(me.group);
 me.onStep = (left) => {
   const surf = world.surface(me.x, me.z);
   audio.step(surf, 1);
-  if (surf === 'sand') world.footprint(me.x, me.z, me.yaw, left);
   if (surf === 'water') world.ripple(me.x, me.z);
 };
 
@@ -155,7 +161,7 @@ let mySeat = -1;
 let sayMsg = null, emoteMsg = null;
 let lastSayAt = 0;
 let held = 0;
-let warmth = 0, warmSaid = false;   // how warmed through you are, 0 to 1
+let warmth = 0, warmSaid = false, companySaid = false;   // how warmed through you are, 0 to 1
 let stargazing = false;
 let wet = 0, wetSaid = false;        // how soaked your coat is, 0 to 1
 let fishTonight = 0;
@@ -311,6 +317,7 @@ const TASK_WHERE = {
 };
 let goal = null;
 function findGoal() {
+  if (itWho === 'me') { const q = taggable(999); return { text: q ? 'You are it. Catch another animal and tag it' : 'You are it. Everyone is resting, so wait for someone to get up', at: q ? q.p.av : me, step: '' }; }
   if (starterAt < STARTER.length) return { text: STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
@@ -338,6 +345,7 @@ function updateGuide(now) {
     if (starterAt < STARTER.length && STARTER[starterAt].done()) {
       starterAt++;
       store('ember.starter', starterAt);
+      net.note('g' + starterAt);
       audio.pop(560);
       if (starterAt >= STARTER.length) addLog('', 'That is how the island works. From here the keeper has three small jobs a day. The next one is at the top of the screen.', 'sys');
     }
@@ -402,6 +410,12 @@ function did(id) {
   addPlanks(2);
   if (!left) setTimeout(() => playEmote('hop'), 800);
 }
+// The nearest visitor who is awake and within reach, if there is one.
+function companion(reach) {
+  let best = null, bd = reach;
+  for (const p of peers.values()) { if (p.data.asleep) continue; const d = Math.hypot(p.av.x - me.x, p.av.z - me.z); if (d < bd) { bd = d; best = p; } }
+  return best;
+}
 function addPlanks(n) {
   saved.addPlanks(n, me.name).then((r) => { if (r === 'local') { boatTotal += n; yard.setProgress(boatTotal); } });
 }
@@ -415,13 +429,27 @@ function addToBoat() {
   playEmote('throw');
   setTimeout(() => {
     setHeld(0); audio.step('wood', 1.4); pushPresence(true);
-    addPlanks(1);
-    addLog('', `Your driftwood is part of the boat now. ${Math.min(BOAT_GOAL, boatTotal + 1)} of ${BOAT_GOAL} planks.`, 'sys');
+    // Many paws: with another animal beside you, the driftwood counts twice.
+    const mate = companion(8);
+    addPlanks(mate ? 2 : 1);
+    if (mate) net.note('duo');
+    addLog('', mate
+      ? `With ${mate.data.name} beside you, the driftwood counts twice. ${Math.min(BOAT_GOAL, boatTotal + 2)} of ${BOAT_GOAL} planks.`
+      : `Your driftwood is part of the boat now. ${Math.min(BOAT_GOAL, boatTotal + 1)} of ${BOAT_GOAL} planks.${peers.size ? ' It counts twice when another animal is beside you.' : ''}`, 'sys');
     did('wood');
   }, 300);
 }
+// Tracks left by an earlier visitor: nose over them to learn who it was.
+function sniffTracks(tr) {
+  me.targetYaw = Math.atan2(tr.x - me.x, tr.z - me.z);
+  playEmote('sniff');
+  const kind = SPECIES[tr.s] ? SPECIES[tr.s].label.toLowerCase() : 'animal';
+  setTimeout(() => addLog('', tr.n ? `${tr.n} was here ${ago(tr.at)}.` : `A ${kind} was here ${ago(tr.at)}.`, 'sys'), 600);
+  if (!sniffTracks.seen) sniffTracks.seen = new Set();
+  if (!sniffTracks.seen.has(tr.at)) { sniffTracks.seen.add(tr.at); net.note('sniff'); }
+}
 function lookAtBoat() {
-  addLog('', boatTotal >= BOAT_GOAL ? 'The hull is planked. The keeper says it sails soon, to the next island.' : `The keeper is building a boat for the next island. ${boatTotal} of ${BOAT_GOAL} planks so far. Driftwood washes up on the beaches.`, 'sys');
+  addLog('', boatTotal >= BOAT_GOAL ? 'The hull is planked. The keeper says it sails soon, to the next island.' : `The keeper is building a boat for the next island. ${boatTotal} of ${BOAT_GOAL} planks so far. Driftwood washes up on the beaches, and it counts twice when another animal is beside you.`, 'sys');
 }
 
 // Fish: watch the shadows from the end of the dock and bring a paw down when one passes underneath.
@@ -460,12 +488,145 @@ function giveFish() {
 }
 
 // Calls: each animal has its own voice, and it carries.
+// ---------- tag ----------
+// Whoever is "it" chases the others and passes it on with a touch. Nobody keeps score and nothing is at stake.
+// There is no referee: each animal says when it was last made it, and whom it last tagged and when. The one whose
+// "made it" is the newest, and newer than its own last tag, is it. Animals resting or away cannot be tagged.
+const TAG_REACH = 2.6, TAG_GRACE = 3;
+let tagTime = 75;                    // seconds someone stays it before the game lapses
+let myIt = 0, myItAt = -99, myTag = null, tagSeen = 0;
+let noItSince = 0, gameOn = false, lapseSaid = false;
+const nowSec = () => performance.now() / 1000;
+function taggable(reach) {
+  let best = null, bd = reach;
+  for (const [id, p] of peers) {
+    if (p.data.mode !== 'stand' || p.data.asleep) continue;
+    const d = Math.hypot(p.av.x - me.x, p.av.z - me.z);
+    if (d < bd) { bd = d; best = { id, p }; }
+  }
+  return best;
+}
+function tagPeer(id) {
+  const p = peers.get(id);
+  if (!p || !entered) return;
+  // A stamp later than any seen so far, so the order of tags is the same for everyone whatever their clocks say.
+  let at = Math.max(Date.now(), myIt + 1, tagSeen + 1, myTag ? myTag[1] + 1 : 0);
+  for (const q of peers.values()) at = Math.max(at, q.data.it + 1, q.data.tagAt + 1);
+  const starting = itWho !== 'me';
+  me.targetYaw = Math.atan2(p.av.x - me.x, p.av.z - me.z);
+  playEmote('paw'); audio.pop(700);
+  myTag = [id, at]; myIt = 0; tagSeen = at;
+  addLog('', starting ? `You tagged ${p.data.name}, and a game of tag is on. Run!` : `You tagged ${p.data.name}. Run!`, 'sys');
+  net.note('tag');
+  pushPresence(true);
+}
+// Called with every update from another visitor: has this one just tagged somebody?
+function heardTag(id, p, data) {
+  if (!(data.tagAt > (p.tagAt || 0))) return;
+  p.tagAt = data.tagAt;
+  if (data.tagAt > Date.now() + 60000 || data.tagAt <= tagSeen) return;      // a stamp from the future, or old news
+  tagSeen = data.tagAt;
+  if (!entered) return;
+  if (data.tagTo === net.id) {
+    if (asleepSince || me.mode !== 'stand') return;       // resting and away animals are out of the game
+    myIt = data.tagAt; myItAt = nowSec();
+    addLog('', `${data.name} tagged you. You are it! Catch another animal.`, 'sys');
+    audio.pop(480);
+    if (!me.emote) playEmote('hop');
+    me.setName(me.name, mySub());
+    pushPresence(true);
+  } else {
+    const q = peers.get(data.tagTo);
+    if (q) addLog('', `${data.name} tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
+  }
+}
+const itMarker = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xffb04a, fog: false, toneMapped: false }));
+itMarker.rotation.x = Math.PI; itMarker.visible = false; scene.add(itMarker);
+function updateTag() {
+  const now = nowSec();
+  if (myIt) {
+    let lapsed = now - myItAt > tagTime || asleepSince || !entered;
+    for (const p of peers.values()) if (p.data.it > myIt && p.data.it > p.data.tagAt) lapsed = true;        // someone was made it after you
+    if (lapsed) {
+      if (now - myItAt > tagTime && entered) { lapseSaid = true; addLog('', 'Nobody was caught, so the game of tag is over.', 'sys'); }
+      myIt = 0; pushPresence(true);
+    }
+  }
+  let who = myIt && (!myTag || myIt > myTag[1]) ? 'me' : null, at = who ? myIt : 0;
+  for (const [id, p] of peers) if (p.data.it > p.data.tagAt && p.data.it > at && !p.data.asleep) { who = id; at = p.data.it; }
+  if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); pushPresence(true); }
+  if (who) { gameOn = true; noItSince = 0; }
+  else if (gameOn) {
+    // Between a tag and the tagged animal saying so, nobody is it for a moment. Only a longer gap ends the game.
+    if (!noItSince) noItSince = now;
+    else if (now - noItSince > 4) { gameOn = false; noItSince = 0; if (entered && !lapseSaid) addLog('', 'The game of tag is over.', 'sys'); lapseSaid = false; }
+  }
+  const av = who === 'me' ? me : who ? peers.get(who).av : null;
+  itMarker.visible = !!av && entered && av.group.visible !== false;
+  if (itMarker.visible) {
+    const sp = SPECIES[who === 'me' ? me.species : peers.get(who).data.species];
+    itMarker.position.set(av.x, av.y + (av.tag ? av.tag.position.y : sp.height * 1.3) + 0.5 + Math.sin(t * 5) * 0.06, av.z);
+    itMarker.rotation.y = t * 2.4;
+  }
+}
+
+// Calling and answering. A call you hear can be answered for a few seconds; a call nobody answers is picked up
+// by the owl or Clover if they are near, and otherwise by the keeper, so no call falls flat.
+let answerTo = null;                 // the call you could answer now: { name, until }
+let myCallOpen = -99, answeredBy = new Set();
+let lonely = null;                   // the latest call no other animal has answered yet: { at, mine, by }
+let keeperCallLogAt = -99;
+const ripples = [];
+function ripple(x, z, reach, color) {
+  let r = ripples.find((k) => !k.mesh.visible);
+  if (!r) {
+    if (ripples.length >= 8) return;
+    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 48), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+    mesh.rotation.x = -Math.PI / 2; mesh.renderOrder = 2; scene.add(mesh);
+    r = { mesh }; ripples.push(r);
+  }
+  r.at = t; r.reach = reach; r.mesh.material.color.set(color);
+  r.mesh.position.set(x, Math.max(groundHeight(x, z), 0) + 0.12, z); r.mesh.visible = true;
+}
+function updateCalls() {
+  for (const r of ripples) {
+    if (!r.mesh.visible) continue;
+    const k = (t - r.at) / 1.6;
+    if (k >= 1) { r.mesh.visible = false; continue; }
+    r.mesh.scale.setScalar(0.4 + r.reach * (1 - (1 - k) * (1 - k)));
+    r.mesh.material.opacity = 0.5 * (1 - k);
+  }
+  if (answerTo && t > answerTo.until) answerTo = null;
+  if (lonely && t - lonely.at > 2.6) {
+    const mine = lonely.mine; lonely = null;
+    if (!entered) return;
+    keeper.play('call');
+    audio.call('bellow', Math.max(0.1, hearFrom(keeper.x, keeper.z, 55)) * 0.75);
+    ripple(keeper.x, keeper.z, 5, 0xffc978);
+    if (mine && t - keeperCallLogAt > 40) { keeperCallLogAt = t; addLog('', 'By the fire, the keeper lifts his head and answers you.', 'sys'); }
+  }
+}
+// Every call on the island passes through here: yours (by = null) and everyone else's.
+function noteCall(by, x, z) {
+  const mine = by === null;
+  ripple(x, z, mine ? 6 : 5, 0xfff1d6);
+  const taken = critters.heard(x, z, skyNow.dark);
+  if (lonely && lonely.by !== by) lonely = null;                 // another animal spoke up: that call was answered
+  else lonely = taken ? null : { at: t, mine, by };
+}
 function callOut() {
   if (t - lastCallAt < 2.8) return;
   lastCallAt = t;
   audio.call(SPECIES[me.species].call, 1);
   playEmote('call');
-  critters.heard(me.x, me.z, skyNow.dark);
+  const answering = answerTo && t < answerTo.until ? answerTo : null;
+  noteCall(null, me.x, me.z);
+  if (answering) {
+    answerTo = null; lonely = null;
+    addLog('', `You answer ${answering.name}.`, 'sys');
+    ripple(me.x, me.z, 9, 0xffc978);
+    net.note('answer');
+  } else { myCallOpen = t; answeredBy = new Set(); }
   if (stargazing) { life.meteor(emoteMsg[1] % 100000); did('hill'); }      // call at the sky from the hill and a star answers
 }
 // Greeting: a dip of the head and a wagging tail.
@@ -480,12 +641,14 @@ function greet(av, name) {
 
 // ---------- chat ----------
 const logEl = $('log');
-function addLog(name, text, kind) {
+function addLog(name, text, kind, peerId) {
   const row = document.createElement('div');
   row.className = 'line' + (kind ? ' ' + kind : '');
   if (name) {
     const b = document.createElement('b');
     b.textContent = name;
+    // Another visitor's name can be pressed, to stop hearing them or report them.
+    if (peerId) { b.className = 'who'; b.tabIndex = 0; b.setAttribute('role', 'button'); b.title = 'Stop hearing or report'; b.onclick = () => openVisitor(peerId); b.onkeydown = (e) => { if (e.key === 'Enter') openVisitor(peerId); }; }
     row.appendChild(b);
     row.appendChild(document.createTextNode(' ' + text));
   } else {
@@ -494,6 +657,36 @@ function addLog(name, text, kind) {
   logEl.appendChild(row);
   while (logEl.children.length > 7) logEl.removeChild(logEl.firstChild);
   setTimeout(() => row.classList.add('old'), 14000);
+}
+// Muted: what you type is not passed on for a while. The island decides for how long; without it, ten minutes.
+function setMuted(until, why) {
+  const was = mutedUntil > Date.now();
+  mutedUntil = Math.max(mutedUntil, until);
+  store('ember.mute', mutedUntil);
+  if (!was) addLog('', why === 'reports'
+    ? `Several animals reported you, so you are muted for ${Math.ceil((mutedUntil - Date.now()) / 60000)} minutes. You can still walk, call and play.`
+    : `That is not said on this island. You are muted for ${Math.ceil((mutedUntil - Date.now()) / 60000)} minutes. You can still walk, call and play.`, 'sys');
+  me.setName(me.name, mySub());
+  pushPresence(true);
+}
+{ const m = store('ember.mute'); if (Number.isFinite(m) && m > Date.now()) mutedUntil = Math.min(m, Date.now() + 3600000); }
+// Another visitor: stop hearing them, or tell the keeper what they said.
+function openVisitor(id) {
+  const p = peers.get(id);
+  if (!p) return;
+  const name = p.data.name, deaf = ignored.has(id);
+  openSheet({
+    title: name,
+    lines: (p.lines && p.lines.length ? p.lines.map((x) => ({ text: `"${x}"` })) : [{ text: 'Nothing said since you have been near.' }]),
+    input: p.reported ? null : { max: 200, placeholder: 'What happened? (optional)', button: `Report ${name}`, submit: async (note) => {
+      const sent = net.report(id, p.lines || [], note);
+      p.reported = true; ignored.add(id);
+      closeSheet();
+      addLog('', sent ? `Thank you. The keeper will read your report about ${name}, and you will not hear them again this visit.` : `You will not hear ${name} again this visit.`, 'sys');
+    } },
+    extra: { label: deaf ? `Hear ${name} again` : `Stop hearing ${name}`, run: () => { if (deaf) ignored.delete(id); else ignored.add(id); closeSheet(); addLog('', deaf ? `You can hear ${name} again.` : `You will not hear ${name} until you leave. They are not told.`, 'sys'); } },
+    note: p.reported ? 'You have reported this animal.' : 'A report sends the keeper the last things this animal said. Animals reported by several others are muted.',
+  });
 }
 function tidyMessage(text) {
   return text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/(https?:\/\/|www\.)\S+/gi, '[link removed]').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -504,6 +697,10 @@ function sendChat(raw) {
   const now = performance.now();
   if (now - lastSayAt < 900) return;
   lastSayAt = now;
+  if (mutedUntil > Date.now()) { addLog('', `You are muted, so nobody would hear that. ${Math.ceil((mutedUntil - Date.now()) / 60000)} more minutes. Everything else on the island still works.`, 'sys'); return; }
+  const verdict = judge(text);
+  if (verdict === 'mute') { net.selfMute(); setMuted(Date.now() + 600000, 'words'); return; }
+  if (verdict === 'soft') { addLog('', 'Gently, please. That one was not sent.', 'sys'); return; }
   me.say(text);
   speaker = { av: me, until: t + 5 };
   addLog(me.name, text, 'you');
@@ -537,10 +734,12 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
+    it: myIt, tg: myTag, mu: mutedUntil > Date.now() ? mutedUntil : 0,
   };
 }
 const net = createNet({
   onStatus() { updateCount(); },
+  onMod(m) { if (m.muted) setMuted(m.muted, m.why); else if (m.soft) addLog('', 'Gently, please. That one was not passed on.', 'sys'); },
   onPeers(list) {
     const seen = new Set();
     for (const { id, data } of list) {
@@ -553,21 +752,25 @@ const net = createNet({
         av.onStep = (left) => {
           const surf = world.surface(av.x, av.z);
           audio.step(surf, 0.6 * clamp(1 - Math.hypot(av.x - me.x, av.z - me.z) / 11, 0, 1));
-          if (surf === 'sand') world.footprint(av.x, av.z, av.yaw, left);
           if (surf === 'water') world.ripple(av.x, av.z);
         };
-        p = { av, data, sayId: data.say ? data.say.id : 0, emoteId: data.emote ? data.emote.id : 0, fade: 1 };
+        p = { av, data, sayId: data.say ? data.say.id : 0, emoteId: data.emote ? data.emote.id : 0, fade: 1, tagAt: data.tagAt };
         peers.set(id, p);
         if (entered) addLog('', `${data.name} came ashore.`, 'sys');
       }
       p.data = data;
+      heardTag(id, p, data);
       p.av.setLook(data.species, data.palette);
-      p.av.setName(data.name, data.sub);
+      p.av.setName(data.name, data.muted > Date.now() ? 'muted' : data.sub);
       p.av.mode = data.mode;
       p.av.stargaze = data.gaze;
       if (data.say && data.say.id !== p.sayId) {
         p.sayId = data.say.id;
-        if (p.fade > 0.05) { p.av.say(data.say.text); speaker = { av: p.av, until: t + 5 }; addLog(data.name, data.say.text); audio.blip(700); }
+        // Not shown: anything from the muted or from someone you chose not to hear, and words that slipped past.
+        if (p.fade > 0.05 && !ignored.has(id) && !(data.muted > Date.now()) && !judge(data.say.text)) {
+          p.av.say(data.say.text); speaker = { av: p.av, until: t + 5 }; addLog(data.name, data.say.text, '', id); audio.blip(700);
+          p.lines = (p.lines || []).concat(data.say.text).slice(-5);
+        }
       }
       if (data.emote && data.emote.id !== p.emoteId) {
         p.emoteId = data.emote.id;
@@ -577,11 +780,20 @@ const net = createNet({
         if (name === 'shake' && data.wet > 0.15) life.shakeOff(p.av.x, p.av.y + SPECIES[data.species].height * 0.6, p.av.z, SPECIES[data.species].height);
         if (name === 'paw' && p.av.x > DOCK.x1 - 1.8) setTimeout(() => life.splash(life.fishingSpot.x, p.av.z * 0.5, false), 420);
         if (name === 'call' && data.gaze) life.meteor(data.emote.id % 100000);
-        if (name === 'call') critters.heard(p.av.x, p.av.z, skyNow.dark);
+        if (name === 'call') noteCall(id, p.av.x, p.av.z);
         if (name === 'call' && entered) {
           const sp = SPECIES[data.species], reach = sp.call === 'howl' || sp.call === 'bellow' || sp.call === 'bray' ? 45 : 24;
           audio.call(sp.call, clamp(1 - dist / reach, 0, 1) * 0.9);
-          if (dist > 12 && dist < reach) addLog('', `Somewhere on the island, ${data.name} ${sp.calls}.`, 'sys');
+          if (dist < reach && t - myCallOpen < 7) {
+            // You called a moment ago, and this is your answer.
+            if (!answeredBy.has(id)) { answeredBy.add(id); addLog('', `${data.name} answers your call.`, 'sys'); ripple(p.av.x, p.av.z, 9, 0xffc978); }
+          } else if (dist < reach && !asleepSince) {
+            answerTo = { name: data.name, until: t + 7 };
+            if (dist > 12) addLog('', `Somewhere on the island, ${data.name} ${sp.calls}. You could answer.`, 'sys');
+          }
+        }
+        if (name === 'throw' && entered && !asleepSince && dist < 8 && Math.hypot(p.av.x - yard.site.x, p.av.z - yard.site.z) < 4.2 && data.held === 3) {
+          addLog('', `You kept ${data.name} company at the boat, so their driftwood counted twice.`, 'sys');
         }
         if (name === 'greet' && entered && dist < 2.4 && me.mode === 'stand') {
           addLog('', `${data.name} greets you.`, 'sys');
@@ -670,6 +882,8 @@ $('sheet-form').addEventListener('submit', async (e) => {
   if (!sheetSubmit) return;
   const box = $('sheet-input'), btn = $('sheet-send');
   btn.disabled = true;
+  // Marks on the wall and notes in bottles are held to the same words as talk.
+  if (judge(box.value) && !$('sheet-send').textContent.startsWith('Report ')) { $('sheet-note').textContent = 'Those words are not left on this island. Try it another way.'; btn.disabled = false; return; }
   try { await sheetSubmit(tidyMessage(box.value)); } finally { btn.disabled = false; }
 });
 $('sheet-close').addEventListener('click', closeSheet);
@@ -975,18 +1189,23 @@ $('enter').addEventListener('click', () => {
   $('enter').hidden = true; $('picker').hidden = true;
   $('queue').hidden = false;
   $('queue-text').textContent = 'Finding you a place by the fire…';
+  // What kind of visit this is, for the island's daily totals: first today, first ever, and how far along the guide.
+  const utcDay = new Date().toISOString().slice(0, 10);
+  const info = { first: store('ember.day') !== utcDay ? 1 : 0, fresh: store('ember.been') ? 0 : 1, step: starterAt };
   net.join((q) => {
-    if (q.state === 'in') { comeAshore(); return; }
+    if (q.state === 'in') { store('ember.day', utcDay); store('ember.been', true); comeAshore(q); return; }
     if (q.state === 'out') { leaveIsland('tide'); return; }
     if (entered) return;
     $('queue-text').textContent = q.pos === 1 ? 'The island is full. You are next in line.' : `The island is full. You are ${nth(q.pos)} in line.`;
     $('queue-note').textContent = 'Leave this open. You will step ashore as soon as someone leaves.';
-  });
+  }, info);
 });
 // Back to the title screen. Your place is given up, and you can choose again and step ashore when you like.
 function leaveIsland(why) {
   const was = entered;
   entered = false; asking = false;
+  if (was && why === 'left') net.note('left');
+  myIt = 0; myTag = null; itWho = null; ignored.clear();
   if (was || why !== 'tide') net.leave();
   wake(false);
   setMode('stand'); setHeld(0);
@@ -1025,7 +1244,7 @@ setInterval(() => {
   if (asleepSince) { me.setName(me.name, mySub()); pushPresence(true); }
 }, 4000);
 
-function comeAshore() {
+function comeAshore(q = {}) {
   if (entered) return;
   entered = true;
   lastInputAt = Date.now();
@@ -1035,6 +1254,14 @@ function comeAshore() {
   document.body.classList.add('playing');
   me.targetYaw = Math.PI;      // turn to face the fire
   addLog('', 'You came ashore. The fire is straight ahead.', 'sys');
+  // Signs of the others: how many have been here today, and whose tracks are still on the ground.
+  if (q.mu > Date.now()) { mutedUntil = Math.max(mutedUntil, q.mu); me.setName(me.name, mySub()); }
+  const laid = traces.setLeft(q.tracks, (sp) => !!(SPECIES[sp] && SPECIES[sp].hoof), (sp) => (SPECIES[sp] ? SPECIES[sp].height : 1));
+  if (Number.isFinite(q.today)) {
+    const others = Math.max(0, q.today - 1);
+    const line = others === 0 ? 'You are the first animal ashore today.' : others === 1 ? 'One other animal has been here today.' : `${others} other animals have been here today.`;
+    setTimeout(() => addLog('', !laid ? line : others ? `${line} Some of their tracks are still on the ground.` : `${line} Tracks from earlier visitors are still on the ground.`, 'sys'), 2500);
+  }
   pushPresence(true);
   canvas.focus();
   // If nobody here already knows how the fire is doing, your view of it becomes the shared one.
@@ -1077,6 +1304,8 @@ function updateActions() {
     const drift = yard.near(me.x, me.z);
     if (drift >= 0) opts.push({ label: 'Pick up the driftwood', run: () => pickUpDriftwood(drift) });
     if (Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) opts.push({ label: 'Look over the boat', run: lookAtBoat });
+    const tr = traces.near(me.x, me.z);
+    if (tr && !who && drift < 0) opts.push({ label: 'Sniff at the tracks', run: () => sniffTracks(tr) });
     const mn = life.meadowNear(me.x, me.z);
     if (mn.flying && mn.dist < 3.6 && !hasButterfly) opts.push({ label: 'Pounce at the butterflies', run: () => { me.targetYaw = Math.atan2(mn.meadow.x - me.x, mn.meadow.z - me.z); playEmote('hop'); setTimeout(() => life.startle(mn.meadow), 350); } });
     if (Math.hypot(life.stone.x - me.x, life.stone.z - me.z) < 2.2) opts.push({ label: skyNow.dark < 0.4 && rainNow < 0.2 ? 'Lie on the warm stone' : 'Lie on the stone', run: () => { me.x = life.stone.x; me.z = life.stone.z; setMode('lie'); pushPresence(true); } });
@@ -1088,6 +1317,17 @@ function updateActions() {
     main = opts[0] || null;
     alt = opts[1] && opts[1].side ? opts[1] : null;
   }
+  // Tag: whoever is it tags the nearest animal on its feet. With no game on, anyone close can be asked to play.
+  if (me.mode === 'stand') {
+    const q = taggable(TAG_REACH);
+    if (q && itWho === 'me' && nowSec() - myItAt > TAG_GRACE) { if (!alt && main) alt = main; main = { label: `Tag ${q.p.data.name}`, run: () => tagPeer(q.id) }; }
+    else if (q && !itWho && !held) {
+      const play = { label: `Play tag with ${q.p.data.name}`, run: () => tagPeer(q.id) };
+      if (!main) main = play; else if (!alt) alt = play;
+    }
+  }
+  // A call you just heard comes first: answering it is the main thing to do for a few seconds.
+  if (answerTo && t < answerTo.until && !held) { if (!alt && main) alt = main; main = { label: `Answer ${answerTo.name}`, run: callOut }; }
   const next = [main, alt];
   ['action', 'action2'].forEach((id, i) => {
     const btn = $(id), a = next[i], old = actions[i];
@@ -1134,6 +1374,7 @@ function frame() {
   let wantX = 0, wantZ = 0;
   const stroll = keys.has('shift') || held === 1 || fireDist() < 7 || (moveTarget && moveTarget.short);
   let top = (stroll ? 1.5 : 3.6) * Math.min(1.25, SPECIES[me.species].height / 0.8);
+  if (itWho === 'me' && !stroll) top = Math.max(top * 1.15, 3.6 * 1.25 * 1.12);      // whoever is it outruns everyone, whatever their size
   if (entered) {
     if (world.surface(me.x, me.z) === 'water') top *= 0.62;
     let ix = 0, iy = 0;
@@ -1186,11 +1427,18 @@ function frame() {
   if (entered) {
     const near = fireDist() < 4.4, heat = clamp(fuelNow(), 0.15, 1.2);
     if (world.surface(me.x, me.z) === 'water') warmth = Math.max(0, warmth - dt / 10);
-    else if (near && me.mode !== 'stand') warmth = Math.min(1, warmth + dt * (0.01 + 0.028 * heat));
+    else if (near && me.mode !== 'stand') {
+      // Warmer together: each animal resting at the fire with you (up to two) adds as much again.
+      let company = 0, friend = null;
+      for (const p of peers.values()) if (p.data.mode !== 'stand' && Math.hypot(p.av.x - FIRE.x, p.av.z - FIRE.z) < 5.5) { company++; friend = friend || p.data.name; }
+      warmth = Math.min(1, warmth + dt * (0.01 + 0.028 * heat) * (1 + Math.min(company, 2)));
+      if (company && !companySaid && warmth < 0.9) { companySaid = true; addLog('', `${friend} is by the fire too. You warm through ${company > 1 ? 'three times' : 'twice'} as fast in company.`, 'sys'); }
+    }
     else if (near) warmth = warmth < 0.4 ? Math.min(0.4, warmth + dt * 0.012) : warmth;
     else warmth = Math.max(0, warmth - dt / 240);
     if (warmth >= 1 && !warmSaid) { warmSaid = true; addLog('', 'You are warm right through. The glow will stay with you a while.', 'sys'); audio.pop(520); pushPresence(true); did('warm'); }
     if (warmth < 0.5) warmSaid = false;
+    if (me.mode === 'stand') companySaid = false;
     // Wading soaks the coat. It dries slowly on its own, quickly by the fire, at once with a good shake.
     if (!treeList) treeList = world.trees;
     const sheltered = treeList.some((c) => Math.hypot(c.x - me.x, c.z - me.z) < c.r * 0.9);
@@ -1259,6 +1507,7 @@ function frame() {
     const seen = dist < 85 && viewFrustum.intersectsSphere(viewSphere);
     av.group.visible = seen;
     av.setShadows(Math.hypot(av.x - FIRE.x, av.z - FIRE.z) < 6.5);
+    if (d.mode === 'stand' && dist < 70) traces.walk(av, SPECIES[d.species].height, !!SPECIES[d.species].hoof);
     p.acc = (p.acc || 0) + dt; p.skip = (p.skip || 0) + 1;
     const every = dist > 32 ? 3 : dist > 18 ? 2 : 1;
     if (!seen) { av.group.position.set(av.x, av.y, av.z); p.acc = 0; p.skip = 0; }
@@ -1347,6 +1596,10 @@ function frame() {
   updateGuide(nowMs);
   world.update(dt, t);
   life.update(dt, t);
+  if (entered && me.mode === 'stand') traces.walk(me, SPECIES[me.species].height, hoofed());
+  traces.update(t);
+  updateCalls();
+  updateTag();
   yard.update(dt, t);
   frame.players = frame.players || [];
   frame.players.length = 0;
@@ -1368,6 +1621,16 @@ window.__ember = {
   leaveIsland,
   get goal() { return goal ? { text: goal.text, x: goal.at.x, z: goal.at.z, step: goal.step } : null; },
   get starterAt() { return starterAt; },
+  traces, companion, noteCall, setHeld, addToBoat, tagPeer,
+  get it() { return itWho; },
+  set tagTime(v) { tagTime = v; },
+  get netId() { return net.id; },
+  get mutedUntil() { return mutedUntil; },
+  openVisitor, ignored,
+  get room() { return `${net.mode} ${net.status}`; },
+  get log() { return [...document.querySelectorAll('#log > *')].map((e) => e.textContent); },
+  get answerTo() { return answerTo; },
+  get lonely() { return lonely; },
   set idleAfter(v) { idleAfter = v; },
   get asleep() { return !!asleepSince; },
   get identity() { return identity; },

@@ -1,7 +1,7 @@
 // Shared presence: who else has the island open right now, where they stand and what they say.
 // Everything received here is untrusted display data from other viewers.
 import { clamp } from './terrain.js';
-import { use } from './backend.js';
+import { use, mode } from './backend.js';
 import { PLAYABLE } from './avatar.js';
 
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '').trim().slice(0, max);
@@ -30,6 +30,11 @@ export function parsePeer(p) {
     butterfly: s.b === 1,
     nights: Math.floor(num(s.nv, 0, 9999)),
     asleep: num(s.zz, 0, 1e15) > 0,
+    // Tag: when this visitor was last made "it", and whom they last tagged and when.
+    muted: num(s.mu, 0, 1e15),
+    it: num(s.it, 0, 1e15),
+    tagTo: Array.isArray(s.tg) ? clean(s.tg[0], 16) : '',
+    tagAt: Array.isArray(s.tg) ? num(s.tg[1], 0, 1e15) : 0,
     warmth: num(s.tl, 0, 1),
     fire: Array.isArray(s.fr) && Number.isFinite(s.fr[0]) && Number.isFinite(s.fr[1]) ? { fuel: num(s.fr[0], 0, 1.4), at: num(s.fr[1], 0, 1e15) } : null,
   };
@@ -41,8 +46,8 @@ export function createNet(handlers) {
   let lastSentAt = 0;
   let pending = null;
   let status = 'connecting';
-  let joinCb = null;
-  const startJoin = () => { if (room && typeof room.join === 'function') room.join(joinCb); else joinCb({ state: 'in' }); };
+  let joinCb = null, joinInfo = null;
+  const startJoin = () => { if (room && typeof room.join === 'function') room.join(joinCb, joinInfo); else joinCb({ state: 'in' }); };
 
   async function connect() {
     let ns = null;
@@ -66,6 +71,7 @@ export function createNet(handlers) {
         }
         handlers.onPeers(list);
       }, fail);
+      if (typeof room.mod === 'function' && handlers.onMod) room.mod(handlers.onMod);
       if (pending) { const p = pending; pending = null; send(p, true); }
       if (joinCb) startJoin();
     } catch (e) { fail(); }
@@ -87,7 +93,14 @@ export function createNet(handlers) {
     send,
     get status() { return status; },
     // Ask for a place on the island. cb hears {state: 'in'}, or {state: 'wait', pos, of} while the island is full.
-    join(cb) { joinCb = cb; if (status === 'solo') cb({ state: 'in' }); else if (room) startJoin(); },
+    join(cb, info) { joinCb = cb; joinInfo = info || null; if (status === 'solo') cb({ state: 'in' }); else if (room) startJoin(); },
+    get mode() { return mode; },
+    selfMute() { if (room && typeof room.selfMute === 'function') room.selfMute(); },
+    report(peer, lines, note) { return !!(room && typeof room.report === 'function' && room.report(peer, lines, note)); },
+    // The name everyone else on the island knows you by on the wire.
+    get id() { return room && typeof room.id === 'function' ? room.id() : ''; },
+    // Have the island count one more of something. Only the island's own room keeps count.
+    note(k) { if (room && typeof room.note === 'function') room.note(k); },
     // Give up your place and stop being seen.
     leave() { joinCb = null; lastSent = ''; if (room && typeof room.leave === 'function') room.leave(); handlers.onPeers([]); },
   };

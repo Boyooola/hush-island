@@ -168,8 +168,10 @@ export function buildCritters(scene, world) {
     },
     // The owl answers a call from close by; so does the cow.
     heard(x, z, dark) {
-      if (dark > 0.6 && Math.hypot(x - OWL.x, z - OWL.z) < 14) { hootIn = 1.6; }
-      if (Math.hypot(x - cow.x, z - cow.z) < 10 && mooBack <= 0) mooBack = 1.4;
+      let taken = false;
+      if (dark > 0.6 && Math.hypot(x - OWL.x, z - OWL.z) < 14) { hootIn = 1.6; taken = true; }
+      if (Math.hypot(x - cow.x, z - cow.z) < 10) { if (mooBack <= 0) mooBack = 1.4; taken = true; }
+      return taken;       // true when one of them will answer
     },
     moo() { if (mooBack <= 0) mooBack = 0.7; },
     get crabs() { return crabs.map((c) => ({ x: c.x, z: c.z, hidden: c.sink > 0.5 })); },

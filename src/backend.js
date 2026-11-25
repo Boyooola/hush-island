@@ -24,8 +24,12 @@ async function build() {
   const db = sb ? makeDb(supabaseDriver(sb), 10000) : makeDb(localDriver(), 1000);
   // Live visitors: the island's own room on Cloudflare if this site has one, else Supabase, else this browser alone.
   const url = location.origin.replace(/^http/, 'ws') + '/room';
-  const ws = /^https?:/.test(location.protocol) ? await openSocket(url) : null;
+  const web = /^https?:/.test(location.protocol);
+  const ws = web ? await openSocket(url) : null;
   if (ws) { mode = 'cloudflare'; return { room: makeRoom(socketWire(ws, url)), db, user: null }; }
+  // No line yet. If this site does have its own room, keep trying for it rather than settling for another one:
+  // everyone has to end up on the same island.
+  if (web && await hasRoom()) { mode = 'cloudflare'; return { room: makeRoom(socketWire(null, url)), db, user: null }; }
   if (sb) { mode = 'supabase'; return { room: makeRoom(supabaseWire(sb)), db, user: null }; }
   mode = 'local';
   return { room: makeRoom(localWire()), db, user: null };
@@ -36,16 +40,25 @@ function openSocket(url) {
   return new Promise((res) => {
     let done = false, ws;
     const end = (v) => { if (!done) { done = true; clearTimeout(timer); res(v); } };
-    const timer = setTimeout(() => { try { ws.close(); } catch (e) { /* never opened */ } end(null); }, 4000);
+    // A slow device can be busy loading the island when the line opens, so the clock may run out before the
+    // "open" event is heard. Look at the line itself before giving up on it.
+    const timer = setTimeout(() => { if (ws && ws.readyState === 1) { end(ws); return; } try { ws.close(); } catch (e) { /* never opened */ } end(null); }, 8000);
     try { ws = new WebSocket(url); } catch (e) { end(null); return; }
     ws.onopen = () => end(ws);
     ws.onerror = ws.onclose = () => end(null);
   });
 }
+async function hasRoom() {
+  try {
+    const r = await fetch('/room/status.json', { cache: 'no-store' });
+    const d = r.ok ? await r.json() : null;
+    return !!d && Number.isFinite(d.cap);
+  } catch (e) { return false; }
+}
 function socketWire(first, url) {
-  let ws = first, onMsg = () => {}, onUp = () => {}, joined = false;
+  let ws = first || { readyState: 3 }, onMsg = () => {}, onUp = () => {}, joined = false, joinMsg = null, admitted = false;
   const hook = () => {
-    ws.onmessage = (e) => { if (e.data === 'pong') return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } onMsg(m); };
+    ws.onmessage = (e) => { if (e.data === 'pong') return; let m; try { m = JSON.parse(e.data); } catch (err) { return; } if (m && m.t === 'in') admitted = true; onMsg(m); };
     ws.onerror = () => {};
     ws.onclose = () => { onUp(false); setTimeout(again, 2000); };
   };
@@ -54,13 +67,14 @@ function socketWire(first, url) {
     const n = await openSocket(url);
     if (!n) { setTimeout(again, 4000); return; }
     ws = n; hook(); onUp(true);
-    if (joined) ws.send(JSON.stringify({ t: 'join' }));
+    // Picking up a visit already under way is not a new visit; a first request that never got through still is.
+    if (joined) ws.send(JSON.stringify(admitted || !joinMsg ? { t: 'join', again: 1 } : joinMsg));
   };
-  hook();
+  if (first) hook(); else setTimeout(again, 500);
   setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 20000);
   window.addEventListener('pagehide', () => { try { ws.close(1000); } catch (e) { /* gone */ } });
   return {
-    post(m) { if (m.t === 'join') joined = true; if (m.t === 'leave') joined = false; if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
+    post(m) { if (m.t === 'join') { joined = true; joinMsg = m; } if (m.t === 'leave') joined = false; if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
     listen(fn) { onMsg = fn; },
     up(fn) { onUp = fn; fn(ws.readyState === 1); },
     gap: 240, beat: 5000, queued: true,
@@ -83,10 +97,11 @@ function supabaseWire(sb) {
 }
 function makeRoom(wire) {
   const id = Math.random().toString(36).slice(2, 12);
+  let known = id;                // the id others see: the island's own room hands one out when you come ashore
   const others = new Map();
   const beat = wire.beat || 2500;
   let mine = {}, handler = null, lastPost = 0, timer = null, dirty = false;
-  let ashore = !wire.queued, onQueue = null;      // a room with a queue lets you in when there is space
+  let ashore = !wire.queued, onQueue = null, been = false, inLine = false, onMod = null;      // a room with a queue lets you in when there is space
   const emit = () => {
     if (!handler) return;
     handler({ peers: [...others.entries()].map(([peer, o]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence: o.p })) });
@@ -94,8 +109,10 @@ function makeRoom(wire) {
   const post = () => { if (!ashore) return; lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
   wire.listen((m) => {
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'in') { ashore = true; if (onQueue) onQueue({ state: 'in', cap: m.cap }); post(); return; }
-    if (m.t === 'wait') { ashore = false; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }
+    if (m.t === 'in') { ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu }); post(); return; }
+    if (m.t === 'muted') { if (onMod) onMod({ muted: m.until, why: m.why }); return; }
+    if (m.t === 'hush') { if (onMod) onMod({ soft: true }); return; }
+    if (m.t === 'wait') { ashore = false; inLine = true; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }
     if (m.t === 'out') { ashore = false; others.clear(); emit(); wire.post({ t: 'leave' }); const f = onQueue; onQueue = null; if (f) f({ state: 'out', why: m.why }); return; }
     if (typeof m.id !== 'string' || m.id === id) return;
     if (m.t === 'p' && m.p && typeof m.p === 'object') { others.set(m.id, { p: m.p, at: Date.now() }); emit(); }
@@ -124,7 +141,21 @@ function makeRoom(wire) {
     onPeers(fn) { handler = fn; if (!wire.queued) wire.post({ t: 'hello', id }); setTimeout(emit, 0); return () => { handler = null; }; },
     onConnection(fn) { wire.up(fn); return () => {}; },
     // Ask to come ashore. fn hears {state: 'in'} when there is room, or {state: 'wait', pos, of} while queued.
-    join(fn) { onQueue = fn; if (wire.queued) wire.post({ t: 'join' }); else { ashore = true; fn({ state: 'in' }); if (handler) wire.post({ t: 'hello', id }); } },
+    // info says what kind of visit this is (first today, first ever), for the island's daily totals.
+    join(fn, info) {
+      onQueue = fn; inLine = false;
+      // If the island's room cannot be reached, nobody is kept on the title screen: after a while you step ashore
+      // alone, and the others appear when the line comes up.
+      if (wire.queued) setTimeout(() => { if (!ashore && !inLine && onQueue === fn) fn({ state: 'in', alone: true }); }, 12000);
+      if (wire.queued) wire.post(been ? { t: 'join', again: 1 } : { t: 'join', ...(info || {}) }); else { ashore = true; fn({ state: 'in' }); if (handler) wire.post({ t: 'hello', id }); } },
+    id() { return known; },
+    // Keeping the peace. mod(fn) hears when the island mutes you or drops a message; selfMute tells the island the
+    // game stopped your words itself; report sends the island what another visitor said.
+    mod(fn) { onMod = fn; },
+    selfMute() { if (wire.queued && ashore) wire.post({ t: 'mute' }); },
+    report(peer, lines, note) { if (wire.queued && ashore) { wire.post({ t: 'report', id: peer, lines, note }); return true; } return false; },
+    // Ask the island to count one more of something (a guide step reached, a call answered).
+    note(k) { if (wire.queued && ashore) wire.post({ t: 'note', k }); },
     // Back to the title screen: stop being seen, give up your place.
     leave() {
       if (wire.queued) wire.post({ t: 'leave' }); else wire.post({ t: 'bye', id });

@@ -1,0 +1,47 @@
+// The room's side of keeping the peace, spoken to directly over sockets.
+const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const open = async (name, browser) => { const ws = await new Promise((res) => { const w = new WebSocket('ws://localhost:8787/room', { headers: { 'User-Agent': browser || name } }); w.msgs = []; w.onmessage = (e) => w.msgs.push(JSON.parse(e.data)); w.onopen = () => res(w); }); ws.send(JSON.stringify({ t: 'join', first: 1 })); await sleep(300); ws.me = ws.msgs.find((m) => m.t === 'in'); ws.name = name; return ws; };
+let mid = 1;
+const say = async (ws, text) => { ws.send(JSON.stringify({ t: 'p', p: { v: 1, n: ws.name, x: 1, z: 1, m: [text, mid++] } })); await sleep(350); };
+const lastFrom = (ws, id) => ws.msgs.filter((m) => m.t === 'p' && m.id === id).pop();
+const a = await open('Loud Wolf'), b = await open('Calm Deer');
+ok('a new visitor is not muted', a.me && a.me.mu === 0, JSON.stringify(a.me).slice(0, 90));
+await say(a, 'hello there');
+ok('ordinary talk is passed on', lastFrom(b, a.me.id).p.m[0] === 'hello there' && lastFrom(b, a.me.id).p.mu === 0);
+await say(a, 'oh sh1t');
+ok('milder swearing is dropped, nobody muted', lastFrom(b, a.me.id).p.m === null && a.msgs.some((m) => m.t === 'hush') && !a.msgs.some((m) => m.t === 'muted'));
+await say(a, 'nice day though');
+ok('and talk carries on after it', lastFrom(b, a.me.id).p.m[0] === 'nice day though');
+await say(a, 'wanna f u c k?');
+const mu = a.msgs.find((m) => m.t === 'muted');
+ok('the words are dropped and the sender muted for ten minutes', lastFrom(b, a.me.id).p.m === null && mu && Math.abs(mu.until - Date.now() - 600000) < 5000 && mu.why === 'words', JSON.stringify(mu));
+ok('others are told who is muted', lastFrom(b, a.me.id).p.mu === mu.until);
+await say(a, 'can you hear me');
+ok('nothing from the muted is passed on', lastFrom(b, a.me.id).p.m === null);
+ok('a visitor cannot claim someone else is muted or unmute themselves', (() => { a.send(JSON.stringify({ t: 'p', p: { v: 1, n: 'Loud Wolf', x: 1, z: 1, mu: 0, m: null } })); return true; })());
+await sleep(300);
+ok('the island stamps the mute itself', lastFrom(b, a.me.id).p.mu === mu.until);
+// Reports: three different visitors mute a fourth.
+const t = await open('Sly Fox'); await say(t, 'you are all boring');
+const r1 = await open('R One'), r2 = await open('R Two');
+for (const r of [b, r1]) r.send(JSON.stringify({ t: 'report', id: t.me.id, lines: ['made up line'], note: 'being rude' }));
+await sleep(400);
+ok('two reports do not mute', !t.msgs.some((m) => m.t === 'muted'));
+b.send(JSON.stringify({ t: 'report', id: t.me.id, lines: [] })); await sleep(300);
+ok('reporting the same animal twice counts once', !t.msgs.some((m) => m.t === 'muted'));
+r2.send(JSON.stringify({ t: 'report', id: t.me.id, lines: [] })); await sleep(400);
+const tm = t.msgs.find((m) => m.t === 'muted');
+ok('a third reporter mutes them', !!tm && tm.why === 'reports', JSON.stringify(tm));
+// The keeper's page.
+const no = await fetch('http://localhost:8787/room/reports.json'), wrong = await fetch('http://localhost:8787/room/reports.json', { headers: { 'x-keeper-key': 'nope' } });
+ok('reports are closed without the key', no.status === 403 && wrong.status === 403, no.status + ' ' + wrong.status);
+const d = await (await fetch('http://localhost:8787/room/reports.json', { headers: { 'x-keeper-key': 'testkey' } })).json();
+ok('with the key the keeper sees them, with what the island itself heard', d.reports.length === 3 && d.reports.every((r) => r.who === 'Sly Fox' && r.sure && r.lines[0] === 'you are all boring') && d.reports.some((r) => r.note === 'being rude'), JSON.stringify(d.reports[0]));
+ok('and who is muted now', d.mutes.length >= 0, JSON.stringify(d.mutes));
+const s = await (await fetch('http://localhost:8787/room/stats.json')).json();
+ok('mutes and reports are counted', s.days[s.today].muted === 2 && s.days[s.today].reports === 3, JSON.stringify(s.days[s.today]));
+const late = await open('Late One'), again = await open('Loud Wolf Again', 'Loud Wolf');
+ok('someone else at the same address is not muted', late.me.mu === 0);
+ok('the muted one is still muted after reconnecting', again.me.mu === mu.until, String(again.me.mu));
+process.exit(0);

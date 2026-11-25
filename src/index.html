@@ -94,7 +94,19 @@
   .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7); }
   .brand b { font-family: var(--display); font-weight: 800; font-size: 22px; color: var(--amber); line-height: 1; }
   #count { color: var(--ink); font-size: 14px; }
-  #clock { color: var(--ink); opacity: 0.85; font-size: 14px; font-variant-numeric: tabular-nums; }
+  /* The island day as a strip of sky: dawn, day, dusk, night. The marker is the sun or the moon. */
+  #day { display: flex; align-items: center; gap: 12px; padding-top: 5px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.75); }
+  #daybar {
+    position: relative; width: 190px; height: 7px; border-radius: 4px; flex: none;
+    background: linear-gradient(90deg, #f0a47c 0%, #f6c79a 5%, #6aaee6 11%, #6aaee6 44%, #ffb070 49%, #ff8c5c 53%, #74508e 57%, #1c2a58 60%, #101a3c 100%);
+    box-shadow: 0 0 0 1px rgba(5, 9, 20, 0.55), 0 1px 6px rgba(0, 0, 0, 0.6);
+  }
+  #daydot { position: absolute; top: 50%; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; border-radius: 50%; transition: left 1s linear; }
+  #daydot.sun { background: #ffe08a; box-shadow: 0 0 0 2px rgba(5, 9, 20, 0.6), 0 0 12px 3px rgba(255, 210, 110, 0.85); }
+  #daydot.moon { background: #eef3ff; box-shadow: 0 0 0 2px rgba(5, 9, 20, 0.6), 0 0 10px 2px rgba(190, 210, 255, 0.7); }
+  /* A small star marks island midnight, when the stars fall. */
+  #daystar { position: absolute; left: 77.1%; top: -9px; width: 5px; height: 5px; margin-left: -2.5px; background: #fff6dc; border-radius: 50%; box-shadow: 0 0 6px 1px rgba(255, 246, 220, 0.9); }
+  #daytext { font-size: 14px; font-weight: 700; color: var(--ink); white-space: nowrap; }
   #help h3 { font-family: var(--display); font-size: 16px; margin: 4px 0 0; color: var(--amber); }
   #list { margin: 0; padding: 0 0 0 18px; font-size: 14px; color: var(--ink); display: flex; flex-direction: column; gap: 3px; }
   #list li.done { color: var(--ink-quiet); text-decoration: line-through; }
@@ -250,7 +262,9 @@
     .word { font-size: 16.5px; padding: 6px 0; }
     .act { font-size: 21px; }
     #help { padding-top: 56px; background: rgba(5, 9, 20, 0.93); }
-    #tasks { top: 104px; }
+    #tasks { top: 132px; }
+    #day { order: 3; flex: 1 1 100%; }
+    #daybar { width: 140px; }
     #tasks-list { font-size: 13.5px; }
     #log { font-size: 13.5px; }
   }
@@ -260,6 +274,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     #intro, .hud, #log .line { transition: none; }
+    #daydot { transition: none; }
     #queue .ember { animation: none; }
   }
 </style>
@@ -282,7 +297,8 @@
 </section>
 
 <div id="top" class="hud">
-  <div class="brand"><b>Hush Island</b><span id="count">Just you and the keeper</span><span id="clock"></span></div>
+  <div class="brand"><b>Hush Island</b><span id="count">Just you and the keeper</span></div>
+  <div id="day" role="img" aria-label="Island time"><div id="daybar"><i id="daystar"></i><i id="daydot" class="sun"></i></div><span id="daytext"></span></div>
   <div class="tools">
     <button class="chip" id="btn-music" type="button" aria-pressed="true">Music on</button>
     <button class="chip" id="btn-sound" type="button" aria-pressed="true">Sound on</button>

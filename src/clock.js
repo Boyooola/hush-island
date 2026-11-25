@@ -8,6 +8,19 @@ export function clockText(h) {
   return `${part}, ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+// Where the island day stands, for the little bar on screen: which part of the day it is, what comes next
+// and in how many real minutes, and how far along the bar the marker sits (the bar runs dawn to dawn).
+const PARTS = [[5.5, 'Dawn'], [8, 'Day'], [16.5, 'Dusk'], [19.5, 'Night']];
+export const DAY_BAR_START = 5.5;
+export function dayInfo(h) {
+  let i = PARTS.length - 1;
+  for (let k = 0; k < PARTS.length; k++) if (h >= PARTS[k][0]) i = k;
+  if (h < PARTS[0][0]) i = PARTS.length - 1;
+  const next = PARTS[(i + 1) % PARTS.length];
+  const hours = (next[0] - h + 24) % 24;
+  return { part: PARTS[i][1], next: next[1], minutes: hours * (DAY_MS / 60000 / 24), pos: ((h - DAY_BAR_START + 24) % 24) / 24, night: i === 3 };
+}
+
 // What the sky and light look like at a few hours; everything between is blended.
 // dark: 1 at night, 0 by day (fireflies, stars and lamps follow it).
 const KEYS = [

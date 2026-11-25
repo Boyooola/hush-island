@@ -11,7 +11,7 @@ import { createNet } from './net.js';
 import { findPath } from './path.js';
 import { createStore, todayKey } from './store.js';
 import { buildLife, showerState } from './life.js';
-import { islandHour, clockText, skyAt, rainAt } from './clock.js';
+import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1173,8 +1173,16 @@ function frame() {
     life.setRain(rainNow, null);
     renderer.toneMappingExposure = lerp(0.98, 1.15, k.dark);
     viewLight.intensity = 0.28 * k.dark;
-    const text = clockText(hour);
-    if (text !== frame.clockText) { frame.clockText = text; $('clock').textContent = text; }
+    // The day bar: a marker sliding from dawn to dawn, and a line saying what comes next and how soon.
+    const di = dayInfo(hour), mins = Math.max(1, Math.round(di.minutes));
+    const text = `${di.part}. ${di.next} ${di.minutes < 0.75 ? 'any moment' : `in ${mins} min`}${rainNow > 0.3 ? '. Raining' : ''}`;
+    $('daydot').style.left = `${(di.pos * 100).toFixed(1)}%`;
+    if (text !== frame.clockText) {
+      frame.clockText = text;
+      $('daytext').textContent = text;
+      $('day').setAttribute('aria-label', `Island time: ${text}`);
+      $('daydot').className = di.night ? 'moon' : 'sun';
+    }
   }
   life.setRain(rainNow, camPos);
   world.update(dt, t);

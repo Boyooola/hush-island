@@ -3,6 +3,8 @@
   // that runs the island's live room. The name must match the Worker's name in the dashboard.
   "name": "hush-island",
   "main": "worker/index.js",
+  // Values added in the Cloudflare dashboard (such as ADMIN_KEY) are kept when a new version is deployed.
+  "keep_vars": true,
   "compatibility_date": "2026-11-25",
   "assets": {
     "directory": "./dist",

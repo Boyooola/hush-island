@@ -46,6 +46,8 @@ export function parsePeer(p) {
     tagAt: Array.isArray(s.tg) ? num(s.tg[1], 0, 1e15) : 0,
     tagStart: Array.isArray(s.tg) && s.tg[2] === 1,
     game: num(s.gm, 0, 1e15),
+    // Where the keeper is, from whoever is moving him in a game of tag: game (-1 while he walks home), place, and his tags.
+    keeper: Array.isArray(s.kp) && Number.isFinite(s.kp[0]) && s.kp[0] !== 0 ? { g: num(s.kp[0], -1, 1e15), x: num(s.kp[1], -40, 40), z: num(s.kp[2], -40, 40), it: num(s.kp[3], 0, 1e15), to: clean(s.kp[4], 16), at: num(s.kp[5], 0, 1e15) } : null,
     invTo: Array.isArray(s.ti) ? clean(s.ti[0], 16) : '',
     invAt: Array.isArray(s.ti) ? num(s.ti[1], 0, 1e15) : 0,
     warmth: num(s.tl, 0, 1),

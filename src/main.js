@@ -325,7 +325,7 @@ const TASK_WHERE = {
 let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
-  if (game && itWho && peers.has(itWho)) return { text: `${peers.get(itWho).data.name} is it. Keep away`, at: peers.get(itWho).av, step: '' };
+  if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
   if (starterAt < STARTER.length) return { text: STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
@@ -510,6 +510,153 @@ function giveFish() {
 }
 
 // Calls: each animal has its own voice, and it carries.
+// ---------- the keeper plays tag ----------
+// Ask the keeper and he gets up and plays like anyone else: he runs from whoever is it, and chases when it is him.
+// One player's game moves him (the "host": the player whose id sorts first) and tells the others where he is, so
+// everyone sees the same chase. If that player goes, the next one carries on.
+const K = { av: keeper, data: { name: 'the keeper', species: keeper.species, game: 0, it: 0, tagAt: 0, tagTo: '', mode: 'stand', asleep: false, code: '', muted: 0 } };
+let keeperLoose = false, keeperHoming = false, keeperItAt = -99, keeperRestUntil = 0, keeperTagSeen = 0, keeperHead = 0, wasHost = false, keeperSaid = 0;
+const myWireId = () => net.id || 'solo';
+function* folk() { yield* peers; if (K.data.game) yield ['keeper', K]; }
+const folkGet = (id) => (id === 'keeper' ? (K.data.game ? K : undefined) : peers.get(id));
+const folkHas = (id) => !!folkGet(id);
+// Who moves the keeper: of the visitors in his game, the one whose id sorts first.
+function keeperHost() {
+  const g = K.data.game;
+  if (!g) return null;
+  let best = game === g ? myWireId() : null;
+  for (const [id, p] of peers) if (p.data.game === g && (best === null || id < best)) best = id;
+  return best;
+}
+function askKeeper() {
+  if (game || seenGame || !entered) return;
+  me.targetYaw = Math.atan2(keeper.x - me.x, keeper.z - me.z);
+  playEmote('wag');
+  if (rainNow > 0.5) { setTimeout(() => keeperSays('Tag, in this rain? Ask me when it clears.'), 500); return; }
+  if (nowSec() < keeperRestUntil) { setTimeout(() => keeperSays('Let me get my breath back first.'), 500); return; }
+  const at = tagStamp();
+  game = at; myIt = at; myItAt = nowSec(); myTag = null; tagSeen = at; alone = 0;
+  Object.assign(K.data, { game: at, it: 0, tagAt: 0, tagTo: '' });
+  keeperLoose = true; keeperHoming = false; keeperHead = Math.atan2(keeper.x - me.x, keeper.z - me.z);
+  keeper.mode = 'stand'; keeper.play('hop');
+  setTimeout(() => keeperSays('Tag? Ha. You will have to catch me first.'), 400);
+  flash('You are it!', 'Catch the keeper');
+  addLog('', 'The keeper gets to his feet. You are it! Catch him.', 'sys');
+  audio.pop(700);
+  net.note('game');
+  me.setName(me.name, mySub());
+  pushPresence(true);
+}
+function keeperMadeIt(at) {
+  if (!(at > K.data.it)) return;
+  K.data.it = at; keeperItAt = nowSec();
+  keeper.play('hop');
+}
+// Something the keeper did reaches everyone here: he has tagged someone.
+function keeperTagged() {
+  const d = K.data;
+  if (!(d.tagAt > keeperTagSeen)) return;
+  keeperTagSeen = d.tagAt; tagSeen = Math.max(tagSeen, d.tagAt);
+  if (!entered || !d.tagTo) return;
+  keeper.play('paw');
+  if (d.tagTo === myWireId()) {
+    if (!game || game !== d.game) return;
+    myIt = d.tagAt; myItAt = nowSec();
+    flash('You are it!', 'The keeper tagged you');
+    addLog('', 'The keeper tagged you. You are it!', 'sys');
+    ripple(me.x, me.z, 4, 0xffb04a); audio.pop(480);
+    if (!me.emote) playEmote('hop');
+    me.setName(me.name, mySub()); pushPresence(true);
+  } else {
+    const q = peers.get(d.tagTo);
+    if (!q) return;
+    ripple(q.av.x, q.av.z, 4, 0xffb04a);
+    addLog('', `The keeper tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
+    if (game && game === d.game) flash(`${q.data.name} is it`, 'The keeper tagged them');
+  }
+}
+function keeperStep(dt, tx, tz, speed, away) {
+  // Head for (or away from) a point, picking the open direction: not into the sea, not off the island.
+  let want = Math.atan2(tx - keeper.x, tz - keeper.z) + (away ? Math.PI : 0), best = want, score = -1e9;
+  for (let k = 0; k < 12; k++) {
+    const a = want + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5;
+    const px = keeper.x + Math.sin(a) * 3.5, pz = keeper.z + Math.cos(a) * 3.5;
+    let s = -Math.abs(a - want) * 2.2 - Math.abs(Math.atan2(Math.sin(a - keeperHead), Math.cos(a - keeperHead))) * 0.8;
+    if (groundHeight(px, pz) < 0.45) s -= 100;
+    if (away) s += Math.hypot(px - tx, pz - tz) * 0.6 - Math.max(0, Math.hypot(px, pz) - 19) * 1.5 - (Math.hypot(px - FIRE.x, pz - FIRE.z) < 3 ? 6 : 0);
+    if (s > score) { score = s; best = a; }
+  }
+  keeperHead += Math.atan2(Math.sin(best - keeperHead), Math.cos(best - keeperHead)) * Math.min(1, dt * 5);
+  const n = moveWithCollision(keeper.x, keeper.z, Math.sin(keeperHead) * speed * dt, Math.cos(keeperHead) * speed * dt, 0.5);
+  keeper.speed = lerp(keeper.speed, Math.hypot(n.x - keeper.x, n.z - keeper.z) / Math.max(dt, 1e-3), 0.3);
+  keeper.x = n.x; keeper.z = n.z; keeper.targetYaw = keeperHead;
+}
+// Called every frame before the keeper is drawn. Returns true while he is up and about, false when he is by the fire.
+function updateKeeperGame(dt) {
+  const d = K.data, now = nowSec();
+  const host = keeperHost(), mine = host !== null ? host === myWireId() : wasHost && (d.game || keeperHoming);
+  if (!mine) {
+    // Someone else moves him: follow what they say.
+    wasHost = false;
+    let src = null;
+    for (const [id, p] of peers) if (p.data.keeper && (!src || id < src.id)) src = { id, k: p.data.keeper };
+    if (!src) {
+      if (keeperLoose && (d.game || keeperHoming)) { d.game = 0; keeperHoming = false; }
+      if (!d.game) keeperLoose = false;
+    } else {
+      keeperLoose = true; keeperHoming = src.k.g < 0;
+      d.game = src.k.g > 0 ? src.k.g : 0; d.it = src.k.it; d.tagTo = src.k.to; d.tagAt = src.k.at;
+      const px = keeper.x, pz = keeper.z, k = 1 - Math.exp(-dt * 8);
+      keeper.x = lerp(keeper.x, src.k.x, k); keeper.z = lerp(keeper.z, src.k.z, k);
+      keeper.speed = lerp(keeper.speed, Math.hypot(keeper.x - px, keeper.z - pz) / Math.max(dt, 1e-3), 0.25);
+      if (keeper.speed > 0.4) keeper.targetYaw = Math.atan2(keeper.x - px, keeper.z - pz);
+    }
+  } else {
+    wasHost = true; keeperLoose = true;
+    const runners = [];
+    if (game && game === d.game && me.mode === 'stand' && !asleepSince) runners.push({ id: myWireId(), av: me });
+    for (const [id, p] of peers) if (p.data.game === d.game && d.game && p.data.mode === 'stand' && !p.data.asleep) runners.push({ id, av: p.av });
+    const humans = (game && game === d.game ? 1 : 0) + [...peers.values()].filter((p) => d.game && p.data.game === d.game).length;
+    if (d.game && (Date.now() - d.game > tagTime * 1000 || !humans)) {
+      // The round is over, or everyone has gone: back to the fire for a rest.
+      d.game = 0; d.it = 0; keeperHoming = true; keeperRestUntil = now + 45;
+      if (entered && now - keeperSaid > 20) { keeperSaid = now; setTimeout(() => keeperSays('Enough for these old legs. Good game.'), 600); }
+    }
+    if (d.game) {
+      const keeperIt = d.it > d.tagAt;
+      if (keeperIt) {
+        let prey = null, pd = 1e9;
+        for (const r of runners) { const dd = Math.hypot(r.av.x - keeper.x, r.av.z - keeper.z); if (dd < pd) { pd = dd; prey = r; } }
+        if (now - keeperItAt < TAG_GRACE || !prey) keeper.speed = lerp(keeper.speed, 0, 0.3);       // counting to three
+        else if (pd < 2.0) { d.tagTo = prey.id; d.tagAt = tagStamp(); }
+        else keeperStep(dt, prey.av.x, prey.av.z, 4.6, false);
+      } else {
+        const chaser = itWho === 'me' ? me : itWho && peers.has(itWho) ? peers.get(itWho).av : null;
+        const cd = chaser ? Math.hypot(chaser.x - keeper.x, chaser.z - keeper.z) : 1e9;
+        if (chaser && cd < 13) keeperStep(dt, chaser.x, chaser.z, cd < 5 ? 4.1 : 3.3, true);
+        else { keeper.speed = lerp(keeper.speed, 0, 0.2); if (chaser) keeper.targetYaw = Math.atan2(chaser.x - keeper.x, chaser.z - keeper.z); }
+      }
+    } else if (keeperHoming) {
+      const s = spotAt(KEEPER_SEAT, bodyLen(keeper));
+      if (Math.hypot(s.x - keeper.x, s.z - keeper.z) < 0.8) { keeperHoming = false; keeperLoose = false; wasHost = false; }
+      else if (Math.hypot(s.x - keeper.x, s.z - keeper.z) < 5) {
+        // The last few steps go straight to his place, between the logs.
+        const dx = s.x - keeper.x, dz = s.z - keeper.z, dd = Math.hypot(dx, dz), step = Math.min(dd, 2.4 * dt);
+        keeper.x += (dx / dd) * step; keeper.z += (dz / dd) * step; keeper.targetYaw = Math.atan2(dx, dz); keeper.speed = lerp(keeper.speed, 2.4, 0.3);
+      }
+      else keeperStep(dt, s.x, s.z, 2.6, false);
+    } else { keeperLoose = false; wasHost = false; }
+  }
+  keeperTagged();
+  if (keeperLoose) { keeper.mode = 'stand'; keeper.y = groundHeight(keeper.x, keeper.z); }
+  else if (keeper.mode !== 'lie') { keeper.mode = 'lie'; keeper.speed = 0; }
+  const sub = `${itWho === 'keeper' ? '§i' : ''}island keeper`;
+  if (keeper.sub !== sub) keeper.setName('Keeper', sub);
+  return keeperLoose;
+}
+// What the host tells everyone about the keeper, riding along with their own position.
+const keeperWire = () => (wasHost && (K.data.game || keeperHoming) ? [K.data.game || -1, Math.round(keeper.x * 100) / 100, Math.round(keeper.z * 100) / 100, K.data.it, K.data.tagTo, K.data.tagAt] : null);
+
 // ---------- tag ----------
 // A game of tag is asked for and agreed to: one animal asks another, and when the other says yes the asker is "it".
 // Whoever is it chases the players and passes it on with a touch. A round lasts two minutes, and anyone can join or
@@ -529,7 +676,7 @@ const inMyGame = (p) => !!game && p.data.game === game;
 // The nearest animal you could touch: for whoever is it, a player; otherwise anyone awake and on their feet.
 function taggable(reach, playersOnly) {
   let best = null, bd = reach;
-  for (const [id, p] of peers) {
+  for (const [id, p] of folk()) {
     if (p.data.mode !== 'stand' || p.data.asleep || (playersOnly && !inMyGame(p))) continue;
     const d = Math.hypot(p.av.x - me.x, p.av.z - me.z);
     if (d < bd) { bd = d; best = { id, p }; }
@@ -539,7 +686,7 @@ function taggable(reach, playersOnly) {
 // A stamp later than any seen so far, so the order of tags is the same for everyone whatever their clocks say.
 function tagStamp() {
   let at = Math.max(Date.now(), myIt + 1, tagSeen + 1, myTag ? myTag[1] + 1 : 0);
-  for (const q of peers.values()) at = Math.max(at, q.data.it + 1, q.data.tagAt + 1);
+  for (const [, q] of folk()) at = Math.max(at, q.data.it + 1, q.data.tagAt + 1);
   return at;
 }
 // Big words in the middle of the screen for a moment: the things in a game nobody should miss.
@@ -588,13 +735,14 @@ function leaveTag(say = true) {
   pushPresence(true);
 }
 function tagPeer(id) {
-  const p = peers.get(id);
+  const p = folkGet(id);
   if (!p || !entered || itWho !== 'me' || !inMyGame(p)) return;
   const at = tagStamp();
   me.targetYaw = Math.atan2(p.av.x - me.x, p.av.z - me.z);
   playEmote('paw'); audio.pop(760);
   ripple(p.av.x, p.av.z, 4, 0xffb04a);
   myTag = [id, at]; myIt = 0; tagSeen = at;
+  if (id === 'keeper') keeperMadeIt(at);          // if someone else moves him, they hear of it from your tag
   flash(`You tagged ${p.data.name}!`, 'Now run');
   addLog('', `You tagged ${p.data.name}. Run!`, 'sys');
   net.note('tag');
@@ -616,6 +764,7 @@ function heardTag(id, p, data) {
   if (data.tagAt > Date.now() + 60000 || data.tagAt <= tagSeen) return;      // a stamp from the future, or old news
   tagSeen = data.tagAt;
   if (!entered) return;
+  if (data.tagTo === 'keeper' && K.data.game && data.game === K.data.game) keeperMadeIt(data.tagAt);
   if (data.tagTo === net.id) {
     if (data.tagStart) {
       // They said yes to your asking: the game is on and you are it.
@@ -637,11 +786,12 @@ function heardTag(id, p, data) {
     me.setName(me.name, mySub());
     pushPresence(true);
   } else if (!data.tagStart) {
-    const q = peers.get(data.tagTo);
+    const q = folkGet(data.tagTo);
     if (!q) return;
     ripple(q.av.x, q.av.z, 4, 0xffb04a);
-    addLog('', `${data.name} tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
-    if (game && data.game === game) flash(`${q.data.name} is it`, `${data.name} tagged them`);
+    const whom = data.tagTo === 'keeper' ? 'The keeper' : q.data.name;
+    addLog('', `${data.name} tagged ${q.data.name}. ${whom} is it.`, 'sys');
+    if (game && data.game === game) flash(`${whom} is it`, `${data.name} tagged ${data.tagTo === 'keeper' ? 'him' : 'them'}`);
   }
 }
 const itMarker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.42, 4), new THREE.MeshBasicMaterial({ color: 0xffb04a, fog: false, toneMapped: false }));
@@ -664,18 +814,18 @@ function updateTag() {
   if (game && (asleepSince || !entered)) leaveTag(false);
   // The game in view: yours if you are playing, otherwise the newest one still running on the island.
   let g = game;
-  if (!g) for (const p of peers.values()) if (p.data.game > g && Date.now() - p.data.game < tagTime * 1000 + 5000) g = p.data.game;
+  if (!g) for (const [, p] of folk()) if (p.data.game > g && Date.now() - p.data.game < tagTime * 1000 + 5000) g = p.data.game;
   seenGame = g;
   const players = [];
-  if (g) for (const [id, p] of peers) if (p.data.game === g) players.push(id);
+  if (g) for (const [id, p] of folk()) if (p.data.game === g) players.push(id);
   // Who is it: among the players, the newest "made it" that has not been passed on.
   let who = null, at = 0;
   if (game && myIt && (!myTag || myIt > myTag[1])) { who = 'me'; at = myIt; }
-  for (const id of players) { const d = peers.get(id).data; if (d.it > d.tagAt && d.it > at && !d.asleep) { who = id; at = d.it; } }
-  if (who !== 'me' && myIt && game) { let later = false; for (const id of players) { const d = peers.get(id).data; if (d.it > myIt && d.it > d.tagAt) later = true; } if (later) { myIt = 0; pushPresence(true); } }
+  for (const id of players) { const d = folkGet(id).data; if (d.it > d.tagAt && d.it > at && !d.asleep) { who = id; at = d.it; } }
+  if (who !== 'me' && myIt && game) { let later = false; for (const id of players) { const d = folkGet(id).data; if (d.it > myIt && d.it > d.tagAt) later = true; } if (later) { myIt = 0; pushPresence(true); } }
   if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); for (const [id, p] of peers) p.av.setName(p.data.name, peerSub(id, p.data)); pushPresence(true); }
   const left = g ? tagTime - (Date.now() - g) / 1000 : 0;
-  const itName = who === 'me' ? 'You' : who ? peers.get(who).data.name : '';
+  const itName = who === 'me' ? 'You' : who === 'keeper' ? 'The keeper' : who ? folkGet(who).data.name : '';
   if (game) {
     // Your game ends when time is up, when everyone else has gone, or when whoever was it has left.
     alone = players.length ? 0 : alone || now;
@@ -713,13 +863,13 @@ function updateTag() {
   };
   if (g && entered && left > 0) {
     if (game) ring(me, who === 'me');
-    for (const id of players) { const p = peers.get(id); if (p.av.group.visible !== false && p.data.mode === 'stand' && k < 14) ring(p.av, who === id); }
+    for (const id of players) { const p = folkGet(id); if (p.av.group.visible !== false && p.data.mode === 'stand' && k < 14) ring(p.av, who === id); }
   }
   for (; k < tagRings.length; k++) tagRings[k].visible = false;
-  const av = who === 'me' ? me : who ? peers.get(who).av : null;
+  const av = who === 'me' ? me : who ? folkGet(who).av : null;
   itMarker.visible = !!av && entered && av.group.visible !== false;
   if (itMarker.visible) {
-    const sp = SPECIES[who === 'me' ? me.species : peers.get(who).data.species];
+    const sp = SPECIES[who === 'me' ? me.species : folkGet(who).data.species] || SPECIES[5];
     itMarker.position.set(av.x, av.y + (av.tag ? av.tag.position.y : sp.height * 1.3) + 0.55 + Math.sin(t * 5) * 0.08, av.z);
     itMarker.rotation.y = t * 2.4;
   }
@@ -906,7 +1056,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, mu: mutedUntil > Date.now() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), mu: mutedUntil > Date.now() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -1521,6 +1671,10 @@ function updateActions() {
       const play = seenGame ? (near.p.data.game === seenGame ? { label: 'Join the game of tag', run: joinTag } : null) : { label: `Ask ${near.p.data.name} to play tag`, run: () => inviteTag(near.id) };
       if (play) { if (!main) main = play; else if (!alt) alt = play; }
     }
+    else if (!game && !seenGame && !held && !myInvite && !near && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 2.8) {
+      const play = { label: 'Ask the keeper to play tag', run: askKeeper };
+      if (!main) main = play; else if (!alt) alt = play;
+    }
   }
   // A call you just heard comes first: answering it is the main thing to do for a few seconds.
   if (answerTo && t < answerTo.until && !held) { if (!alt && main) alt = main; main = { label: `Answer ${answerTo.name}`, run: callOut }; }
@@ -1679,7 +1833,7 @@ function frame() {
   }
   keeper.look = speaker && speaker.until > t && speaker.av !== keeper ? speaker.av : null;
 
-  placeKeeper();
+  if (!updateKeeperGame(dt)) placeKeeper();
   keeper.update(dt, t);
 
   viewFrustum.setFromProjectionMatrix(viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
@@ -1819,6 +1973,8 @@ window.__ember = {
   get starterAt() { return starterAt; },
   traces, companion, noteCall, setHeld, addToBoat, tagPeer, inviteTag, acceptTag, joinTag, leaveTag,
   get game() { return game; },
+  askKeeper, K,
+  get keeperLoose() { return keeperLoose; },
   get seenGame() { return seenGame; },
   get it() { return itWho; },
   set tagTime(v) { tagTime = v; },

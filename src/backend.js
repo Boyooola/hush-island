@@ -5,7 +5,25 @@
 // (see config.js), or this browser alone, where tabs of the same browser share with each other.
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
-let made = null;
+let made = null, client = null, signing = null;
+// The visitor's guest account with Supabase: { id, token }, or null if there is none to be had (Supabase out of
+// reach, or guest sign-ins switched off). Asked for afresh each time, so the token is never stale.
+export async function guest() {
+  if (!made) made = build();
+  try { await made; } catch (e) { return null; }
+  if (!client) return null;
+  const within = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(() => res(null), ms))]);
+  try {
+    let got = await within(client.auth.getSession(), 3000);
+    let session = got && got.data ? got.data.session : null;
+    if (!session) {
+      if (!signing) signing = within(client.auth.signInAnonymously(), 6000).finally(() => { signing = null; });
+      got = await signing;
+      session = got && got.data ? got.data.session : null;
+    }
+    return session && session.user ? { id: session.user.id, token: session.access_token } : null;
+  } catch (e) { return null; }
+}
 export function use(name) {
   if (window.claude && typeof window.claude.use === 'function') return window.claude.use(name);
   if (!made) made = build();
@@ -18,7 +36,9 @@ async function build() {
   if (SUPABASE_URL && SUPABASE_KEY) {
     try {
       const { createClient } = await import('@supabase/supabase-js');
-      sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 3 } } });
+      // Every visitor is signed in as a guest: no name, no email, just an account the browser keeps hold of.
+      sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'hush.guest' }, realtime: { params: { eventsPerSecond: 3 } } });
+      client = sb;
     } catch (e) { sb = null; }
   }
   const db = sb ? makeDb(supabaseDriver(sb), 10000) : makeDb(localDriver(), 1000);
@@ -26,13 +46,13 @@ async function build() {
   const url = location.origin.replace(/^http/, 'ws') + '/room';
   const web = /^https?:/.test(location.protocol);
   const ws = web ? await openSocket(url) : null;
-  if (ws) { mode = 'cloudflare'; return { room: makeRoom(socketWire(ws, url)), db, user: null }; }
+  if (ws) { mode = 'cloudflare'; return { room: makeRoom(socketWire(ws, url)), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null }; }
   // No line yet. If this site does have its own room, keep trying for it rather than settling for another one:
   // everyone has to end up on the same island.
-  if (web && await hasRoom()) { mode = 'cloudflare'; return { room: makeRoom(socketWire(null, url)), db, user: null }; }
-  if (sb) { mode = 'supabase'; return { room: makeRoom(supabaseWire(sb)), db, user: null }; }
+  if (web && await hasRoom()) { mode = 'cloudflare'; return { room: makeRoom(socketWire(null, url)), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null }; }
+  if (sb) { mode = 'supabase'; return { room: makeRoom(supabaseWire(sb)), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null }; }
   mode = 'local';
-  return { room: makeRoom(localWire()), db, user: null };
+  return { room: makeRoom(localWire()), db, user: sb ? { id: () => guest().then((g) => (g ? g.id : null)), can: async () => true } : null };
 }
 
 // ---------- the island's own room: one WebSocket to the Worker in worker/index.js ----------
@@ -68,7 +88,14 @@ function socketWire(first, url) {
     if (!n) { setTimeout(again, 4000); return; }
     ws = n; hook(); onUp(true);
     // Picking up a visit already under way is not a new visit; a first request that never got through still is.
-    if (joined) ws.send(JSON.stringify(admitted || !joinMsg ? { t: 'join', again: 1 } : joinMsg));
+    if (joined) {
+      // Say who you are again, with a fresh token: the island keeps nothing about a line once it has dropped.
+      const g = await guest().catch(() => null);
+      const msg = { ...(joinMsg || { t: 'join' }) };
+      if (g) msg.tok = g.token;
+      if (admitted || !joinMsg) msg.again = 1;
+      if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+    }
   };
   if (first) hook(); else setTimeout(again, 500);
   setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 20000);
@@ -101,7 +128,7 @@ function makeRoom(wire) {
   const others = new Map();
   const beat = wire.beat || 2500;
   let mine = {}, handler = null, lastPost = 0, timer = null, dirty = false;
-  let ashore = !wire.queued, onQueue = null, been = false, inLine = false, onMod = null;      // a room with a queue lets you in when there is space
+  let ashore = !wire.queued, onQueue = null, been = false, inLine = false, onMod = null, onSocial = null;      // a room with a queue lets you in when there is space
   const emit = () => {
     if (!handler) return;
     handler({ peers: [...others.entries()].map(([peer, o]) => ({ peer, isMe: false, sameTab: false, kind: 'viewer', presence: o.p })) });
@@ -109,9 +136,10 @@ function makeRoom(wire) {
   const post = () => { if (!ashore) return; lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
   wire.listen((m) => {
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'in') { ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc }); post(); return; }
+    if (m.t === 'in') { ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc, pid: m.pid, code: m.code, who: m.who }); post(); return; }
     if (m.t === 'muted') { if (onMod) onMod({ muted: m.until, why: m.why }); return; }
     if (m.t === 'hush') { if (onMod) onMod({ soft: true }); return; }
+    if (m.t === 'friends' || m.t === 'mail' || m.t === 'fask' || m.t === 'fyes' || m.t === 'fno' || m.t === 'w' || m.t === 'wok' || m.t === 'wno') { if (onSocial) onSocial(m); return; }
     if (m.t === 'wait') { ashore = false; inLine = true; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }
     if (m.t === 'out') { ashore = false; others.clear(); emit(); wire.post({ t: 'leave' }); const f = onQueue; onQueue = null; if (f) f({ state: 'out', why: m.why }); return; }
     if (typeof m.id !== 'string' || m.id === id) return;
@@ -147,11 +175,13 @@ function makeRoom(wire) {
       // If the island's room cannot be reached, nobody is kept on the title screen: after a while you step ashore
       // alone, and the others appear when the line comes up.
       if (wire.queued) setTimeout(() => { if (!ashore && !inLine && onQueue === fn) fn({ state: 'in', alone: true }); }, 12000);
-      if (wire.queued) wire.post(been ? { t: 'join', again: 1 } : { t: 'join', ...(info || {}) }); else { ashore = true; fn({ state: 'in' }); if (handler) wire.post({ t: 'hello', id }); } },
+      if (wire.queued) wire.post(been ? { t: 'join', ...(info || {}), again: 1 } : { t: 'join', ...(info || {}) }); else { ashore = true; fn({ state: 'in' }); if (handler) wire.post({ t: 'hello', id }); } },
     id() { return known; },
     // Keeping the peace. mod(fn) hears when the island mutes you or drops a message; selfMute tells the island the
     // game stopped your words itself; report sends the island what another visitor said.
     mod(fn) { onMod = fn; },
+    social(fn) { onSocial = fn; },
+    send(m) { if (wire.queued && ashore) wire.post(m); },
     selfMute() { if (wire.queued && ashore) wire.post({ t: 'mute' }); },
     report(peer, lines, note) { if (wire.queued && ashore) { wire.post({ t: 'report', id: peer, lines, note }); return true; } return false; },
     // Ask the island to count one more of something (a guide step reached, a call answered).

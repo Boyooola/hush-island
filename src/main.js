@@ -78,6 +78,8 @@ let itWho = null;                  // who is "it" in a game of tag: 'me', anothe
 // in front of it: §m, §z and §i are drawn as pictures by the name tag.
 const originText = () => (showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
 // Every visitor has a four-figure number, made once and kept by their browser, so two with the same name can be told apart.
+let myKey = store('ember.key');
+if (typeof myKey !== 'string' || !/^[a-z0-9]{24,40}$/.test(myKey)) { const b = new Uint8Array(20); crypto.getRandomValues(b); myKey = [...b].map((x) => (x % 36).toString(36)).join('') + Date.now().toString(36).slice(-6); store('ember.key', myKey); }
 let myCode = store('ember.code');
 if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.random() * 9000)); store('ember.code', myCode); }
 const fullName = (name, code) => (code ? `${name} #${code}` : name);
@@ -312,7 +314,13 @@ const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matche
 const STARTER = [
   { text: touch ? 'Walk up to the fire. Tap the ground to move' : 'Walk up to the fire. W A S D, or click the ground', where: () => FIRE, done: () => fireDist() < 5.5 },
   { text: touch ? 'Rest by the fire. Tap the words at the bottom' : 'Rest by the fire. Press E', where: () => FIRE, done: () => me.mode !== 'stand' && fireDist() < 5.5 },
-  { text: 'Fetch a stick from the woodpile and drop it on the fire', where: () => (held === 1 ? FIRE : WOODPILE), done: () => !!guideFlags.fire },
+  // The stick step says only the next small thing to do, with the key for it.
+  { text: () => {
+    const press = touch ? 'Tap the words at the bottom' : 'Press E';
+    if (held === 1) return fireDist() < 5.2 ? `Drop the stick on the fire. ${press}` : 'Carry the stick back to the fire';
+    if (me.mode !== 'stand') return touch ? 'Get up: tap "Get up" at the bottom. Then fetch a stick for the fire' : 'Get up with R. Then fetch a stick for the fire';
+    return Math.hypot(me.x - WOODPILE.x, me.z - WOODPILE.z) < 1.7 ? `Pick up a stick. ${press}` : 'Walk to the woodpile, a few steps from the fire';
+  }, where: () => (held === 1 ? FIRE : WOODPILE), done: () => !!guideFlags.fire },
   { text: 'Greet the keeper, the stag lying by the fire', where: () => keeper, done: () => !!guideFlags.greet },
 ];
 let starterAt = store('ember.starter');
@@ -326,7 +334,7 @@ let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
   if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
-  if (starterAt < STARTER.length) return { text: STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
+  if (starterAt < STARTER.length) return { text: typeof STARTER[starterAt].text === 'function' ? STARTER[starterAt].text() : STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
 }
@@ -402,7 +410,7 @@ function showList() {
 {
   const box = $('tasks'), head = $('tasks-head');
   let closed = store('ember.tasksClosed');
-  if (typeof closed !== 'boolean') closed = window.innerWidth < 720;
+  if (typeof closed !== 'boolean') closed = window.innerWidth < 720 || window.innerHeight < 520;
   const apply = () => { box.dataset.closed = closed ? 'true' : 'false'; head.setAttribute('aria-expanded', closed ? 'false' : 'true'); };
   apply();
   head.addEventListener('click', () => { closed = !closed; store('ember.tasksClosed', closed); apply(); canvas.focus(); });
@@ -649,6 +657,7 @@ function updateKeeperGame(dt) {
   }
   keeperTagged();
   if (keeperLoose) { keeper.mode = 'stand'; keeper.y = groundHeight(keeper.x, keeper.z); }
+  else if (partyStand) { if (keeper.mode !== 'stand') keeper.mode = 'stand'; }          // on his feet for the dance
   else if (keeper.mode !== 'lie') { keeper.mode = 'lie'; keeper.speed = 0; }
   const sub = `${itWho === 'keeper' ? '§i' : ''}island keeper`;
   if (keeper.sub !== sub) keeper.setName('Keeper', sub);
@@ -752,7 +761,7 @@ function tagPeer(id) {
 function heardTag(id, p, data) {
   if (data.invAt > (p.invAt || 0)) {
     p.invAt = data.invAt;
-    if (data.invTo === net.id && entered && !asleepSince && !game && !ignored.has(id)) {
+    if (data.invTo === net.id && entered && !asleepSince && !game && !party && !ignored.has(id)) {
       invitedBy = { id, name: data.name, until: nowSec() + 14 };
       flash(`${data.name} wants to play tag`, touch ? 'Tap the words below to play' : 'Press E to play');
       addLog('', `${data.name} asks you to play tag.`, 'sys');
@@ -846,10 +855,10 @@ function updateTag() {
   const line = !g || !entered || left <= 0 ? '' : game
     ? `${who === 'me' ? 'You are it!' : who ? `${itName} is it. Run!` : 'Tag'}|${players.length + 1} playing|Stop playing`
     : `Tag: ${who ? `${itName} is it` : 'a game is on'}|${players.length} playing|Join in`;
-  el.hidden = !line;
+  if (line || !partyLine) el.hidden = !line;       // a dance at the fire may be using the line
   if (line) {
     $('game-time').textContent = clockText(left);
-    if (line !== gameLine) { const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; el.classList.toggle('it', who === 'me'); }
+    if (line !== gameLine) { partyLine = ''; const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; el.classList.toggle('it', who === 'me'); }
   }
   gameLine = line;
   // Rings under the players, and a marker over whoever is it.
@@ -874,7 +883,275 @@ function updateTag() {
     itMarker.rotation.y = t * 2.4;
   }
 }
-$('game-btn').addEventListener('click', () => { if (game) leaveTag(); else joinTag(); canvas.focus(); });
+$('game-btn').addEventListener('click', () => { if (game) leaveTag(); else if (seenGame) joinTag(); else if (party) leaveParty(); else joinParty(); canvas.focus(); });
+
+// ---------- a dance at the fire ----------
+// When a few animals are resting at the fire, one of them can start a dance. Everyone who joins circles the fire
+// together for a minute, hopping on the beat and calling out on every fourth bar; the fire burns higher the more
+// there are, and the keeper gets up and joins in. Like tag, there is no referee: each dancer says which dance they
+// are in (its number is the moment it began) and works out their own place in the ring from the list of dancers.
+const PARTY_MS = 60000, PARTY_R = 5.0, BEAT_MS = 800;
+let party = 0, seenParty = 0, partyBeat = -1, partyAlone = 0, partyJoinedAt = 0, partyLine = '', partyCalled = 0;
+const restingAtFire = () => [...peers.values()].filter((p) => p.data.mode !== 'stand' && !p.data.asleep && Math.hypot(p.av.x - FIRE.x, p.av.z - FIRE.z) < 5.5);
+function startParty() {
+  if (party || seenParty || game || !entered) return;
+  party = Math.max(Date.now(), tagSeen + 1); partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
+  standUp(); setHeld(0);
+  flash('Dance!', 'Round the fire');
+  addLog('', 'You started a dance at the fire. Anyone near can join in.', 'sys');
+  audio.pop(760); world.flareUp();
+  net.note('dance');
+  pushPresence(true);
+}
+function joinParty() {
+  if (party || !seenParty || game || !entered) return;
+  party = seenParty; partyJoinedAt = Date.now(); partyAlone = 0; partyBeat = -1;
+  if (me.mode !== 'stand') standUp();
+  setHeld(0);
+  flash('You are in', 'Round the fire');
+  audio.pop(700);
+  net.note('dance');
+  pushPresence(true);
+}
+function leaveParty(why = '') {
+  if (!party) return;
+  const danced = Date.now() - partyJoinedAt;
+  party = 0;
+  if (why === 'done') {
+    // Danced it through: warm to the bone, and (not more than once in ten minutes) a plank on the boat.
+    warmth = 1; warmSaid = true;
+    const last = store('ember.danced') || 0, plank = danced > 25000 && Date.now() - last > 600000;
+    if (plank) { store('ember.danced', Date.now()); addPlanks(1); }
+    flash('What a dance', plank ? 'Warm right through, and a plank on the boat' : 'Warm right through');
+    addLog('', plank ? 'The dance is over. You are warm right through, and a plank goes on the boat in your name.' : 'The dance is over. You are warm right through.', 'sys');
+    did('warm');
+  } else addLog('', why === 'alone' ? 'The dance has wound down.' : 'You stepped out of the dance.', 'sys');
+  pushPresence(true);
+}
+function updateParty(dt) {
+  let g = party;
+  if (!g) for (const p of peers.values()) if (p.data.dance > g && Date.now() - p.data.dance < PARTY_MS) g = p.data.dance;
+  seenParty = g;
+  const left = g ? (PARTY_MS - (Date.now() - g)) / 1000 : 0;
+  const ids = [];
+  if (g) for (const [id, p] of peers) if (p.data.dance === g) ids.push(id);
+  if (!seenParty && partyCalled) partyCalled = 0;
+  if (seenParty && !party && !partyCalled && entered && fireDist() < 12 && ids.length) {
+    // A dance has begun nearby: say so once.
+    partyCalled = seenParty;
+    flash(`${peers.get(ids[0]).data.name} started a dance`, touch ? 'Tap the words below to join in' : 'Press E to join in');
+    audio.pop(620);
+  }
+  if (party) {
+    partyAlone = ids.length ? 0 : partyAlone || Date.now();
+    if (left <= 0) leaveParty('done');
+    else if (asleepSince || !entered) leaveParty();
+    else if (partyAlone && Date.now() - partyAlone > 9000) leaveParty('alone');
+  }
+  const on = !!g && left > 0 && entered;
+  const n = ids.length + (party ? 1 : 0);
+  const beat = on ? Math.floor((Date.now() - g) / BEAT_MS) : -1;
+  const newBeat = on && beat !== partyBeat;
+  if (party) {
+    // Your place in the ring: the dancers in a fixed order, evenly spaced, all turning together.
+    const order = [myWireId(), ...ids].sort(), i = order.indexOf(myWireId());
+    const ang = (i / order.length) * Math.PI * 2 + ((Date.now() - party) / 1000) * 0.5;
+    // Eased in over the first second, then exactly on the ring whatever the frame rate.
+    const tx = FIRE.x + Math.sin(ang) * PARTY_R, tz = FIRE.z + Math.cos(ang) * PARTY_R, k = Math.min(1, (Date.now() - partyJoinedAt) / 1000) ** 2;
+    me.x = lerp(me.x, tx, k); me.z = lerp(me.z, tz, k);
+    me.targetYaw = Math.atan2(Math.cos(ang), -Math.sin(ang));
+    me.speed = lerp(me.speed, PARTY_R * 0.5, 0.2);
+    vel.x = vel.z = 0; moveTarget = null; world.hideMarker(); lastInputAt = Date.now();
+    if (newBeat && beat % 2 === 0) playEmote('hop');
+  }
+  if (newBeat) {
+    partyBeat = beat;
+    if (beat % 8 === 7) {
+      // Every fourth bar the whole ring calls out, and the fire jumps.
+      world.flareUp();
+      const voices = ids.map((id) => peers.get(id)).filter((p) => p.fade !== undefined);
+      if (party) audio.call(SPECIES[me.species].call, 0.5);
+      voices.slice(0, 4).forEach((p, j) => setTimeout(() => audio.call(SPECIES[p.data.species].call, 0.3 * hearFrom(p.av.x, p.av.z, 30)), 60 + j * 70));
+    }
+    // The keeper keeps time, on his feet by his place.
+    if (!keeperLoose && beat % 2 === 0) keeper.play('hop');
+  }
+  world.setParty(on ? Math.min(1, n / 5) * 0.6 + 0.4 : 0);
+  partyStand = on && !keeperLoose;
+  // The line at the top, when no game of tag has it.
+  const el = $('game');
+  const line = on && !gameLine ? `${party ? 'Dancing at the fire' : 'A dance at the fire'}|${n} dancing|${party ? 'Step out' : game ? '' : 'Join in'}` : '';
+  if (!gameLine) {
+    el.hidden = !line;
+    if (line) {
+      $('game-time').textContent = clockText(left);
+      if (line !== partyLine) { const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; $('game-btn').hidden = !c; el.classList.remove('it'); }
+    }
+  } else $('game-btn').hidden = false;
+  partyLine = line;
+}
+let partyStand = false;
+
+// ---------- gestures, friends and whispers ----------
+// Gestures are small things done to the animal beside you, which they can return with one tap.
+const GESTURES = {
+  nuzzle: { label: 'Nuzzle', did: (n) => `You nuzzle ${n}.`, got: (n) => `${n} nuzzles you.`, back: 'Nuzzle back', emote: 'sniff', color: 0xff9db0 },
+  bow: { label: 'Play-bow', did: (n) => `You bow to ${n}, tail up.`, got: (n) => `${n} bows to you, wanting to play.`, back: 'Bow back', emote: 'greet', color: 0xffc978 },
+  share: { label: 'Share', did: (n) => `You hold it out to ${n}.`, got: (n) => `${n} offers you what they are carrying.`, back: '', emote: 'greet', color: 0xa9e6c8 },
+  curl: { label: 'Curl up beside', did: (n) => `You curl up beside ${n}.`, got: (n) => `${n} curls up beside you.`, back: '', emote: '', color: 0xffc978 },
+};
+let myGesture = null, gestureBack = null, lastGestureAt = -99;
+function gestureTo(id, kind) {
+  const p = peers.get(id), g = GESTURES[kind];
+  if (!p || !g || !entered || nowSec() - lastGestureAt < 1.5 || ignored.has(id)) return;
+  lastGestureAt = nowSec();
+  me.targetYaw = Math.atan2(p.av.x - me.x, p.av.z - me.z);
+  if (kind === 'curl') {
+    // Lie down close against them, on the side you came from.
+    const dx = me.x - p.av.x, dz = me.z - p.av.z, d = Math.hypot(dx, dz) || 1, gap = 0.55 + (SPECIES[me.species].height + SPECIES[p.data.species].height) * 0.28;
+    me.x = p.av.x + (dx / d) * gap; me.z = p.av.z + (dz / d) * gap;
+    setMode('lie');
+  } else if (g.emote) playEmote(g.emote);
+  if (kind === 'share') { myGesture = ['share', id, Date.now(), held]; setTimeout(() => { setHeld(0); pushPresence(true); }, 500); }
+  else myGesture = [kind, id, Date.now()];
+  ripple((me.x + p.av.x) / 2, (me.z + p.av.z) / 2, 1.6, g.color);
+  addLog('', g.did(p.data.name), 'sys');
+  audio.pop(kind === 'nuzzle' ? 820 : 680);
+  gestureBack = null;
+  net.note('gesture');
+  pushPresence(true);
+}
+function heardGesture(id, p, data) {
+  const g = data.gesture;
+  if (!g || !(g.at > (p.gestAt || 0))) return;
+  p.gestAt = g.at;
+  const def = GESTURES[g.kind];
+  if (!def || !entered) return;
+  if (g.to !== net.id) { if (peers.has(g.to)) ripple((p.av.x + peers.get(g.to).av.x) / 2, (p.av.z + peers.get(g.to).av.z) / 2, 1.6, def.color); return; }
+  if (ignored.has(id) || asleepSince || Math.hypot(p.av.x - me.x, p.av.z - me.z) > 4) return;
+  addLog('', def.got(data.name), 'sys');
+  audio.pop(760);
+  ripple((me.x + p.av.x) / 2, (me.z + p.av.z) / 2, 1.6, def.color);
+  if (g.kind === 'share' && g.held && !held) { setTimeout(() => { setHeld(g.held); pushPresence(true); addLog('', g.held === 2 ? 'You take the fish. Kind of them.' : 'You take it. Kind of them.', 'sys'); }, 600); }
+  if (g.kind === 'curl') warmth = Math.min(1, warmth + 0.15);
+  if (def.back) gestureBack = { id, kind: g.kind, name: data.name, until: nowSec() + 8 };
+  else if (!me.emote) setTimeout(() => { if (!me.emote) playEmote('wag'); }, 500);
+}
+// The row of things to do with the animal beside you. Plain words, like everything else down there.
+let withShown = '', withTick = 0;
+function updateWith() {
+  if (withTick++ % 40 === 0) showFriendsCount();
+  const row = $('with');
+  let who = null, wd = 2.5;
+  if (entered && !party && !asleepSince) for (const [id, p] of peers) { const d = Math.hypot(p.av.x - me.x, p.av.z - me.z); if (d < wd && !p.data.asleep && !ignored.has(id) && p.fade > 0.5) { wd = d; who = { id, p }; } }
+  const opts = [];
+  if (who && me.mode === 'stand') {
+    const resting = who.p.data.mode !== 'stand';
+    if (!resting) { opts.push(['nuzzle', 'Nuzzle'], ['bow', 'Play-bow']); if (held === 1 || held === 2) opts.push(['share', held === 2 ? 'Share your fish' : 'Share your stick']); }
+    else opts.push(['curl', 'Curl up beside']);
+    if (who.p.data.pid && myPid && !friendOf(who.p.data.pid)) opts.push(['friend', askedMe(who.p.data.pid) ? 'Be friends' : 'Ask to be friends']);
+  }
+  const key = who && opts.length ? who.id + '|' + opts.map((o) => o[1]).join('|') : '';
+  if (key !== withShown) {
+    withShown = key;
+    row.textContent = '';
+    row.hidden = !key;
+    if (key) {
+      const lead = document.createElement('span'); lead.textContent = `With ${who.p.data.name}:`; row.appendChild(lead);
+      for (const [kind, label] of opts) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'word'; b.textContent = label;
+        b.addEventListener('click', () => { if (kind === 'friend') askFriend(who.p.data.pid, who.p.data.name); else gestureTo(who.id, kind); withShown = ''; canvas.focus(); });
+        row.appendChild(b);
+      }
+    }
+  }
+  if (gestureBack && (nowSec() > gestureBack.until || !peers.has(gestureBack.id))) gestureBack = null;
+}
+
+// Friends are kept by the island, under a scrambled form of the secret each browser holds.
+let myPid = '', friends = [], friendAsks = [], friendInvite = null, keptBy = '';
+const friendOf = (pid) => friends.find((f) => f.pid === pid);
+const askedMe = (pid) => friendAsks.some((f) => f.pid === pid);
+const peerOf = (pid) => { for (const [id, p] of peers) if (p.data.pid === pid) return { id, p }; return null; };
+function askFriend(pid, name) {
+  if (!pid) return;
+  const answering = askedMe(pid);
+  net.social({ t: 'friend', pid });
+  if (!answering) addLog('', `You asked ${name} to be friends. If they say yes, you will find each other here again.`, 'sys');
+  friendInvite = null;
+}
+function onSocial(m) {
+  if (m.t === 'friends') { friends = Array.isArray(m.friends) ? m.friends : []; friendAsks = Array.isArray(m.asks) ? m.asks : []; withShown = ''; showFriendsCount(); if (!$('sheet').hidden && $('sheet-title').textContent === 'Friends') openFriends(); }
+  if (m.t === 'friends' && m.first) {
+    const hereNow = friends.filter((f) => f.here).map((f) => f.name.replace(/ #\d{4}$/, ''));
+    if (hereNow.length) addLog('', hereNow.length === 1 ? `Your friend ${hereNow[0]} is on the island.` : `Friends on the island: ${hereNow.slice(0, 5).join(', ')}.`, 'sys');
+  }
+  if (m.t === 'mail' && Array.isArray(m.mail) && m.mail.length) setTimeout(() => {
+    flash(m.mail.length === 1 ? 'A note for you' : `${m.mail.length} notes for you`, `from ${[...new Set(m.mail.map((n) => String(n.name).replace(/ #\d{4}$/, '')))].slice(0, 3).join(', ')}`);
+    for (const n of m.mail) if (!judge(n.text)) addLog(String(n.name), `${n.text} (left ${ago(n.at)})`, 'whisper', null, 'left you a note:');
+    audio.pop(820);
+  }, 3000);
+  else if (m.t === 'fask') {
+    const p = peers.get(m.id);
+    if (p && ignored.has(m.id)) return;
+    friendInvite = { pid: m.pid, name: m.name, until: nowSec() + 15 };
+    flash(`${m.name} asks to be friends`, touch ? 'Tap the words below to say yes' : 'Press E to say yes');
+    addLog('', `${m.name} asks to be friends. You can also answer later from Friends at the top.`, 'sys');
+    audio.pop(700);
+  } else if (m.t === 'fyes') {
+    flash('Friends!', `You and ${m.name}`);
+    addLog('', `You and ${m.name} are friends now. You can whisper to each other, and leave notes when one of you is away.`, 'sys');
+    audio.pop(880); if (!me.emote) playEmote('hop');
+  } else if (m.t === 'fno') addLog('', 'Your friends list is full.', 'sys');
+  else if (m.t === 'w') {
+    if (m.id && ignored.has(m.id)) return;
+    if (judge(m.text)) return;
+    addLog(m.name, m.text, 'whisper', m.id && peers.has(m.id) ? m.id : null, 'whispers');
+    const p = m.id && peers.get(m.id);
+    if (p) p.lines = (p.lines || []).concat('(whisper) ' + m.text).slice(-5);
+    audio.blip(880);
+  } else if (m.t === 'wok') { const f = friendOf(m.to); addLog('', m.kept ? `${f ? f.name : 'Your friend'} is away. Your note will be waiting when they come ashore.` : '', 'sys'); }
+  else if (m.t === 'wno') addLog('', m.why === 'enough' ? 'They already have five notes from you waiting. Let them read those first.' : m.why === 'friends' ? 'You can only whisper to friends.' : m.why === 'muted' ? 'You are muted, so that went nowhere.' : 'That did not go through.', 'sys');
+}
+function whisperTo(pid, text) {
+  const f = friendOf(pid);
+  if (!f || !text) return;
+  if (mutedUntil > Date.now()) { addLog('', 'You are muted, so that went nowhere.', 'sys'); return; }
+  const verdict = judge(text);
+  if (verdict === 'mute') { net.selfMute(); setMuted(Date.now() + 600000, 'words'); return; }
+  if (verdict === 'soft') { addLog('', 'Gently, please. That one was not sent.', 'sys'); return; }
+  net.social({ t: 'w', to: pid, text });
+  addLog(`To ${f.name}`, text, 'whisper you');
+}
+function openWhisper(pid) {
+  const f = friendOf(pid);
+  if (!f) return;
+  const here = !!peerOf(pid);
+  openSheet({
+    title: here ? `Whisper to ${f.name}` : `A note for ${f.name}`,
+    lines: [{ text: here ? 'Only they will see it, wherever they are on the island.' : 'They are away. Your note will be handed to them when they next step ashore.' }],
+    input: { max: 200, placeholder: here ? 'Your whisper' : 'Your note', button: here ? 'Whisper' : 'Leave it', submit: async (text) => { if (!text) return; closeSheet(); whisperTo(pid, text); } },
+    extras: [{ label: 'Back to friends', run: openFriends }],
+  });
+}
+function showFriendsCount() {
+  const here = friends.filter((f) => peerOf(f.pid)).length;
+  const label = friendAsks.length ? `Friends (${friendAsks.length} asking)` : here ? `Friends (${here} here)` : 'Friends';
+  if ($('btn-friends').textContent !== label) $('btn-friends').textContent = label;
+}
+function openFriends() {
+  const lines = [];
+  for (const a of friendAsks) lines.push({ text: `${fullName(a.name.replace(/ #\d{4}$/, ''), a.code)} asks to be friends`, meta: 'Press to say yes', kind: 'pick', run: () => { askFriend(a.pid, a.name); } });
+  const sorted = friends.slice().sort((p, q) => (Number(!!peerOf(q.pid)) - Number(!!peerOf(p.pid))) || (q.seen - p.seen));
+  for (const f of sorted) {
+    const here = !!peerOf(f.pid), kind = SPECIES[f.s] ? SPECIES[f.s].label : 'Animal';
+    lines.push({ text: fullName(f.name.replace(/ #\d{4}$/, ''), f.code), meta: here ? `${kind} · on the island now · press to whisper` : `${kind} · last here ${ago(f.seen)} · press to leave a note`, kind: here ? 'pick here' : 'pick', run: () => openWhisper(f.pid) });
+  }
+  if (!lines.length) lines.push({ text: myPid ? 'No friends yet. Stand beside another animal and choose "Ask to be friends", or press their name in the chat.' : 'Friends need the island\'s own room, which could not be reached just now.' });
+  const kept = keptBy === 'guest' ? 'Your number and friends are kept with your guest account.' : keptBy ? 'Your number and friends are kept by this browser.' : '';
+  openSheet({ title: 'Friends', lines, note: [friends.length ? 'Friends can whisper to each other and leave notes. Press a name in the chat to remove a friend.' : '', kept].filter(Boolean).join(' ') });
+}
+$('btn-friends').addEventListener('click', openFriends);
 
 // Calling and answering. A call you hear can be answered for a few seconds; a call nobody answers is picked up
 // by the owl or Clover if they are near, and otherwise by the keeper, so no call falls flat.
@@ -947,7 +1224,8 @@ function greet(av, name) {
 
 // ---------- chat ----------
 const logEl = $('log');
-function addLog(name, text, kind, peerId) {
+function addLog(name, text, kind, peerId, verb) {
+  if (!text) return;
   const row = document.createElement('div');
   row.className = 'line' + (kind ? ' ' + kind : '');
   if (name) {
@@ -956,7 +1234,7 @@ function addLog(name, text, kind, peerId) {
     // Another visitor's name can be pressed, to stop hearing them or report them.
     if (peerId) { b.className = 'whom'; b.tabIndex = 0; b.setAttribute('role', 'button'); b.title = 'Stop hearing or report'; b.onclick = () => openVisitor(peerId); b.onkeydown = (e) => { if (e.key === 'Enter') openVisitor(peerId); }; }
     row.appendChild(b);
-    row.appendChild(document.createTextNode(' ' + text));
+    row.appendChild(document.createTextNode(verb ? ` ${verb} ${text}` : ' ' + text));
   } else {
     row.textContent = text;
   }
@@ -1006,6 +1284,9 @@ function openVisitor(id) {
       closeSheet();
       addLog('', sent ? `Thank you. The keeper will read your report about ${name}, and you will not hear them again this visit.` : `You will not hear ${name} again this visit.`, 'sys');
     } },
+    extras: !p.data.pid || !myPid ? [] : friendOf(p.data.pid)
+      ? [{ label: `Whisper to ${name}`, run: () => openWhisper(p.data.pid) }, { label: 'Stop being friends', run: () => { net.social({ t: 'unfriend', pid: p.data.pid }); closeSheet(); addLog('', `You and ${name} are no longer friends. They are not told.`, 'sys'); } }]
+      : [{ label: askedMe(p.data.pid) ? `Be friends with ${name}` : `Ask ${name} to be friends`, run: () => { closeSheet(); askFriend(p.data.pid, name); } }],
     extra: { label: deaf ? `Hear ${name} again` : `Stop hearing ${name}`, run: () => { if (deaf) ignored.delete(id); else ignored.add(id); closeSheet(); addLog('', deaf ? `You can hear ${name} again.` : `You will not hear ${name} until you leave. They are not told.`, 'sys'); } },
     note: p.reported ? 'You have reported this animal.' : 'A report sends the keeper the last things this animal said. Animals reported by several others are muted.',
   });
@@ -1056,11 +1337,12 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), mu: mutedUntil > Date.now() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, gs: myGesture, mu: mutedUntil > Date.now() ? mutedUntil : 0,
   };
 }
 const net = createNet({
   onStatus() { updateCount(); },
+  onSocial(m) { onSocial(m); },
   onMod(m) { if (m.muted) setMuted(m.muted, m.why); else if (m.soft) addLog('', 'Gently, please. That one was not passed on.', 'sys'); },
   onPeers(list) {
     const seen = new Set();
@@ -1076,12 +1358,14 @@ const net = createNet({
           audio.step(surf, 0.6 * clamp(1 - Math.hypot(av.x - me.x, av.z - me.z) / 11, 0, 1));
           if (surf === 'water') world.ripple(av.x, av.z);
         };
-        p = { av, data, sayId: data.say ? data.say.id : 0, emoteId: data.emote ? data.emote.id : 0, fade: 1, tagAt: data.tagAt, invAt: data.invAt };
+        p = { av, data, sayId: data.say ? data.say.id : 0, emoteId: data.emote ? data.emote.id : 0, fade: 1, tagAt: data.tagAt, invAt: data.invAt, gestAt: data.gesture ? data.gesture.at : 0 };
         peers.set(id, p);
-        if (entered) addLog('', `${data.name} came ashore.`, 'sys');
+        if (entered) addLog('', friendOf(data.pid) ? `Your friend ${data.name} came ashore.` : `${data.name} came ashore.`, 'sys');
+        if (entered && friendOf(data.pid)) { flash(`${data.name} is here`, 'Your friend'); showFriendsCount(); }
       }
       p.data = data;
       heardTag(id, p, data);
+      heardGesture(id, p, data);
       p.av.setLook(data.species, data.palette);
       p.av.setName(data.name, peerSub(id, data));
       p.av.mode = data.mode;
@@ -1159,7 +1443,7 @@ function closeSheet() {
   canvas.focus();
 }
 // One panel for everything you read or write: a title, some lines, an optional box to write in.
-function openSheet({ title, lines = [], input = null, extra = null, note = '' }) {
+function openSheet({ title, lines = [], input = null, extra = null, extras = null, note = '' }) {
   if (stopCarvings) { stopCarvings(); stopCarvings = null; }
   $('sheet-title').textContent = title;
   setSheetLines(lines);
@@ -1175,6 +1459,9 @@ function openSheet({ title, lines = [], input = null, extra = null, note = '' })
   const ex = $('sheet-extra');
   ex.hidden = !extra;
   if (extra) { ex.textContent = extra.label; ex.onclick = extra.run; }
+  // Further choices, when a sheet has more than one.
+  for (const old of [...document.querySelectorAll('.sheet-buttons .more')]) old.remove();
+  for (const x of extras || []) { const b = document.createElement('button'); b.type = 'button'; b.className = 'ghost more'; b.textContent = x.label; b.onclick = x.run; ex.parentNode.insertBefore(b, ex); }
   $('sheet-note').textContent = note;
   sheet.hidden = false;
   moveTarget = null; world.hideMarker();
@@ -1186,6 +1473,7 @@ function setSheetLines(lines) {
   for (const l of lines) {
     const row = document.createElement('div');
     row.className = 'row' + (l.kind ? ' ' + l.kind : '');
+    if (l.run) { row.tabIndex = 0; row.setAttribute('role', 'button'); row.onclick = l.run; row.onkeydown = (e) => { if (e.key === 'Enter') l.run(); }; }
     const text = document.createElement('span');
     text.className = 'text';
     text.textContent = l.text;
@@ -1534,8 +1822,10 @@ $('enter').addEventListener('click', () => {
   $('queue-text').textContent = 'Finding you a place by the fire…';
   // What kind of visit this is, for the island's daily totals: first today, first ever, and how far along the guide.
   const utcDay = new Date().toISOString().slice(0, 10);
-  const info = { first: store('ember.day') !== utcDay ? 1 : 0, fresh: store('ember.been') ? 0 : 1, step: starterAt };
-  net.join((q) => {
+  const info = { first: store('ember.day') !== utcDay ? 1 : 0, fresh: store('ember.been') ? 0 : 1, step: starterAt, key: myKey };
+  // The guest account, if there is one, is how the island knows you from visit to visit. A moment is allowed for it.
+  net.guest().then((g) => g, () => null).then((g) => { if (g && g.token) info.tok = g.token; startJoin(); });
+  const startJoin = () => net.join((q) => {
     if (q.state === 'in') { store('ember.day', utcDay); store('ember.been', true); comeAshore(q); return; }
     if (q.state === 'out') { leaveIsland('tide'); return; }
     if (entered) return;
@@ -1548,7 +1838,7 @@ function leaveIsland(why) {
   const was = entered;
   entered = false; asking = false;
   if (was && why === 'left') net.note('left');
-  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; ignored.clear();
+  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; party = 0; myGesture = null; gestureBack = null; friendInvite = null; ignored.clear();
   if (was || why !== 'tide') net.leave();
   wake(false);
   setMode('stand'); setHeld(0);
@@ -1600,6 +1890,10 @@ function comeAshore(q = {}) {
   // Signs of the others: how many have been here today, and whose tracks are still on the ground.
   // The island knows which country the connection comes from, which beats guessing from the time zone.
   if (/^[A-Z]{2}$/.test(String(q.cc || ''))) { try { COUNTRY = new Intl.DisplayNames(['en'], { type: 'region' }).of(q.cc) || COUNTRY; } catch (e) { /* keep the guess */ } me.setName(me.name, mySub()); }
+  // The island says who you are to everyone else: your number, your friends, and any notes left for you.
+  if (/^\d{4}$/.test(String(q.code || ''))) { myCode = q.code; store('ember.code', myCode); $('who-code').textContent = '#' + myCode; me.setName(me.name, mySub()); }
+  if (typeof q.pid === 'string') myPid = q.pid;
+  keptBy = q.who === 'guest' ? 'guest' : 'browser';
   if (q.mu > Date.now()) { mutedUntil = Math.max(mutedUntil, q.mu); me.setName(me.name, mySub()); }
   const laid = traces.setLeft(q.tracks, (sp) => !!(SPECIES[sp] && SPECIES[sp].hoof), (sp) => (SPECIES[sp] ? SPECIES[sp].height : 1));
   if (Number.isFinite(q.today)) {
@@ -1662,8 +1956,14 @@ function updateActions() {
     main = opts[0] || null;
     alt = opts[1] && opts[1].side ? opts[1] : null;
   }
+  if (gestureBack && me.mode === 'stand' && !held) { if (!alt && main) alt = main; const gb = gestureBack; main = { label: `${GESTURES[gb.kind].back} (${gb.name})`, run: () => gestureTo(gb.id, gb.kind) }; }
+  if (friendInvite && nowSec() < friendInvite.until) { if (!alt && main) alt = main; const fi = friendInvite; main = { label: `Be friends with ${fi.name}`, run: () => askFriend(fi.pid, fi.name) }; } else friendInvite = null;
+  // A dance at the fire: start one when resting there in company, join one that is going, step out of yours.
+  if (party) { main = null; alt = { label: 'Step out of the dance', run: () => leaveParty() }; }
+  else if (seenParty && !game && fireDist() < 12) { if (!alt && main) alt = main; main = { label: 'Join the dance', run: joinParty }; }
+  else if (!seenParty && !game && !seenGame && me.mode !== 'stand' && fireDist() < 5.5 && restingAtFire().length >= 1) { if (!alt) alt = main; main = { label: 'Start a dance', run: startParty }; }
   // Tag: whoever is it tags the nearest animal on its feet. With no game on, anyone close can be asked to play.
-  if (me.mode === 'stand') {
+  if (me.mode === 'stand' && !party) {
     const near = taggable(TAG_REACH, false), prey = taggable(TAG_REACH, true);
     if (itWho === 'me') { if (prey && nowSec() - myItAt > TAG_GRACE) { if (!alt && main) alt = main; main = { label: `Tag ${prey.p.data.name}`, run: () => tagPeer(prey.id) }; } }
     else if (invitedBy) { if (!alt && main) alt = main; main = { label: `Play tag with ${invitedBy.name}`, run: acceptTag }; }
@@ -1817,6 +2117,8 @@ function frame() {
   world.setFuel(fuelNow());
   me.look = speaker && speaker.until > t && speaker.av !== me ? speaker.av : null;
   me.y = groundHeight(me.x, me.z);
+  updateParty(dt);
+  updateWith();
   me.update(dt, t);
 
   // Keeper.
@@ -1973,8 +2275,18 @@ window.__ember = {
   get starterAt() { return starterAt; },
   traces, companion, noteCall, setHeld, addToBoat, tagPeer, inviteTag, acceptTag, joinTag, leaveTag,
   get game() { return game; },
+  gestureTo, askFriend, openFriends, whisperTo, openWhisper,
+  get friends() { return friends; },
+  get friendAsks() { return friendAsks; },
+  get pid() { return myPid; },
+  get keptBy() { return keptBy; },
+  get code() { return myCode; },
+  startParty, joinParty, leaveParty,
+  get party() { return party; },
+  get seenParty() { return seenParty; },
   askKeeper, K,
   get keeperLoose() { return keeperLoose; },
+  get keeperState() { const s = spotAt(KEEPER_SEAT, bodyLen(keeper)); return { loose: keeperLoose, homing: keeperHoming, wasHost, host: keeperHost(), game: K.data.game, seat: [s.x, s.z], at: [keeper.x, keeper.z], party: partyStand }; },
   get seenGame() { return seenGame; },
   get it() { return itWho; },
   set tagTime(v) { tagTime = v; },

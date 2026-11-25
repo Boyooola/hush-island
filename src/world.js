@@ -476,7 +476,7 @@ export function buildWorld(scene, opts = {}) {
   fireGroup.add(embers);
 
   // The fire runs on fuel: 0 is embers, 1 is a good blaze, above 1 is roaring.
-  let fuel = 0.6, flare = 0, heat = 0.6;
+  let fuel = 0.6, flare = 0, heat = 0.6, party = 0, partyWas = false;
   const emberCountFor = (h) => Math.floor(EMBERS * clamp(0.1 + 0.7 * h, 0, 1));
   updaters.push((dt, t) => {
     flare = Math.max(0, flare - dt / 5);
@@ -484,7 +484,10 @@ export function buildWorld(scene, opts = {}) {
     const target = 0.14 + 0.86 * Math.min(1, f) + Math.max(0, f - 1) * 0.5 + flare * 0.45;
     heat = lerp(heat, target, 1 - Math.exp(-dt * 2.5));
     const flick = 0.82 + 0.1 * Math.sin(t * 11.3) + 0.08 * Math.sin(t * 23.7 + 1) + 0.06 * Math.sin(t * 5.1 + 2);
-    fireLight.intensity = 62 * flick * heat;
+    // A dance warms the light and lets its colour wander.
+    fireLight.intensity = 62 * flick * heat * (1 + party * 0.45);
+    if (party > 0) fireLight.color.setHSL(0.07 + 0.045 * Math.sin(t * 2.3) + 0.02 * Math.sin(t * 5.1), 1, 0.62); else if (partyWas) fireLight.color.set(0xffa25e);
+    partyWas = party > 0;
     fireLight.position.x = Math.sin(t * 9) * 0.05;
     fireLight.position.z = Math.cos(t * 7.3) * 0.05;
     fireGlow.scale.setScalar((1.6 + 4.4 * heat) * (0.9 + 0.15 * flick));
@@ -1108,6 +1111,7 @@ export function buildWorld(scene, opts = {}) {
     fireY,
     update(dt, t) { for (const u of updaters) u(dt, t); },
     setFuel(v) { fuel = v; },
+    setParty(v) { party = v; },
     get heat() { return heat; },
     flareUp() { flare = 1; for (let i = 0; i < EMBERS; i++) if (rng() < 0.5) emberData[i].life = 99; },
     tossLog(x, y, z, done) { toss = { x, y, z, k: 0, done }; tossMesh.position.set(x, y, z); tossMesh.visible = true; },

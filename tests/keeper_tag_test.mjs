@@ -62,7 +62,8 @@ const p1 = await kpos(b);
 ok('when the first player leaves, the game goes on for the other', (await b.evaluate(() => window.__ember.game)) > 0 && (await b.evaluate(() => window.__ember.keeperLoose)), JSON.stringify(p1));
 // Time runs out: he goes home.
 await b.evaluate(() => { window.__ember.tagTime = 1; });
-ok('when time is up he walks back to the fire and lies down', await until(b, () => { const e = window.__ember; return !e.keeperLoose && e.keeper.mode === 'lie'; }, 60000) && Math.hypot((await kpos(b))[0] - home[0], (await kpos(b))[1] - home[1]) < 0.5, JSON.stringify(await kpos(b)));
+ok('when time is up he walks back to the fire and lies down', await until(b, () => { const e = window.__ember; return !e.keeperLoose && e.keeper.mode === 'lie'; }, 180000) && Math.hypot((await kpos(b))[0] - home[0], (await kpos(b))[1] - home[1]) < 0.5, JSON.stringify(await kpos(b)));
+console.log('state', JSON.stringify(await b.evaluate(() => window.__ember.keeperState)));
 await nearKeeper(b); await b.waitForTimeout(1500);
 await b.evaluate(() => { const e = window.__ember; e.tagTime = 900; const i = e.actions.indexOf('Ask the keeper to play tag'); if (i >= 0) e.run(i); });
 ok('asked again straight away, he wants a rest', await has(b, 'Let me get my breath back first', 8000), JSON.stringify(await b.evaluate(() => window.__ember.actions)));

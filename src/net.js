@@ -1,7 +1,7 @@
 // Shared presence: who else has the island open right now, where they stand and what they say.
 // Everything received here is untrusted display data from other viewers.
 import { clamp } from './terrain.js';
-import { use, mode } from './backend.js';
+import { use, mode, guest } from './backend.js';
 import { PLAYABLE } from './avatar.js';
 import { judge } from './words.js';
 
@@ -40,12 +40,15 @@ export function parsePeer(p) {
     asleep: num(s.zz, 0, 1e15) > 0,
     // Tag: when this visitor was last made "it", and whom they last tagged and when.
     code: /^\d{4}$/.test(String(s.k ?? '')) ? String(s.k) : '',
+    pid: /^[0-9a-f]{20}$/.test(String(s.pd ?? '')) ? String(s.pd) : '',
+    gesture: Array.isArray(s.gs) ? { kind: clean(s.gs[0], 8), to: clean(s.gs[1], 16), at: num(s.gs[2], 0, 1e15), held: s.gs[3] === 1 || s.gs[3] === 2 ? s.gs[3] : 0 } : null,
     muted: num(s.mu, 0, 1e15),
     it: num(s.it, 0, 1e15),
     tagTo: Array.isArray(s.tg) ? clean(s.tg[0], 16) : '',
     tagAt: Array.isArray(s.tg) ? num(s.tg[1], 0, 1e15) : 0,
     tagStart: Array.isArray(s.tg) && s.tg[2] === 1,
     game: num(s.gm, 0, 1e15),
+    dance: num(s.dn, 0, 1e15),
     // Where the keeper is, from whoever is moving him in a game of tag: game (-1 while he walks home), place, and his tags.
     keeper: Array.isArray(s.kp) && Number.isFinite(s.kp[0]) && s.kp[0] !== 0 ? { g: num(s.kp[0], -1, 1e15), x: num(s.kp[1], -40, 40), z: num(s.kp[2], -40, 40), it: num(s.kp[3], 0, 1e15), to: clean(s.kp[4], 16), at: num(s.kp[5], 0, 1e15) } : null,
     invTo: Array.isArray(s.ti) ? clean(s.ti[0], 16) : '',
@@ -87,6 +90,7 @@ export function createNet(handlers) {
         handlers.onPeers(list);
       }, fail);
       if (typeof room.mod === 'function' && handlers.onMod) room.mod(handlers.onMod);
+      if (typeof room.social === 'function' && handlers.onSocial) room.social(handlers.onSocial);
       if (pending) { const p = pending; pending = null; send(p, true); }
       if (joinCb) startJoin();
     } catch (e) { fail(); }
@@ -110,6 +114,9 @@ export function createNet(handlers) {
     // Ask for a place on the island. cb hears {state: 'in'}, or {state: 'wait', pos, of} while the island is full.
     join(cb, info) { joinCb = cb; joinInfo = info || null; if (status === 'solo') cb({ state: 'in' }); else if (room) startJoin(); },
     get mode() { return mode; },
+    guest,
+    // Friends and whispers go through the island's own room; elsewhere they quietly do nothing.
+    social(m) { if (room && typeof room.send === 'function') room.send(m); },
     selfMute() { if (room && typeof room.selfMute === 'function') room.selfMute(); },
     report(peer, lines, note) { return !!(room && typeof room.report === 'function' && room.report(peer, lines, note)); },
     // The name everyone else on the island knows you by on the wire.

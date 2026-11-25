@@ -174,7 +174,7 @@
   /* A game of tag: one line under the guide, and big words in the middle of the screen when something happens. */
   #game { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: baseline; gap: 14px; white-space: nowrap;
     font-size: 15px; color: var(--ink); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.75); }
-  #game[hidden] { display: none; }
+  #game[hidden], #game-btn[hidden] { display: none; }
   #game b { font-family: var(--display); font-weight: 800; font-size: 19px; color: var(--ink); }
   #game.it b { color: var(--ember); }
   #game-time { font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -230,6 +230,17 @@
   #log .line.sys b { color: var(--ink-quiet); }
 
   /* What you can do here: a key and a few words, nothing else. */
+  /* Things to do with the animal beside you. */
+  #with { display: flex; align-items: baseline; gap: 4px 18px; flex-wrap: wrap; font-size: 15px; color: var(--ink-quiet); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.75); }
+  #with[hidden] { display: none; }
+  #with .word { color: var(--amber); }
+  #with .word::before { content: none; }
+  #log .line.whisper { color: #c9b8ff; font-style: italic; }
+  #log .line.whisper b { color: #c9b8ff; }
+  #sheet-body .row.pick { cursor: pointer; padding: 5px 0; border-bottom: 1px solid rgba(60, 40, 20, 0.14); }
+  #sheet-body .row.pick:hover .text, #sheet-body .row.pick:focus-visible .text { text-decoration: underline; }
+  #sheet-body .row.pick:focus-visible { outline: none; }
+  #sheet-body .row.pick.here .text::after { content: " ●"; color: #3f9a5a; font-size: 12px; }
   .acts { display: flex; gap: 6px 34px; flex-wrap: wrap; justify-content: center; }
   .acts:not(:has(.act:not([hidden]))) { display: none; }
   .act {
@@ -326,6 +337,22 @@
   /* Narrow windows and tablets: the top row keeps to one line by dropping words before it wraps. */
   @media (min-width: 721px) and (max-width: 1040px) { #daytext { display: none; } }
   @media (min-width: 721px) and (max-width: 880px) { #daybar { width: 120px; } #count { display: none; } }
+  /* A phone held sideways: wide but very short. Everything gives up a little height. */
+  @media (max-height: 520px) and (min-width: 721px) {
+    #intro { align-items: center; padding-top: 10px; padding-bottom: 10px; }
+    .card { gap: 7px; }
+    .card h1 { font-size: 40px; line-height: 1; }
+    .card p { font-size: 14px; max-width: 46ch; }
+    .card .primary { padding-top: 9px; padding-bottom: 9px; }
+    .hint { display: none; }
+    #log { font-size: 13px; width: min(340px, 44%); }
+    #log .line:nth-last-child(n+4) { display: none; }
+    #goal { font-size: 17px; }
+    #flash { top: 18%; }
+    #flash b { font-size: 34px; }
+    .act { font-size: 19px; }
+    #help { padding-top: 44px; }
+  }
   @media (max-width: 720px) {
     #intro { align-items: flex-end; justify-content: center; padding: 20px 16px 28px;
       background: linear-gradient(0deg, rgba(8, 14, 30, 0.9) 0%, rgba(8, 14, 30, 0.55) 42%, rgba(8, 14, 30, 0) 66%); }
@@ -390,6 +417,7 @@
     <button class="chip" id="btn-music" type="button" aria-pressed="true">Music on</button>
     <button class="chip" id="btn-sound" type="button" aria-pressed="true">Sound on</button>
     <button class="chip" id="btn-help" type="button" aria-pressed="false">Help</button>
+    <button class="chip" id="btn-friends" type="button">Friends</button>
     <button class="chip" id="btn-feedback" type="button">Feedback</button>
     <button class="chip" id="btn-leave" type="button">Leave</button>
   </div>
@@ -422,7 +450,9 @@
   <p>Fish pass under the end of the dock. A whole island day takes 48 minutes, and at island midnight the stars fall.</p>
   <p>By day, butterflies settle on anyone who keeps still, and the flat stone holds the sun. When rain comes, trees keep you dry.</p>
   <p>Things go better in company. Answer a call when you hear one. Driftwood counts twice with another animal beside you, and the fire warms you faster with someone else resting at it. Tracks on the ground show who was here before you.</p>
+  <p>Stand beside another animal and a row of things to do with them appears: nuzzle, play-bow, share what you are carrying, or curl up beside them if they are resting. You can also ask to be friends. Friends are told when the other is on the island, can whisper to each other, and can leave notes for when one of them is away.</p>
   <p>Keep it kind. Slurs, sexual talk and heavy swearing are not passed on, and whoever writes them is muted for a while. Press an animal's name in the chat to stop hearing them or to report them to the keeper.</p>
+  <p>When two or more animals are resting at the fire, any of them can start a dance. Everyone who joins circles the fire for a minute, and comes away warm right through.</p>
   <p>To play tag, walk up to another animal and ask. If they say yes, you are it. Whoever is it has a glowing ring and runs a little faster; touch another player to pass it on. A round lasts two minutes, anyone can join in from the line at the top, and players who sit or lie down are safe.</p>
   <p>You are not the only ones here. Crabs keep to the sand, an owl watches from the dead tree at night, and Clover the cow grazes her way round the island.</p>
   <h3>The keeper's list for today</h3>
@@ -452,6 +482,7 @@
     <button id="action" class="act" type="button" hidden><kbd>E</kbd><span class="label">Sit by the fire</span></button>
     <button id="action2" class="act alt" type="button" hidden><kbd>R</kbd><span class="label">Get up</span></button>
   </div>
+  <div id="with" hidden></div>
   <div class="bar">
     <div class="emotes">
       <button class="word" id="emote-call" type="button" data-key="1">Call</button>

@@ -43,3 +43,12 @@ create policy "answer a bottle" on public.bottles for update using (d->>'state' 
   d->>'state' = 'replied' and char_length(d->>'reply') between 1 and 140 and octet_length(d::text) < 1400
 );
 create policy "finish a bottle" on public.bottles for delete using (d->>'state' = 'replied');
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- People, friends, notes, feedback and reports (migration "friends_notes_feedback_reports", applied 25 Nov 2026).
+-- Tables: profiles, friends, friend_asks, friend_notes, feedback, reports. Row level security is on with no
+-- policies, so browsers cannot touch them. The island's room (the Worker) reads and writes them through the
+-- hi_* functions, using the project's secret key held in the Worker secret SUPABASE_SECRET_KEY:
+--   hi_remember, hi_friends_of, hi_are_friends, hi_befriend, hi_unfriend,
+--   hi_leave_note, hi_take_notes, hi_feedback, hi_report, hi_keeper
+-- The full SQL is in the project's migration history (Supabase dashboard, Database, Migrations).

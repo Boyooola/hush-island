@@ -1,0 +1,9 @@
+{
+  // Lets the site be deployed as a Cloudflare Worker that serves the built files.
+  // The name must match the Worker's name in the Cloudflare dashboard.
+  "name": "hush-island",
+  "compatibility_date": "2026-11-25",
+  "assets": {
+    "directory": "./dist"
+  }
+}

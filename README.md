@@ -12,10 +12,17 @@ npm run build      # writes the site to dist/
 npm run serve      # or serve dist/ with anything
 ```
 
-## Deploy on Cloudflare Pages
+## Deploy on Cloudflare
+
+As a Pages project:
 
 - Build command: `npm run build`
 - Build output directory: `dist`
+
+As a Worker (the repo's `wrangler.jsonc` points it at `dist`):
+
+- Build command: `npm run build`
+- Deploy command: `npx wrangler deploy`
 
 ## Visitors and storage
 

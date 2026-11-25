@@ -26,11 +26,11 @@ ok('others see the chosen name', await until(b, () => [...window.__ember.peers.v
 // Signs beside the country and time.
 await a.evaluate(() => window.__ember.teleport(2, 15, Math.PI / 2)); await b.evaluate(() => { const e = window.__ember; e.teleport(4.2, 15, 0); e.cam(1.2, 0.25, 4.2); });
 await a.evaluate(() => { window.__ember.idleAfter = 1; }); await a.waitForTimeout(6000);
-ok('away keeps the country and time, with a sign in front', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return /^§z.+·/.test(p.av.sub); }), await b.evaluate(() => [...window.__ember.peers.values()][0].av.sub));
+ok('away keeps the country and time, with a sign in front', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return /§z.+·/.test(p.av.sub); }), await b.evaluate(() => [...window.__ember.peers.values()][0].av.sub));
 await b.waitForTimeout(1500); await b.screenshot({ path: '/home/claude/ember-isle/shots/n2-away.png' });
 await a.evaluate(() => { window.__ember.idleAfter = 3600000; }); await a.mouse.click(640, 300); await a.waitForTimeout(800);
 await a.evaluate(() => window.__ember.sendChat('wanna fuck?'));
-ok('muted keeps them too', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return /^§m[^§]+·/.test(p.av.sub); }), await b.evaluate(() => [...window.__ember.peers.values()][0].av.sub));
+ok('muted keeps them too', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return /§m[^§]+·/.test(p.av.sub); }), await b.evaluate(() => [...window.__ember.peers.values()][0].av.sub));
 await b.waitForTimeout(1500); await b.screenshot({ path: '/home/claude/ember-isle/shots/n3-muted.png' });
 // The boat.
 const site = await b.evaluate(() => { const y = window.__ember.yard.site; return [y.x, y.z]; });

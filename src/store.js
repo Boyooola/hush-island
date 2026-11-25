@@ -190,7 +190,7 @@ export function createStore() {
             if (!Number.isFinite(n)) continue;
             const k = Math.max(0, Math.min(5, Math.floor(n)));
             total += k;
-            const name = clean(rec.name, 22) || 'A visitor';
+            const name = (clean(rec.name, 22) || 'A visitor') + (/^\d{4}$/.test(String(rec.code)) ? ` #${rec.code}` : '');
             by.set(name, (by.get(name) || 0) + k);
           }
           cb(total, 'ok', [...by.entries()].map(([name, n]) => ({ name, n })).sort((p, q) => q.n - p.n));
@@ -198,12 +198,12 @@ export function createStore() {
       } catch (e) { cb(mine(), 'off'); }
     });
   }
-  async function addPlanks(n, name) {
+  async function addPlanks(n, name, code) {
     const v = local.get('ember.boat');
     local.set('ember.boat', (Number.isFinite(v) ? v : 0) + n);
     await ready;
     if (!db || canWrite === false) return 'local';
-    try { await db.collection('boat').add({ n, name: clean(name, 22), at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; }
+    try { await db.collection('boat').add({ n, name: clean(name, 22), code: /^\d{4}$/.test(String(code)) ? String(code) : '', at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; }
   }
 
   return {

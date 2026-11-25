@@ -30,7 +30,7 @@ await say(a, 'hello there');
 ok('ordinary talk is heard', await has(b, 'hello there'));
 // Stop hearing, and hear again.
 await b.click('#log b.whom');
-ok('pressing a name opens that visitor', (await b.evaluate(() => document.getElementById('sheet-title').textContent)) === aName && (await b.evaluate(() => document.getElementById('sheet').innerText)).includes('hello there'));
+ok('pressing a name opens that visitor', (await b.evaluate(() => document.getElementById('sheet-title').textContent)).startsWith(aName + ' #') && (await b.evaluate(() => document.getElementById('sheet').innerText)).includes('hello there'));
 await b.screenshot({ path: '/home/claude/ember-isle/shots/m1-visitor.png' });
 await b.click('#sheet-extra'); await say(a, 'second line');
 ok('after "stop hearing", nothing more from them', !(await has(b, 'second line', 3000)) && await has(b, 'They are not told'));
@@ -39,9 +39,9 @@ ok('and they can be heard again', await has(b, 'third line'));
 // Words not said here.
 await say(a, 'wanna fuck?');
 ok('the sender is told and muted', await has(a, 'That is not said on this island. You are muted for 10 minutes') && (await a.evaluate(() => window.__ember.mutedUntil)) > Date.now());
-ok('their own tag says muted', /^§m/.test(await a.evaluate(() => window.__ember.me.sub)) && (await a.evaluate(() => window.__ember.me.sub)).includes('·'), await a.evaluate(() => window.__ember.me.sub));
+ok('their own tag says muted', /§m/.test(await a.evaluate(() => window.__ember.me.sub)) && (await a.evaluate(() => window.__ember.me.sub)).includes('·'), await a.evaluate(() => window.__ember.me.sub));
 ok('the words reach nobody', !(await has(b, 'wanna', 3000)));
-ok('others see them as muted', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return p.data.muted > Date.now() && /^§m.+·/.test(p.av.sub); }));
+ok('others see them as muted', await until(b, () => { const p = [...window.__ember.peers.values()][0]; return p.data.muted > Date.now() && /§m.+·/.test(p.av.sub); }));
 await b.evaluate(() => window.__ember.cam(0.4, 0.3, 4.5)); await b.waitForTimeout(1200);
 await b.screenshot({ path: '/home/claude/ember-isle/shots/m2-muted.png' });
 await say(a, 'hello?');
@@ -54,11 +54,11 @@ await b.fill('#sheet-input', 'said something gross to me'); await b.click('#shee
 ok('the reporter is thanked', await has(b, 'The keeper will read your report'));
 await b.waitForTimeout(800);
 const d = await (await fetch('http://localhost:8787/room/reports.json', { headers: { 'x-keeper-key': 'testkey' } })).json();
-ok('the keeper gets the report with the lines the island heard', d.reports.length === 1 && d.reports[0].who === aName && d.reports[0].sure && d.reports[0].lines.includes('third line') && d.reports[0].note === 'said something gross to me', JSON.stringify(d.reports));
+ok('the keeper gets the report with the lines the island heard', d.reports.length === 1 && d.reports[0].who.startsWith(aName + ' #') && d.reports[0].sure && d.reports[0].lines.includes('third line') && d.reports[0].note === 'said something gross to me', JSON.stringify(d.reports));
 // A reload does not lift the mute.
 await a.evaluate(() => localStorage.removeItem('ember.mute'));
 await enter(a, 0);
-ok('reloading, even with the browser\'s memory wiped, does not lift the mute', (await a.evaluate(() => window.__ember.mutedUntil)) > Date.now() && /^§m/.test(await a.evaluate(() => window.__ember.me.sub)), await a.evaluate(() => window.__ember.me.sub));
+ok('reloading, even with the browser\'s memory wiped, does not lift the mute', (await a.evaluate(() => window.__ember.mutedUntil)) > Date.now() && /§m/.test(await a.evaluate(() => window.__ember.me.sub)), await a.evaluate(() => window.__ember.me.sub));
 // The keeper's page.
 const pg = await (await browser.newContext({ viewport: { width: 900, height: 900 } })).newPage();
 await pg.route((u) => new URL(u).hostname !== 'localhost', (r) => r.abort());
@@ -67,7 +67,7 @@ await pg.fill('#key', 'wrong'); await pg.click('#door button'); await pg.waitFor
 ok('a wrong key is refused', (await pg.evaluate(() => document.getElementById('state').textContent)).includes('does not open'));
 await pg.fill('#key', 'testkey'); await pg.click('#door button'); await pg.waitForTimeout(1000);
 const txt = await pg.evaluate(() => document.body.innerText);
-ok('the right key shows the report', txt.includes(aName + ' was reported') && txt.includes('third line') && txt.includes('Muted now'), txt.slice(0, 200).replace(/\n+/g, ' / '));
+ok('the right key shows the report', txt.includes(aName + ' #') && txt.includes('third line') && txt.includes('Muted now'), txt.slice(0, 200).replace(/\n+/g, ' / '));
 await pg.screenshot({ path: '/home/claude/ember-isle/shots/m3-reports.png', fullPage: true });
 console.log(errs.length ? 'page errors: ' + errs.join(' | ') : 'no page errors');
 await browser.close();

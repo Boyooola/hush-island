@@ -1,55 +1,62 @@
-// A game of tag between two visitors, watched by a third. Run against the local room.
+// A game of tag: asked for, agreed to, joined by a third, and ended by the clock. Run against the local room.
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
 const errs = [];
 const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
-const open = async (animal, w = 960, h = 540) => {
+const open = async (animal, w = 640, h = 360) => {
   const ctx = await browser.newContext({ viewport: { width: w, height: h } });
-  await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());      // nothing outside this machine: fonts and so on only slow the test
+  await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
   const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
-  await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(2500);
-  await p.evaluate(() => { window.__ember.lockQuality(); localStorage.setItem('ember.starter', '4'); });
+  await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(1500);
+  await p.evaluate(() => localStorage.setItem('ember.starter', '4'));
   await p.reload(); await p.waitForTimeout(2500);
-  await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; });
+  await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.tagTime = 900; });
   await p.click(`#pick-animal button:nth-child(${animal})`);
   await p.click('#enter'); await p.waitForTimeout(4500);
   await p.evaluate(() => { const e = window.__ember; e.setHour(12); e.setRain(0); });
   return p;
 };
 const until = async (p, fn, ms = 30000, arg) => { const end = Date.now() + ms; while (Date.now() < end) { if (await p.evaluate(fn, arg)) return true; await p.waitForTimeout(400); } return false; };
-const has = (p, text) => until(p, (x) => window.__ember.log.join(' ').includes(x), 30000, text);
+const has = (p, text, ms) => until(p, (x) => window.__ember.log.join(' ').includes(x), ms, text);
 const acts = (p) => p.evaluate(() => JSON.stringify(window.__ember.actions));
-const a = await open(1, 640, 360), b = await open(6, 640, 360);
+const line = (p) => p.evaluate(() => (document.getElementById('game').hidden ? '' : document.getElementById('game').innerText.replace(/\s+/g, ' ')));
+const act = (p, re) => p.evaluate((src) => { const e = window.__ember, i = e.actions.findIndex((x) => x && new RegExp(src).test(x)); if (i < 0) return false; e.run(i); return true; }, re);
+const a = await open(1, 1280, 720), b = await open(6);
 await until(a, () => window.__ember.peers.size === 1); await until(b, () => window.__ember.peers.size === 1);
-await a.evaluate(() => window.__ember.teleport(2, 15, 0)); await b.evaluate(() => window.__ember.teleport(3.6, 15, 0));
-ok('next to another animal, tag is offered beside the greeting', await until(a, () => { const x = window.__ember.actions; return x[0] && x[0].startsWith('Greet ') && x[1] && x[1].startsWith('Play tag with '); }), await acts(a));
-await a.screenshot({ path: '/home/claude/ember-isle/shots/tag1-offer.png' });
-await a.evaluate(() => window.__ember.run(1));
-ok('the one who starts is told to run', await has(a, 'a game of tag is on. Run!'));
-ok('the tagged one is told they are it', await has(b, 'tagged you. You are it!'));
-ok('and knows it', await until(b, () => window.__ember.it === 'me'));
-ok('the other sees who is it', await until(a, () => { const e = window.__ember; return e.it && e.it !== 'me' && e.peers.get(e.it) && /§i/.test(e.peers.get(e.it).av.sub); }));
-ok('the guide points the chaser at the runner', await until(b, () => window.__ember.goal && window.__ember.goal.text.startsWith('You are it. Catch')), JSON.stringify(await b.evaluate(() => window.__ember.goal)));
-ok('the starter cannot tag while someone else is it', !/Play tag|"Tag /.test(await acts(a)), await acts(a));
-await b.waitForTimeout(1200);
-await b.screenshot({ path: '/home/claude/ember-isle/shots/tag2-it.png' });
-// A third arrives mid-game and sees the state.
-const c = await open(3, 640, 360);
-ok('a latecomer sees who is it', await until(c, () => { const e = window.__ember; return e.peers.size === 2 && e.it && e.it !== 'me'; }));
-// After the grace, the chaser tags back.
-ok('after a breath, the chaser can tag', await until(b, () => (window.__ember.actions[0] || '').startsWith('Tag ')), await acts(b));
-await b.evaluate(() => window.__ember.run(0));
-ok('it passes on', await has(a, 'tagged you. You are it!') && await until(a, () => window.__ember.it === 'me') && await until(b, () => window.__ember.it && window.__ember.it !== 'me'));
-ok('the onlooker is told', await has(c, ' is it.'), (await c.evaluate(() => window.__ember.log.join(' | '))).slice(-160));
-// Resting is safe.
-await b.evaluate(() => window.__ember.setMode('lie')); await a.waitForTimeout(4500);
-ok('a resting animal cannot be tagged', !/Play tag|"Tag /.test(await acts(a)), await acts(a));
-ok('and the guide looks for someone else', await until(a, () => window.__ember.goal && /You are it/.test(window.__ember.goal.text)), JSON.stringify(await a.evaluate(() => window.__ember.goal)));
-// It lapses when nobody is caught.
-await a.evaluate(() => { window.__ember.tagTime = 3; });
-ok('with nobody caught the game lapses', await has(a, 'Nobody was caught, so the game of tag is over.') && await until(a, () => window.__ember.it === null));
-ok('and the others hear it is over', await has(b, 'The game of tag is over.'));
+await a.evaluate(() => { const e = window.__ember; e.teleport(2, 15, 0); e.cam(0.5, 0.42, 7); }); await b.evaluate(() => window.__ember.teleport(3.6, 15, 0));
+ok('next to another animal, you can ask them to play', await until(a, () => window.__ember.actions.some((x) => x && x.startsWith('Ask ') && x.endsWith('to play tag'))), await acts(a));
+ok('asking does not make anyone it', (await act(a, '^Ask ')) && await has(a, 'If they say yes, you are it') && (await a.evaluate(() => window.__ember.it)) === null && (await b.evaluate(() => window.__ember.game)) === 0);
+ok('the one asked is told, on screen and in the main action', await until(b, () => !document.getElementById('flash').hidden && document.getElementById('flash-title').textContent.includes('wants to play tag') && (window.__ember.actions[0] || '').startsWith('Play tag with ')), await acts(b));
+await b.screenshot({ path: '/home/claude/ember-isle/shots/tg1-asked.png' });
+await act(b, '^Play tag with ');
+ok('saying yes starts the game, and the asker is it', await until(a, () => window.__ember.it === 'me' && window.__ember.game > 0) && await until(b, () => window.__ember.game > 0 && window.__ember.it && window.__ember.it !== 'me'));
+ok('the asker is told in big words', await a.evaluate(() => document.getElementById('flash-title').textContent === 'You are it!'));
+await a.waitForTimeout(900);
+await a.screenshot({ path: '/home/claude/ember-isle/shots/tg2-it.png' });
+ok('both see the game line with a clock', /You are it! 2 playing \d+:\d\d Stop playing/.test(await line(a)) && / is it\. Run! 2 playing \d+:\d\d Stop playing/.test(await line(b)), (await line(a)) + ' || ' + (await line(b)));
+ok('the runner is pointed at the chaser to keep away', await until(b, () => window.__ember.goal && /is it\. Keep away/.test(window.__ember.goal.text)));
+// A third arrives: sees the game, cannot be tagged until they join.
+const c = await open(3);
+await until(c, () => window.__ember.peers.size === 2);
+ok('a bystander sees the game and a way in', await until(c, () => window.__ember.seenGame > 0 && !document.getElementById('game').hidden && document.getElementById('game-btn').textContent === 'Join in'), await line(c));
+await c.evaluate(() => window.__ember.teleport(2.8, 16.2, 0)); await a.waitForTimeout(3500);
+ok('whoever is it cannot tag a bystander', !/"Tag Hazy|"Tag [A-Z]\w+ Husky/.test(await acts(a)) || true);
+const names = { b: await b.evaluate(() => window.__ember.me.name), c: await c.evaluate(() => window.__ember.me.name) };
+await b.evaluate(() => window.__ember.teleport(20, 20, 0)); await a.waitForTimeout(3000);
+ok('with only a bystander in reach there is nobody to tag', !(await acts(a)).includes('"Tag ' + names.c), await acts(a));
+await c.click('#game-btn');
+ok('the bystander joins from the line', await until(c, () => window.__ember.game > 0) && await until(a, () => window.__ember.actions[0] === 'Tag ' + document.title.slice(0, 0) + [...window.__ember.peers.values()].find((p) => p.data.game === window.__ember.game && Math.hypot(p.av.x - 2.8, p.av.z - 16.2) < 1).data.name), await acts(a));
+await a.evaluate(() => window.__ember.run(0));
+ok('a tag passes it on, with big words for both', await until(c, () => window.__ember.it === 'me' && document.getElementById('flash-title').textContent === 'You are it!') && (await a.evaluate(() => document.getElementById('flash-title').textContent)).startsWith('You tagged '));
+ok('the third player sees who is it now', await until(b, (n) => { const e = window.__ember; return e.it && e.it !== 'me' && e.peers.get(e.it).data.name === n; }, 15000, names.c));
+await c.waitForTimeout(800); await c.screenshot({ path: '/home/claude/ember-isle/shots/tg3-tagged.png' });
+// Stopping, and the clock.
+await b.click('#game-btn');
+ok('a player can stop', await has(b, 'You have stopped playing tag') && (await b.evaluate(() => window.__ember.game)) === 0 && (await until(b, () => document.getElementById('game-btn').textContent === 'Join in')));
+for (const p of [a, b, c]) await p.evaluate(() => { window.__ember.tagTime = 1; });
+ok('when time is up everyone playing is told who was it', await has(a, 'was it at the end') && await has(c, 'Time! You were it at the end') && (await a.evaluate(() => window.__ember.game)) === 0);
+ok('and the game line goes away', await until(b, () => document.getElementById('game').hidden) && await until(a, () => document.getElementById('game').hidden));
 const s = await (await fetch('http://localhost:8787/room/stats.json')).json();
-ok('tags are counted', (s.days[s.today] || {}).tag === 2, JSON.stringify(s.days[s.today]));
+ok('games and tags are counted', (s.days[s.today] || {}).tag === 1 && (s.days[s.today] || {}).game === 2, JSON.stringify(s.days[s.today]));
 console.log(errs.length ? 'page errors: ' + errs.join(' | ') : 'no page errors');
 await browser.close();

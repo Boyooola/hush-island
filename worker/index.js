@@ -20,7 +20,7 @@ const MAX_PER_SECOND = 12;       // messages accepted from one visitor each seco
 const DEFAULT_SLEEP_OUT = 600;   // seconds asleep before a visitor can be moved on, and only when others are waiting
 const TRACKS_KEPT = 8;           // how many departed visitors' tracks stay on the island
 const TRACK_AGE = 36 * 3600000;  // and for how long
-const NOTES = /^(g[1-4]|answer|duo|sniff|left|tag)$/;   // things the game may ask to have counted
+const NOTES = /^(g[1-4]|answer|duo|sniff|left|tag|game)$/;   // things the game may ask to have counted
 const MUTE_FIRST = 10 * 60000;    // how long a first mute lasts
 const MUTE_AGAIN = 60 * 60000;    // and any further one within a day
 const REPORTS_TO_MUTE = 3;       // reports from different visitors, within an hour, that mute someone
@@ -67,7 +67,7 @@ export class Island extends DurableObject {
     try {
       const n = this.sql.exec('SELECT COUNT(*) AS n FROM feedback WHERE h = ? AND at > ?', h, now - 86400000).toArray()[0].n;
       if (n >= 5) return json({ error: 'enough for today' }, 429);
-      this.sql.exec('INSERT OR REPLACE INTO feedback (at, who, h, text) VALUES (?, ?, ?, ?)', now, clip(m.name, 24), h, text);
+      this.sql.exec('INSERT OR REPLACE INTO feedback (at, who, h, text) VALUES (?, ?, ?, ?)', now, clip(m.name, 32), h, text);
       this.sql.exec('DELETE FROM feedback WHERE at NOT IN (SELECT at FROM feedback ORDER BY at DESC LIMIT 1000)');
       this.add('feedback');
     } catch (e) { return json({ error: 'not kept' }, 500); }
@@ -96,7 +96,7 @@ export class Island extends DurableObject {
     const heard = this.said.get(target.ws) || [];
     const lines = heard.length ? heard : (Array.isArray(m.lines) ? m.lines.slice(-5).map((x) => clip(x, 200)).filter(Boolean) : []);
     try {
-      this.sql.exec('INSERT OR REPLACE INTO reports (at, tid, who, wh, by, note, lines, sure) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', now, tid, clip(target.a.n, 24) || 'A visitor', target.a.h || '', a.h || a.id, clip(m.note, 200), JSON.stringify(lines), heard.length ? 1 : 0);
+      this.sql.exec('INSERT OR REPLACE INTO reports (at, tid, who, wh, by, note, lines, sure) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', now, tid, clip(target.a.n, 32) || 'A visitor', target.a.h || '', a.h || a.id, clip(m.note, 200), JSON.stringify(lines), heard.length ? 1 : 0);
       this.sql.exec('DELETE FROM reports WHERE at < ?', now - 30 * 86400000);
       this.add('reports');
       const n = this.sql.exec('SELECT COUNT(DISTINCT by) AS n FROM reports WHERE tid = ? AND at > ?', tid, now - 3600000).toArray()[0].n;
@@ -160,7 +160,10 @@ export class Island extends DurableObject {
     if (h) {
       try { const r = this.sql.exec('SELECT until, n FROM mutes WHERE h = ?', h).toArray(); if (r.length && r[0].until > Date.now()) { mu = r[0].until; mn = r[0].n; } } catch (e) { /* no mute known */ }
     }
-    pair[1].serializeAttachment({ id: crypto.randomUUID().slice(0, 12), role: 'new', at: Date.now(), seen: Date.now(), h, mu, mn });
+    // The country the connection comes from, as Cloudflare sees it: shown under the visitor's name if they wish.
+    const where = request.cf && typeof request.cf.country === 'string' ? request.cf.country : (request.headers.get('CF-IPCountry') || '');
+    const cc = /^[A-Z]{2}$/.test(where) && where !== 'XX' && where !== 'T1' ? where : '';
+    pair[1].serializeAttachment({ id: crypto.randomUUID().slice(0, 12), role: 'new', at: Date.now(), seen: Date.now(), h, mu, mn, cc });
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
@@ -211,7 +214,7 @@ export class Island extends DurableObject {
       }
       this.top('peak', ashore);
       next.ws.serializeAttachment(next.a);
-      this.send(next.ws, { t: 'in', id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0 });
+      this.send(next.ws, { t: 'in', id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0, cc: next.a.cc || '' });
       // Ask everyone ashore to say where they are, so the newcomer sees them at once. They have company now.
       for (const { ws, a } of all) if (a.role === 'in' && ws !== next.ws) {
         if (!a.met) { a.met = true; ws.serializeAttachment(a); }
@@ -259,7 +262,7 @@ export class Island extends DurableObject {
       const zz = typeof m.p.zz === 'number' && m.p.zz > 0 ? Math.min(now, Math.max(now - 86400000, m.p.zz)) : 0;
       if ((zz > 0) !== ((a.zz || 0) > 0)) { a.zz = zz; ws.serializeAttachment(a); }
       // Names are chosen by visitors, so they are held to the same words as talk. Each new name is judged once.
-      if (typeof m.p.n === 'string' && m.p.n !== a.n0) { a.n0 = m.p.n.slice(0, 40); a.nb = judge(a.n0) ? 1 : 0; a.n = a.nb ? 'Guest' : clip(a.n0, 24); ws.serializeAttachment(a); }
+      if (typeof m.p.n === 'string' && m.p.n !== a.n0) { a.n0 = m.p.n.slice(0, 40); a.nb = judge(a.n0) ? 1 : 0; a.n = (a.nb ? 'Guest' : clip(a.n0, 24)) + (/^\d{4}$/.test(String(m.p.k ?? '')) ? ' #' + m.p.k : ''); ws.serializeAttachment(a); }
       if (a.nb) m.p.n = 'Guest';
       if (typeof m.p.t === 'string' && judge(m.p.t)) m.p.t = '';
       // What they say: nothing from the muted is passed on, and a message with words not said here is dropped
@@ -624,6 +627,7 @@ const STATS_PAGE = `<!DOCTYPE html>
       ['Stays alone the whole time', sum('alone'), pct(sum('alone'), stays)],
       ['Calls answered by another animal', sum('answer'), ''],
       ['Planks added with company', sum('duo'), ''],
+      ['Games of tag begun', sum('game'), ''],
       ['Tags made playing tag', sum('tag'), ''],
       ['Tracks sniffed at', sum('sniff'), ''],
       ['Mutes for bad language or reports', sum('muted'), ''],

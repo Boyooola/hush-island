@@ -44,12 +44,27 @@ export function makeNameTag(name, sub, isYou) {
     ctx.lineWidth = 8;
     ctx.strokeStyle = 'rgba(8,14,30,0.85)';
     ctx.lineJoin = 'round';
-    ctx.strokeText(n, 256, 44);
-    ctx.fillStyle = isYou ? '#ffc978' : '#f6ead2';
-    ctx.fillText(n, 256, 44);
+    // The name, with the visitor's number small and quiet after it.
+    const tagCode = (/^§#(\d{4})/.exec(String(s || '')) || [])[1] || '';
+    const nw = ctx.measureText(n).width;
+    ctx.font = `700 26px ${FONT}`;
+    const cw = tagCode ? ctx.measureText('#' + tagCode).width + 10 : 0;
+    const nx = 256 - cw / 2;
+    ctx.font = `800 44px ${FONT}`;
+    ctx.strokeText(n, nx, 44);
+    ctx.fillStyle = /^(§#\d{4})?(§[mz])*§i/.test(String(s || '')) ? '#ff9d4d' : isYou ? '#ffc978' : '#f6ead2';       // whoever is it wears their name in ember
+    ctx.fillText(n, nx, 44);
+    if (tagCode) {
+      ctx.font = `700 26px ${FONT}`; ctx.textAlign = 'left'; ctx.lineWidth = 5;
+      ctx.strokeText('#' + tagCode, nx + nw / 2 + 10, 50);
+      ctx.fillStyle = 'rgba(214,226,240,0.7)';
+      ctx.fillText('#' + tagCode, nx + nw / 2 + 10, 50);
+      ctx.textAlign = 'center'; ctx.lineWidth = 8;
+    }
     // The second line may begin with marks (§m muted, §z away, §i it), drawn as small signs before the words.
     const marks = [];
-    let text = String(s || '');
+    let text = String(s || ''), code = '';
+    { const c = /^§#(\d{4})/.exec(text); if (c) { code = c[1]; text = text.slice(6); } }
     for (let m = /^§([mzi])/.exec(text); m; m = /^§([mzi])/.exec(text)) { marks.push(m[1]); text = text.slice(2); }
     text = text.trim();
     if (text || marks.length) {

@@ -69,7 +69,7 @@ function rollIdentity() {
 let identity = store('ember.identity');
 if (!identity || !SPECIES[identity.species] || SPECIES[identity.species].npc || typeof identity.name !== 'string') identity = rollIdentity();
 let showOrigin = store('ember.origin') !== false;
-const COUNTRY = countryName();
+let COUNTRY = countryName();       // a first guess from the clock's time zone; the island corrects it when you step ashore
 let asleepSince = 0, lastInputAt = Date.now(), laidByNap = false, idleAfter = 120000;
 let mutedUntil = 0;                // until when the island will not pass on what you say
 const ignored = new Set();         // visitors you have chosen not to hear, until you leave
@@ -77,9 +77,13 @@ let itWho = null;                  // who is "it" in a game of tag: 'me', anothe
 // The line under a name stays what it was (country and local time). Being muted, away or "it" adds a small sign
 // in front of it: §m, §z and §i are drawn as pictures by the name tag.
 const originText = () => (showOrigin ? [COUNTRY, localTime()].filter(Boolean).join(' · ') : '');
-const withMarks = (muted, away, it, text) => `${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${String(text || '').replace(/§/g, '')}`;
-const mySub = () => withMarks(mutedUntil > Date.now(), !!asleepSince, itWho === 'me', originText());
-const peerSub = (id, data) => withMarks(data.muted > Date.now(), data.asleep, itWho === id, data.sub);
+// Every visitor has a four-figure number, made once and kept by their browser, so two with the same name can be told apart.
+let myCode = store('ember.code');
+if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.random() * 9000)); store('ember.code', myCode); }
+const fullName = (name, code) => (code ? `${name} #${code}` : name);
+const withMarks = (muted, away, it, text, code) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${String(text || '').replace(/§/g, '')}`;
+const mySub = () => withMarks(mutedUntil > Date.now(), !!asleepSince, itWho === 'me', originText(), myCode);
+const peerSub = (id, data) => withMarks(data.muted > Date.now(), data.asleep, itWho === id, data.sub, data.code);
 
 // ---------- scene ----------
 const canvas = $('scene');
@@ -320,7 +324,8 @@ const TASK_WHERE = {
 };
 let goal = null;
 function findGoal() {
-  if (itWho === 'me') { const q = taggable(999); return { text: q ? 'You are it. Catch another animal and tag it' : 'You are it. Everyone is resting, so wait for someone to get up', at: q ? q.p.av : me, step: '' }; }
+  if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
+  if (game && itWho && peers.has(itWho)) return { text: `${peers.get(itWho).data.name} is it. Keep away`, at: peers.get(itWho).av, step: '' };
   if (starterAt < STARTER.length) return { text: STARTER[starterAt].text, at: STARTER[starterAt].where(), step: `${starterAt + 1} of ${STARTER.length}` };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
@@ -420,7 +425,7 @@ function companion(reach) {
   return best;
 }
 function addPlanks(n) {
-  saved.addPlanks(n, me.name).then((r) => { if (r === 'local') { boatTotal += n; yard.setProgress(boatTotal); } });
+  saved.addPlanks(n, me.name, myCode).then((r) => { if (r === 'local') { boatTotal += n; yard.setProgress(boatTotal); } });
 }
 function pickUpDriftwood(i) {
   if (!yard.take(i)) return;
@@ -506,86 +511,220 @@ function giveFish() {
 
 // Calls: each animal has its own voice, and it carries.
 // ---------- tag ----------
-// Whoever is "it" chases the others and passes it on with a touch. Nobody keeps score and nothing is at stake.
-// There is no referee: each animal says when it was last made it, and whom it last tagged and when. The one whose
-// "made it" is the newest, and newer than its own last tag, is it. Animals resting or away cannot be tagged.
+// A game of tag is asked for and agreed to: one animal asks another, and when the other says yes the asker is "it".
+// Whoever is it chases the players and passes it on with a touch. A round lasts two minutes, and anyone can join or
+// stop while it runs. Nobody keeps score.
+// There is no referee. Each animal says which game it is in (the game's number is the moment it began), when it was
+// last made it, and whom it last tagged and when. The player whose "made it" is newest, and newer than its own last
+// tag, is it. Only players on their feet and awake can be tagged.
 const TAG_REACH = 2.6, TAG_GRACE = 3;
-let tagTime = 75;                    // seconds someone stays it before the game lapses
+let tagTime = 120;                   // seconds a round lasts
+let game = 0;                        // the game you are playing in, or 0
 let myIt = 0, myItAt = -99, myTag = null, tagSeen = 0;
-let noItSince = 0, gameOn = false, lapseSaid = false;
+let myInvite = null, myInviteAt = -99;       // whom you asked to play, and when
+let invitedBy = null;                // who asked you: { id, name, until }
+let seenGame = 0, noItSince = 0, alone = 0;
 const nowSec = () => performance.now() / 1000;
-function taggable(reach) {
+const inMyGame = (p) => !!game && p.data.game === game;
+// The nearest animal you could touch: for whoever is it, a player; otherwise anyone awake and on their feet.
+function taggable(reach, playersOnly) {
   let best = null, bd = reach;
   for (const [id, p] of peers) {
-    if (p.data.mode !== 'stand' || p.data.asleep) continue;
+    if (p.data.mode !== 'stand' || p.data.asleep || (playersOnly && !inMyGame(p))) continue;
     const d = Math.hypot(p.av.x - me.x, p.av.z - me.z);
     if (d < bd) { bd = d; best = { id, p }; }
   }
   return best;
 }
-function tagPeer(id) {
-  const p = peers.get(id);
-  if (!p || !entered) return;
-  // A stamp later than any seen so far, so the order of tags is the same for everyone whatever their clocks say.
+// A stamp later than any seen so far, so the order of tags is the same for everyone whatever their clocks say.
+function tagStamp() {
   let at = Math.max(Date.now(), myIt + 1, tagSeen + 1, myTag ? myTag[1] + 1 : 0);
   for (const q of peers.values()) at = Math.max(at, q.data.it + 1, q.data.tagAt + 1);
-  const starting = itWho !== 'me';
+  return at;
+}
+// Big words in the middle of the screen for a moment: the things in a game nobody should miss.
+let flashTimer = 0;
+function flash(title, sub = '') {
+  const el = $('flash');
+  $('flash-title').textContent = title; $('flash-sub').textContent = sub;
+  el.hidden = false; el.classList.remove('go'); void el.offsetWidth; el.classList.add('go');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.hidden = true; }, 2600);
+}
+function inviteTag(id) {
+  const p = peers.get(id);
+  if (!p || !entered || game) return;
+  myInvite = [id, Date.now()]; myInviteAt = nowSec();
   me.targetYaw = Math.atan2(p.av.x - me.x, p.av.z - me.z);
-  playEmote('paw'); audio.pop(700);
+  playEmote('wag');
+  addLog('', `You asked ${p.data.name} to play tag. If they say yes, you are it.`, 'sys');
+  pushPresence(true);
+}
+// Saying yes: the game begins, and the one who asked is it.
+function acceptTag() {
+  const inv = invitedBy, p = inv && peers.get(inv.id);
+  invitedBy = null;
+  if (!p || !entered) return;
+  const at = tagStamp();
+  game = at; myTag = [inv.id, at, 1]; myIt = 0; tagSeen = at;
+  playEmote('hop'); audio.pop(700);
+  flash('Run!', `${p.data.name} is it`);
+  addLog('', `You are playing tag with ${p.data.name}. They are it. Run!`, 'sys');
+  net.note('game');
+  pushPresence(true);
+}
+function joinTag() {
+  if (!seenGame || game || !entered) return;
+  game = seenGame; myIt = 0; alone = 0;
+  playEmote('hop'); audio.pop(700);
+  flash('You are in', 'Stay away from whoever is it');
+  pushPresence(true);
+}
+function leaveTag(say = true) {
+  if (!game) return;
+  game = 0; myIt = 0; myTag = null;
+  if (say) addLog('', 'You have stopped playing tag.', 'sys');
+  me.setName(me.name, mySub());
+  pushPresence(true);
+}
+function tagPeer(id) {
+  const p = peers.get(id);
+  if (!p || !entered || itWho !== 'me' || !inMyGame(p)) return;
+  const at = tagStamp();
+  me.targetYaw = Math.atan2(p.av.x - me.x, p.av.z - me.z);
+  playEmote('paw'); audio.pop(760);
+  ripple(p.av.x, p.av.z, 4, 0xffb04a);
   myTag = [id, at]; myIt = 0; tagSeen = at;
-  addLog('', starting ? `You tagged ${p.data.name}, and a game of tag is on. Run!` : `You tagged ${p.data.name}. Run!`, 'sys');
+  flash(`You tagged ${p.data.name}!`, 'Now run');
+  addLog('', `You tagged ${p.data.name}. Run!`, 'sys');
   net.note('tag');
   pushPresence(true);
 }
-// Called with every update from another visitor: has this one just tagged somebody?
+// Called with every update from another visitor: have they asked you to play, or just tagged somebody?
 function heardTag(id, p, data) {
+  if (data.invAt > (p.invAt || 0)) {
+    p.invAt = data.invAt;
+    if (data.invTo === net.id && entered && !asleepSince && !game && !ignored.has(id)) {
+      invitedBy = { id, name: data.name, until: nowSec() + 14 };
+      flash(`${data.name} wants to play tag`, touch ? 'Tap the words below to play' : 'Press E to play');
+      addLog('', `${data.name} asks you to play tag.`, 'sys');
+      audio.pop(620);
+    }
+  }
   if (!(data.tagAt > (p.tagAt || 0))) return;
   p.tagAt = data.tagAt;
   if (data.tagAt > Date.now() + 60000 || data.tagAt <= tagSeen) return;      // a stamp from the future, or old news
   tagSeen = data.tagAt;
   if (!entered) return;
   if (data.tagTo === net.id) {
-    if (asleepSince || me.mode !== 'stand') return;       // resting and away animals are out of the game
-    myIt = data.tagAt; myItAt = nowSec();
-    addLog('', `${data.name} tagged you. You are it! Catch another animal.`, 'sys');
+    if (data.tagStart) {
+      // They said yes to your asking: the game is on and you are it.
+      if (!myInvite || myInvite[0] !== id || nowSec() - myInviteAt > 30 || game) return;
+      myInvite = null;
+      game = data.tagAt; myIt = data.tagAt; myItAt = nowSec(); alone = 0;
+      flash('You are it!', `${data.name} is in. Catch them`);
+      addLog('', `${data.name} said yes. You are it! Give them a moment, then catch them.`, 'sys');
+      net.note('game');
+    } else {
+      if (!game || data.game !== game || asleepSince || me.mode !== 'stand') return;       // not playing, or safe
+      myIt = data.tagAt; myItAt = nowSec();
+      flash('You are it!', `${data.name} tagged you`);
+      addLog('', `${data.name} tagged you. You are it!`, 'sys');
+      ripple(me.x, me.z, 4, 0xffb04a);
+      if (!me.emote) playEmote('hop');
+    }
     audio.pop(480);
-    if (!me.emote) playEmote('hop');
     me.setName(me.name, mySub());
     pushPresence(true);
-  } else {
+  } else if (!data.tagStart) {
     const q = peers.get(data.tagTo);
-    if (q) addLog('', `${data.name} tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
+    if (!q) return;
+    ripple(q.av.x, q.av.z, 4, 0xffb04a);
+    addLog('', `${data.name} tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
+    if (game && data.game === game) flash(`${q.data.name} is it`, `${data.name} tagged them`);
   }
 }
-const itMarker = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xffb04a, fog: false, toneMapped: false }));
+const itMarker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.42, 4), new THREE.MeshBasicMaterial({ color: 0xffb04a, fog: false, toneMapped: false }));
 itMarker.rotation.x = Math.PI; itMarker.visible = false; scene.add(itMarker);
+// A ring on the ground under everyone who is playing: thick and pulsing under whoever is it, thin under the rest.
+const tagRings = [];
+function tagRing(i) {
+  while (tagRings.length <= i) {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 40), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+    m.rotation.x = -Math.PI / 2; m.renderOrder = 2; m.visible = false; scene.add(m); tagRings.push(m);
+  }
+  return tagRings[i];
+}
+const clockText = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+let gameLine = '';
 function updateTag() {
   const now = nowSec();
-  if (myIt) {
-    let lapsed = now - myItAt > tagTime || asleepSince || !entered;
-    for (const p of peers.values()) if (p.data.it > myIt && p.data.it > p.data.tagAt) lapsed = true;        // someone was made it after you
-    if (lapsed) {
-      if (now - myItAt > tagTime && entered) { lapseSaid = true; addLog('', 'Nobody was caught, so the game of tag is over.', 'sys'); }
-      myIt = 0; pushPresence(true);
-    }
-  }
-  let who = myIt && (!myTag || myIt > myTag[1]) ? 'me' : null, at = who ? myIt : 0;
-  for (const [id, p] of peers) if (p.data.it > p.data.tagAt && p.data.it > at && !p.data.asleep) { who = id; at = p.data.it; }
+  if (invitedBy && (now > invitedBy.until || game || !peers.has(invitedBy.id))) invitedBy = null;
+  if (myInvite && now - myInviteAt > 15) { myInvite = null; pushPresence(true); if (!game && entered) addLog('', 'No answer about tag this time.', 'sys'); }
+  if (game && (asleepSince || !entered)) leaveTag(false);
+  // The game in view: yours if you are playing, otherwise the newest one still running on the island.
+  let g = game;
+  if (!g) for (const p of peers.values()) if (p.data.game > g && Date.now() - p.data.game < tagTime * 1000 + 5000) g = p.data.game;
+  seenGame = g;
+  const players = [];
+  if (g) for (const [id, p] of peers) if (p.data.game === g) players.push(id);
+  // Who is it: among the players, the newest "made it" that has not been passed on.
+  let who = null, at = 0;
+  if (game && myIt && (!myTag || myIt > myTag[1])) { who = 'me'; at = myIt; }
+  for (const id of players) { const d = peers.get(id).data; if (d.it > d.tagAt && d.it > at && !d.asleep) { who = id; at = d.it; } }
+  if (who !== 'me' && myIt && game) { let later = false; for (const id of players) { const d = peers.get(id).data; if (d.it > myIt && d.it > d.tagAt) later = true; } if (later) { myIt = 0; pushPresence(true); } }
   if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); for (const [id, p] of peers) p.av.setName(p.data.name, peerSub(id, p.data)); pushPresence(true); }
-  if (who) { gameOn = true; noItSince = 0; }
-  else if (gameOn) {
-    // Between a tag and the tagged animal saying so, nobody is it for a moment. Only a longer gap ends the game.
-    if (!noItSince) noItSince = now;
-    else if (now - noItSince > 4) { gameOn = false; noItSince = 0; if (entered && !lapseSaid) addLog('', 'The game of tag is over.', 'sys'); lapseSaid = false; }
+  const left = g ? tagTime - (Date.now() - g) / 1000 : 0;
+  const itName = who === 'me' ? 'You' : who ? peers.get(who).data.name : '';
+  if (game) {
+    // Your game ends when time is up, when everyone else has gone, or when whoever was it has left.
+    alone = players.length ? 0 : alone || now;
+    noItSince = who ? 0 : noItSince || now;
+    let over = '';
+    if (left <= 0) over = who === 'me' ? 'Time! You were it at the end.' : who ? `Time! ${itName} was it at the end.` : 'Time! The game of tag is over.';
+    else if (alone && now - alone > 6) over = 'Everyone else has left the game of tag.';
+    else if (noItSince && now - noItSince > 6) over = 'Whoever was it has gone, so the game of tag is over.';
+    if (over) {
+      if (left <= 0) { flash('Time!', who === 'me' ? 'You were it at the end' : who ? `${itName} was it at the end` : ''); if (who !== 'me' && !me.emote) playEmote('hop'); audio.pop(880); }
+      addLog('', over, 'sys');
+      game = 0; myIt = 0; myTag = null; alone = 0; noItSince = 0;
+      me.setName(me.name, mySub()); pushPresence(true);
+    }
+  } else { alone = 0; noItSince = 0; }
+  // The line under the guide: what game is on, who is it, how long is left, and a way in or out.
+  const el = $('game');
+  const line = !g || !entered || left <= 0 ? '' : game
+    ? `${who === 'me' ? 'You are it!' : who ? `${itName} is it. Run!` : 'Tag'}|${players.length + 1} playing|Stop playing`
+    : `Tag: ${who ? `${itName} is it` : 'a game is on'}|${players.length} playing|Join in`;
+  el.hidden = !line;
+  if (line) {
+    $('game-time').textContent = clockText(left);
+    if (line !== gameLine) { const [a, b, c] = line.split('|'); $('game-text').textContent = a; $('game-count').textContent = b; $('game-btn').textContent = c; el.classList.toggle('it', who === 'me'); }
   }
+  gameLine = line;
+  // Rings under the players, and a marker over whoever is it.
+  let k = 0;
+  const ring = (av, isIt) => {
+    const m = tagRing(k++);
+    const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+    m.visible = true; m.position.set(av.x, Math.max(groundHeight(av.x, av.z), 0) + 0.07, av.z);
+    m.scale.setScalar(isIt ? 1.0 + pulse * 0.18 : 0.72);
+    m.material.color.set(isIt ? 0xffb04a : 0xf6ead2); m.material.opacity = isIt ? 0.9 : 0.4;
+  };
+  if (g && entered && left > 0) {
+    if (game) ring(me, who === 'me');
+    for (const id of players) { const p = peers.get(id); if (p.av.group.visible !== false && p.data.mode === 'stand' && k < 14) ring(p.av, who === id); }
+  }
+  for (; k < tagRings.length; k++) tagRings[k].visible = false;
   const av = who === 'me' ? me : who ? peers.get(who).av : null;
   itMarker.visible = !!av && entered && av.group.visible !== false;
   if (itMarker.visible) {
     const sp = SPECIES[who === 'me' ? me.species : peers.get(who).data.species];
-    itMarker.position.set(av.x, av.y + (av.tag ? av.tag.position.y : sp.height * 1.3) + 0.5 + Math.sin(t * 5) * 0.06, av.z);
+    itMarker.position.set(av.x, av.y + (av.tag ? av.tag.position.y : sp.height * 1.3) + 0.55 + Math.sin(t * 5) * 0.08, av.z);
     itMarker.rotation.y = t * 2.4;
   }
 }
+$('game-btn').addEventListener('click', () => { if (game) leaveTag(); else joinTag(); canvas.focus(); });
 
 // Calling and answering. A call you hear can be answered for a few seconds; a call nobody answers is picked up
 // by the owl or Clover if they are near, and otherwise by the keeper, so no call falls flat.
@@ -695,8 +834,8 @@ function openFeedback() {
     input: { free: true, max: 500, placeholder: 'Your note', button: 'Send it', submit: async (text) => {
       if (text.length < 3) { $('sheet-note').textContent = 'Write a few words first.'; return; }
       let status = 0;
-      try { status = (await fetch('/room/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, name: me.name }) })).status; } catch (e) { status = 0; }
-      if (status === 200) { closeSheet(); addLog('', 'Your note is with the keeper. Thank you.', 'sys'); }
+      try { status = (await fetch('/room/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, name: fullName(me.name, myCode) }) })).status; } catch (e) { status = 0; }
+      if (status === 200) { closeSheet(); flash('Thank you', 'Your note is with the keeper'); audio.pop(660); addLog('', 'Your note is with the keeper. Thank you.', 'sys'); }
       else $('sheet-note').textContent = status === 429 ? 'That is plenty for one day, thank you. Come back tomorrow with more.' : 'That did not go through. Try again in a moment.';
     } },
     note: 'No name or address is attached, only the animal you are today.',
@@ -709,7 +848,7 @@ function openVisitor(id) {
   if (!p) return;
   const name = p.data.name, deaf = ignored.has(id);
   openSheet({
-    title: name,
+    title: fullName(name, p.data.code),
     lines: (p.lines && p.lines.length ? p.lines.map((x) => ({ text: `"${x}"` })) : [{ text: 'Nothing said since you have been near.' }]),
     input: p.reported ? null : { free: true, max: 200, placeholder: 'What happened? (optional)', button: `Report ${name}`, submit: async (note) => {
       const sent = net.report(id, p.lines || [], note);
@@ -762,12 +901,12 @@ function playEmote(name) {
 // ---------- other people ----------
 function presenceState() {
   return {
-    v: 1, n: me.name, s: me.species, c: me.palette, t: originText(),
+    v: 1, n: me.name, k: myCode, s: me.species, c: me.palette, t: originText(),
     x: Math.round(me.x * 100) / 100, z: Math.round(me.z * 100) / 100, r: Math.round(me.targetYaw * 100) / 100,
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, mu: mutedUntil > Date.now() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, mu: mutedUntil > Date.now() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -787,7 +926,7 @@ const net = createNet({
           audio.step(surf, 0.6 * clamp(1 - Math.hypot(av.x - me.x, av.z - me.z) / 11, 0, 1));
           if (surf === 'water') world.ripple(av.x, av.z);
         };
-        p = { av, data, sayId: data.say ? data.say.id : 0, emoteId: data.emote ? data.emote.id : 0, fade: 1, tagAt: data.tagAt };
+        p = { av, data, sayId: data.say ? data.say.id : 0, emoteId: data.emote ? data.emote.id : 0, fade: 1, tagAt: data.tagAt, invAt: data.invAt };
         peers.set(id, p);
         if (entered) addLog('', `${data.name} came ashore.`, 'sys');
       }
@@ -860,7 +999,7 @@ updateCount();
 
 // ---------- what the island remembers ----------
 const saved = createStore();
-saved.watchBoat((total, state, crew) => { boatTotal = total; if (crew) boatCrew = crew; else if (total && !boatCrew.length) boatCrew = [{ name: me.name, n: total }]; yard.setProgress(total); });
+saved.watchBoat((total, state, crew) => { boatTotal = total; if (crew) boatCrew = crew; else if (total && !boatCrew.length) boatCrew = [{ name: fullName(me.name, myCode), n: total }]; yard.setProgress(total); });
 const sheet = $('sheet');
 let sheetSubmit = null, stopCarvings = null, sheetFree = false;
 function closeSheet() {
@@ -1165,6 +1304,7 @@ $('origin').addEventListener('change', (e) => { showOrigin = e.target.checked; s
 
 function showIdentity() {
   $('who-name').textContent = identity.name;
+  $('who-code').textContent = '#' + myCode;
   me.setLook(identity.species, identity.palette);
   me.setName(identity.name, mySub());
   const sp = SPECIES[identity.species];
@@ -1258,7 +1398,7 @@ function leaveIsland(why) {
   const was = entered;
   entered = false; asking = false;
   if (was && why === 'left') net.note('left');
-  myIt = 0; myTag = null; itWho = null; ignored.clear();
+  myIt = 0; myTag = null; itWho = null; game = 0; myInvite = null; invitedBy = null; ignored.clear();
   if (was || why !== 'tide') net.leave();
   wake(false);
   setMode('stand'); setHeld(0);
@@ -1308,6 +1448,8 @@ function comeAshore(q = {}) {
   me.targetYaw = Math.PI;      // turn to face the fire
   addLog('', 'You came ashore. The fire is straight ahead.', 'sys');
   // Signs of the others: how many have been here today, and whose tracks are still on the ground.
+  // The island knows which country the connection comes from, which beats guessing from the time zone.
+  if (/^[A-Z]{2}$/.test(String(q.cc || ''))) { try { COUNTRY = new Intl.DisplayNames(['en'], { type: 'region' }).of(q.cc) || COUNTRY; } catch (e) { /* keep the guess */ } me.setName(me.name, mySub()); }
   if (q.mu > Date.now()) { mutedUntil = Math.max(mutedUntil, q.mu); me.setName(me.name, mySub()); }
   const laid = traces.setLeft(q.tracks, (sp) => !!(SPECIES[sp] && SPECIES[sp].hoof), (sp) => (SPECIES[sp] ? SPECIES[sp].height : 1));
   if (Number.isFinite(q.today)) {
@@ -1372,11 +1514,12 @@ function updateActions() {
   }
   // Tag: whoever is it tags the nearest animal on its feet. With no game on, anyone close can be asked to play.
   if (me.mode === 'stand') {
-    const q = taggable(TAG_REACH);
-    if (q && itWho === 'me' && nowSec() - myItAt > TAG_GRACE) { if (!alt && main) alt = main; main = { label: `Tag ${q.p.data.name}`, run: () => tagPeer(q.id) }; }
-    else if (q && !itWho && !held) {
-      const play = { label: `Play tag with ${q.p.data.name}`, run: () => tagPeer(q.id) };
-      if (!main) main = play; else if (!alt) alt = play;
+    const near = taggable(TAG_REACH, false), prey = taggable(TAG_REACH, true);
+    if (itWho === 'me') { if (prey && nowSec() - myItAt > TAG_GRACE) { if (!alt && main) alt = main; main = { label: `Tag ${prey.p.data.name}`, run: () => tagPeer(prey.id) }; } }
+    else if (invitedBy) { if (!alt && main) alt = main; main = { label: `Play tag with ${invitedBy.name}`, run: acceptTag }; }
+    else if (!game && !held && !myInvite && near) {
+      const play = seenGame ? (near.p.data.game === seenGame ? { label: 'Join the game of tag', run: joinTag } : null) : { label: `Ask ${near.p.data.name} to play tag`, run: () => inviteTag(near.id) };
+      if (play) { if (!main) main = play; else if (!alt) alt = play; }
     }
   }
   // A call you just heard comes first: answering it is the main thing to do for a few seconds.
@@ -1674,11 +1817,14 @@ window.__ember = {
   leaveIsland,
   get goal() { return goal ? { text: goal.text, x: goal.at.x, z: goal.at.z, step: goal.step } : null; },
   get starterAt() { return starterAt; },
-  traces, companion, noteCall, setHeld, addToBoat, tagPeer,
+  traces, companion, noteCall, setHeld, addToBoat, tagPeer, inviteTag, acceptTag, joinTag, leaveTag,
+  get game() { return game; },
+  get seenGame() { return seenGame; },
   get it() { return itWho; },
   set tagTime(v) { tagTime = v; },
   get netId() { return net.id; },
   get mutedUntil() { return mutedUntil; },
+  get country() { return COUNTRY; },
   setBoat(total, crew) { boatTotal = total; boatCrew = crew || boatCrew; yard.setProgress(total); },
   lookAtBoat, setOwnName,
   openVisitor, ignored,

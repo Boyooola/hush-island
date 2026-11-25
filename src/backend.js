@@ -109,7 +109,7 @@ function makeRoom(wire) {
   const post = () => { if (!ashore) return; lastPost = Date.now(); dirty = false; wire.post({ t: 'p', id, p: mine }); };
   wire.listen((m) => {
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'in') { ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu }); post(); return; }
+    if (m.t === 'in') { ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc }); post(); return; }
     if (m.t === 'muted') { if (onMod) onMod({ muted: m.until, why: m.why }); return; }
     if (m.t === 'hush') { if (onMod) onMod({ soft: true }); return; }
     if (m.t === 'wait') { ashore = false; inLine = true; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }

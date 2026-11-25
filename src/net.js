@@ -39,10 +39,15 @@ export function parsePeer(p) {
     nights: Math.floor(num(s.nv, 0, 9999)),
     asleep: num(s.zz, 0, 1e15) > 0,
     // Tag: when this visitor was last made "it", and whom they last tagged and when.
+    code: /^\d{4}$/.test(String(s.k ?? '')) ? String(s.k) : '',
     muted: num(s.mu, 0, 1e15),
     it: num(s.it, 0, 1e15),
     tagTo: Array.isArray(s.tg) ? clean(s.tg[0], 16) : '',
     tagAt: Array.isArray(s.tg) ? num(s.tg[1], 0, 1e15) : 0,
+    tagStart: Array.isArray(s.tg) && s.tg[2] === 1,
+    game: num(s.gm, 0, 1e15),
+    invTo: Array.isArray(s.ti) ? clean(s.ti[0], 16) : '',
+    invAt: Array.isArray(s.ti) ? num(s.ti[1], 0, 1e15) : 0,
     warmth: num(s.tl, 0, 1),
     fire: Array.isArray(s.fr) && Number.isFinite(s.fr[0]) && Number.isFinite(s.fr[1]) ? { fuel: num(s.fr[0], 0, 1.4), at: num(s.fr[1], 0, 1e15) } : null,
   };

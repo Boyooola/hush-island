@@ -83,6 +83,7 @@
     color: var(--amber); text-shadow: 0 0 34px rgba(255, 140, 60, 0.45); text-wrap: balance;
   }
   .card p { margin: 0; color: var(--ink); font-size: 17px; max-width: 34ch; }
+  #who-code { font-size: 14px; color: var(--ink-quiet); font-weight: 700; }
   .namers { display: flex; gap: 4px 16px; flex-wrap: wrap; }
   #name-form { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; }
   #name-form[hidden] { display: none; }
@@ -170,6 +171,23 @@
     font-family: var(--display); font-weight: 800; font-size: 21px; line-height: 1.15; color: var(--amber); text-align: center;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 18px rgba(255, 140, 60, 0.45), 0 0 14px rgba(0, 0, 0, 0.85); pointer-events: none; }
   #goal[hidden] { display: none; }
+  /* A game of tag: one line under the guide, and big words in the middle of the screen when something happens. */
+  #game { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: baseline; gap: 14px; white-space: nowrap;
+    font-size: 15px; color: var(--ink); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.75); }
+  #game[hidden] { display: none; }
+  #game b { font-family: var(--display); font-weight: 800; font-size: 19px; color: var(--ink); }
+  #game.it b { color: var(--ember); }
+  #game-time { font-variant-numeric: tabular-nums; font-weight: 700; }
+  #game-btn { background: none; border: 0; padding: 0; font: 700 15px var(--body); color: var(--amber); text-shadow: inherit; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; pointer-events: auto; }
+  #game-btn:hover, #game-btn:focus-visible { color: var(--ink); outline: none; }
+  #flash { position: fixed; left: 0; right: 0; top: 27%; z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 2px; pointer-events: none; text-align: center; padding: 0 16px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9), 0 0 28px rgba(0, 0, 0, 0.7); }
+  #flash[hidden] { display: none; }
+  #flash b { font-family: var(--display); font-weight: 800; font-size: clamp(34px, 7vw, 64px); line-height: 1.05; color: var(--amber); }
+  #flash span { font-size: clamp(16px, 2.6vw, 22px); font-weight: 700; color: var(--ink); }
+  #flash.go { animation: flash 2.6s ease both; }
+  @keyframes flash { 0% { opacity: 0; transform: scale(0.82); } 9% { opacity: 1; transform: scale(1.04); } 16% { transform: scale(1); } 78% { opacity: 1; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #flash.go { animation: none; } }
   #goal-arrow { display: inline-block; font-size: 20px; color: var(--ember); transition: transform 0.15s linear; align-self: center; }
   #goal-dist { font: 700 14px var(--body); color: var(--ink); white-space: nowrap; }
   /* Today's jobs, written down the left edge of the sky. */
@@ -320,6 +338,8 @@
     .act { font-size: 21px; }
     #help { padding-top: 56px; background: rgba(5, 9, 20, 0.93); }
     #tasks { top: 186px; }
+    #game { top: 100px; left: 16px; transform: none; gap: 10px; font-size: 14px; }
+    #game b { font-size: 16px; }
     #goal { top: 132px; font-size: 17px; gap: 9px; left: 16px; right: 16px; transform: none; max-width: none; text-align: left; }
     #day { order: 3; flex: 1 1 100%; }
     #daybar { width: 140px; }
@@ -345,7 +365,7 @@
     <h1 id="title">Hush Island</h1>
     <p>Somewhere quiet. Sit by the fire, fish off the dock, howl at the stars, and help build the boat with whoever else is here.</p>
     <div class="who">
-      <div><small>You arrive as</small><strong id="who-name">Sleepy Otter</strong></div>
+      <div><small>You arrive as</small><strong id="who-name">Sleepy Otter</strong> <span id="who-code"></span></div>
       <div class="namers"><button class="ghost" id="reroll" type="button">Another name</button><button class="ghost" id="rename" type="button">Choose my own</button></div>
     </div>
     <form id="name-form" autocomplete="off" hidden>
@@ -375,6 +395,9 @@
   </div>
 </div>
 
+<div id="game" class="hud" hidden><b id="game-text"></b><span id="game-count"></span><span id="game-time"></span><button id="game-btn" type="button"></button></div>
+<div id="flash" hidden aria-live="assertive"><b id="flash-title"></b><span id="flash-sub"></span></div>
+
 <div id="goal" class="hud" hidden role="status" aria-live="polite"><span id="goal-arrow" aria-hidden="true">➤</span><span id="goal-text"></span><span id="goal-dist"></span></div>
 
 <aside id="tasks" class="hud" aria-label="The keeper's list for today">
@@ -400,7 +423,7 @@
   <p>By day, butterflies settle on anyone who keeps still, and the flat stone holds the sun. When rain comes, trees keep you dry.</p>
   <p>Things go better in company. Answer a call when you hear one. Driftwood counts twice with another animal beside you, and the fire warms you faster with someone else resting at it. Tracks on the ground show who was here before you.</p>
   <p>Keep it kind. Slurs, sexual talk and heavy swearing are not passed on, and whoever writes them is muted for a while. Press an animal's name in the chat to stop hearing them or to report them to the keeper.</p>
-  <p>To play tag, walk up to another animal and choose Play tag. Whoever is it runs a little faster than everyone else. Animals sitting, lying down or away are safe.</p>
+  <p>To play tag, walk up to another animal and ask. If they say yes, you are it. Whoever is it has a glowing ring and runs a little faster; touch another player to pass it on. A round lasts two minutes, anyone can join in from the line at the top, and players who sit or lie down are safe.</p>
   <p>You are not the only ones here. Crabs keep to the sand, an owl watches from the dead tree at night, and Clover the cow grazes her way round the island.</p>
   <h3>The keeper's list for today</h3>
   <ul id="list"></ul>

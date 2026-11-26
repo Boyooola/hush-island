@@ -196,15 +196,16 @@
   #goal-arrow { display: inline-block; font-size: 20px; color: var(--ember); transition: transform 0.15s linear; align-self: center; }
   #goal-dist { font: 700 14px var(--body); color: var(--ink); white-space: nowrap; }
   /* Today's jobs, written down the left edge of the sky. */
-  #tasks { position: fixed; left: 16px; top: 54px; max-width: min(300px, 62vw); display: flex; flex-direction: column; gap: 5px; z-index: 3;
+  #tasks { position: fixed; left: 12px; top: 54px; max-width: min(300px, 62vw); display: flex; flex-direction: column; gap: 5px; z-index: 3;
+    background: rgba(18, 22, 32, 0.52); padding: 9px 13px 10px; border-radius: 6px;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.8), 0 0 22px rgba(0, 0, 0, 0.5); }
   #tasks-head { background: none; border: 0; padding: 2px 0; text-align: left; font-family: var(--display); font-weight: 800; font-size: 16px; color: var(--amber); text-shadow: inherit; }
   #tasks-head:hover { color: var(--ink); }
-  #journal-btn { background: none; border: 0; padding: 2px 0; margin-top: 4px; text-align: left; font-family: var(--display); font-weight: 800; font-size: 16px; color: var(--amber); text-shadow: inherit; cursor: pointer; }
+  #journal-btn { color: var(--amber); cursor: pointer; }
   #journal-btn:hover { color: var(--ink); }
   #tide-note { font-size: 13.5px; color: var(--ink); opacity: 0.9; }
   #tide-note:empty { display: none; }
-  #journal-count { font: 700 13px var(--body); color: var(--ink); opacity: 0.85; margin-left: 6px; }
+  #journal-count { font: 700 12.5px var(--body); color: var(--ink); opacity: 0.8; margin-left: 2px; }
   #tasks-count { font: 700 13px var(--body); color: var(--ink); opacity: 0.85; margin-left: 6px; }
   #tasks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14.5px; line-height: 1.25; }
   #tasks-list li { display: grid; grid-template-columns: 14px 1fr; gap: 7px; align-items: baseline; }
@@ -467,7 +468,6 @@
   <ul id="tasks-list"></ul>
   <div id="camp"></div>
   <div id="tide-note"></div>
-  <button id="journal-btn" type="button">Your journal <span id="journal-count"></span></button>
 </aside>
 
 <aside id="help" hidden>
@@ -492,9 +492,8 @@
   <p>When two or more animals are resting at the fire, any of them can start a dance. Everyone who joins circles the fire for a minute, and comes away warm right through.</p>
   <p>To play tag, walk up to another animal and ask. If they say yes, you are it. Whoever is it has a glowing ring and runs a little faster; touch another player to pass it on. A round lasts two minutes, anyone can join in from the line at the top, and players who sit or lie down are safe.</p>
   <p>You are not the only ones here. Crabs keep to the sand, an owl watches from the dead tree at night, and Clover the cow grazes her way round the island.</p>
-  <h3>What the Keeper asks today</h3>
-  <ul id="list"></ul>
-  <p>Each one done puts two planks on the boat on the west beach. Quests are different: each is done once, and tells you a little more about this place. Your journal keeps them.</p>
+  <ul id="list" hidden></ul>
+  <p>Quests are what the island asks of you. Each is done once and tells you a little more about this place. The one you are on is at the top left, with an arrow to it; your journal keeps the rest.</p>
   <p id="music-credit" hidden></p>
   <p id="nights">Nights on the island: 1. A scarf comes on night 3.</p>
   <button class="ghost" id="help-close" type="button">Close</button>
@@ -530,6 +529,7 @@
       <button class="word" id="emote-sit" type="button" data-key="5">Sit</button>
       <button class="word" id="emote-lie" type="button" data-key="6">Lie down</button>
     </div>
+    <button class="word" id="journal-btn" type="button" data-key="J">Journal <span id="journal-count"></span></button>
     <form id="chat" autocomplete="off">
       <input id="say" name="say" type="text" maxlength="200" placeholder="Press Enter to speak" aria-label="Message">
       <button class="send" type="submit">Say</button>

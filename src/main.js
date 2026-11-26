@@ -307,7 +307,6 @@ function keeperHello() {
   if (bottle && bottle.kind === 'reply') return 'A bottle came back for you. It is on the beach.';
   const st = showerState();
   const todo = listToday().find((id) => !listState().done.includes(id));
-  if (todo && !st.on && st.startsIn > 6 * 60000) return `Today I could use a hand. ${TASKS[todo]}.`;
   if (st.on) return 'Look up. They are falling now.';
   const mins = Math.round(st.startsIn / 60000);
   if (mins <= 12) return mins <= 1 ? 'Any moment now, the stars fall. Get to the hill.' : `The stars fall in about ${mins} minutes. The hill is the place for it.`;
@@ -444,7 +443,7 @@ function makeMark() {
 const marks = [];
 function addMark(group, from, y) { const sp = makeMark(); sp.position.y = y; group.add(sp); marks.push({ sp, from, y }); }
 function showMarks() { for (const m of marks) { m.sp.visible = entered && MY_STORY.some((q) => !q.chapter.side && q.from === m.from && questOpen(q)); m.sp.position.y = m.y + Math.sin(performance.now() / 420) * 0.07; } }
-addMark(keeper.group, FAR ? 'The Mapmaker' : 'The Keeper', FAR ? 3.15 : 2.75);
+addMark(keeper.group, FAR ? 'The Mapmaker' : 'The Keeper', FAR ? 3.15 : 2.05);
 let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
@@ -454,7 +453,7 @@ function findGoal() {
   const q = questNow();
   if (q) return { text: (q.id === 'west' || q.id === 'star') && skyNow.dark < 0.6 ? `${q.ask}. Wait for night` : questAsk(q), at: (QUEST_WHERE[q.where] || (() => me))(), step: '' };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
-  return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
+  return null;      // no quest open: nothing is asked, and nothing points anywhere
 }
 const beacon = new THREE.Group();
 {
@@ -527,9 +526,8 @@ function showList() {
       const head = document.createElement('li'); head.className = 'asks'; head.textContent = ch ? ch.title : 'The story so far'; el.appendChild(head);
       if (ch && q) { const li = document.createElement('li'); li.className = 'now quest'; const b = document.createElement('b'); b.textContent = q.title; li.append(b, document.createElement('br'), questAsk(q)); el.appendChild(li); }      // one quest at a time: the rest are in the journal
       else { const li = document.createElement('li'); li.className = 'done quest'; li.textContent = 'Every quest of the story is done'; el.appendChild(li); }
-      if (!FAR) { const h = document.createElement('li'); h.className = 'asks'; h.textContent = 'The Keeper asks today'; el.appendChild(h); }
     }
-    for (const id of FAR ? [] : today) {
+    for (const id of []) {      // the Keeper's list of the day is gone: quests are what the island asks now
       const li = document.createElement('li');
       li.textContent = TASKS[id];
       if (st.done.includes(id)) li.className = 'done';
@@ -551,15 +549,6 @@ function showList() {
 function did(id) {
   if (FAR) return;
   questEvent(id);
-  const today = listToday(), st = listState();
-  if (!entered || !today.includes(id) || st.done.includes(id)) return;
-  st.done.push(id);
-  store('ember.list', st);
-  showList();
-  const left = today.length - st.done.length;
-  addLog('', `The Keeper nods. ${left ? (left === 1 ? 'One more thing he asks today.' : `${left} more things he asks today.`) : 'That is all he asks today.'} Two planks go on the boat in your name.`, 'sys');
-  addPlanks(2);
-  if (!left) setTimeout(() => playEmote('hop'), 800);
 }
 // The nearest visitor who is awake and within reach, if there is one.
 function companion(reach) {
@@ -1948,6 +1937,7 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (k === 'enter') { $('say').focus(); e.preventDefault(); return; }
   if (k === 'e' && actions[0]) { actions[0].run(); return; }
+  if (k === 'j' && !e.ctrlKey && !e.metaKey) { if ($('sheet').hidden) openJournal(); else closeSheet(); return; }
   if (k === 'r' && actions[1]) { actions[1].run(); return; }
   if (k === '1') { callOut(); return; }
   if (k === '2') { playEmote('hop'); return; }

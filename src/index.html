@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hush Island: a quiet island you visit as an animal</title>
-<meta name="description" content="A free browser game with nothing to win. Arrive as a fox, wolf, deer or other animal, sit by the fire, watch the stars, and meet whoever else is there.">
+<title>Hush Island: wash ashore as an animal and explore with whoever is there</title>
+<meta name="description" content="A free social exploration game in your browser. Wash ashore as a fox, wolf, deer or other animal, find out who keeps the fire and why, and explore with whoever else is there.">
 <link rel="canonical" href="https://www.hush-island.dev/">
 <meta name="theme-color" content="#0b1426">
 <meta name="application-name" content="Hush Island">
@@ -17,8 +17,8 @@
 <link rel="manifest" href="/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Hush Island">
-<meta property="og:title" content="Hush Island: a quiet island you visit as an animal">
-<meta property="og:description" content="A free browser game with nothing to win. Sit by the fire, fish off the dock, watch the stars, and meet whoever else is there.">
+<meta property="og:title" content="Hush Island: wash ashore as an animal and explore with whoever is there">
+<meta property="og:description" content="A free social exploration game. Find out who keeps the fire and why, help build the boat, and explore with whoever else is there.">
 <meta property="og:url" content="https://www.hush-island.dev/">
 <meta property="og:image" content="https://www.hush-island.dev/og.jpg">
 <meta property="og:image:width" content="1200">
@@ -108,7 +108,6 @@
   .hint { color: var(--ink-quiet); font-size: 13.5px; }
   .when { color: var(--ink); font-size: 14px; font-weight: 700; margin: 2px 0 6px; }
   .when:empty { display: none; }
-  body.far #tasks-head, body.far #tasks-list { display: none; }
   #camp { font-size: 13.5px; color: var(--ink); opacity: 0.9; margin-top: 4px; }
   #camp:empty { display: none; }
   #tasks[data-closed="true"] #camp { display: none; }
@@ -203,6 +202,8 @@
   #tasks-head:hover { color: var(--ink); }
   #journal-btn { background: none; border: 0; padding: 2px 0; margin-top: 4px; text-align: left; font-family: var(--display); font-weight: 800; font-size: 16px; color: var(--amber); text-shadow: inherit; cursor: pointer; }
   #journal-btn:hover { color: var(--ink); }
+  #tide-note { font-size: 13.5px; color: var(--ink); opacity: 0.9; }
+  #tide-note:empty { display: none; }
   #journal-count { font: 700 13px var(--body); color: var(--ink); opacity: 0.85; margin-left: 6px; }
   #tasks-count { font: 700 13px var(--body); color: var(--ink); opacity: 0.85; margin-left: 6px; }
   #tasks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14.5px; line-height: 1.25; }
@@ -213,6 +214,12 @@
   #tasks[data-closed="true"] #tasks-list { display: none; }
   #tasks[data-fresh="true"] { display: none; }
   #tasks-list li.now { color: var(--amber); font-weight: 700; }
+  #tasks-list li.quest { display: block; font-weight: 400; color: var(--ink); margin-bottom: 4px; }
+  #tasks-list li.quest::before { display: none; }
+  #tasks-list li.quest.other { color: var(--ink); opacity: 0.85; font-size: 14px; margin-bottom: 1px; }
+  #tasks-list li.quest b { color: var(--amber); font-family: var(--display); font-weight: 800; font-size: 15.5px; }
+  #tasks-list li.asks { display: block; font: 700 12.5px var(--body); color: var(--ink-quiet); margin-top: 2px; }
+  #tasks-list li.asks::before { display: none; }
 
   #bottom {
     position: fixed; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 12px; align-items: center;
@@ -315,6 +322,18 @@
       linear-gradient(180deg, #5d4531 0%, #4b3726 55%, #3d2c1e 100%);
     clip-path: polygon(1.5% 0%, 30% 1.4%, 62% 0.2%, 98% 1.6%, 100% 40%, 98.6% 100%, 66% 98.4%, 33% 100%, 0% 98.8%, 1.2% 52%);
   }
+  #sheet[data-kind="journal"] { width: min(660px, calc(100% - 24px)); max-height: min(86%, 720px); transform: translate(-50%, -52%) rotate(-0.4deg); }
+  #sheet .tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--paper-line); padding-bottom: 6px; }
+  #sheet .tabs button { background: none; border: 0; padding: 0; font: 800 17px var(--display); color: var(--paper-quiet); cursor: pointer; }
+  #sheet .tabs button.here { color: var(--paper-accent); text-decoration: underline; text-underline-offset: 5px; text-decoration-thickness: 2px; }
+  #sheet .tabs button:hover { color: var(--paper-ink); }
+  #sheet .album { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 22px 26px; padding: 10px 8px 6px; }
+  #sheet .album figure { margin: 0; transform: rotate(var(--tilt, 0deg)); }
+  #sheet .album .photo { position: relative; aspect-ratio: 3 / 2; background: #fbf6ea; border: 8px solid #fbf6ea; box-shadow: 0 2px 9px rgba(50, 30, 10, 0.32); }
+  #sheet .album .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #sheet .album .postmark { position: absolute; right: -16px; top: -18px; width: 62%; opacity: 0.86; mix-blend-mode: multiply; pointer-events: none; }
+  #sheet .album figcaption { font-size: 13.5px; color: var(--paper-quiet); margin-top: 7px; }
+  #sheet .album .blank .photo { background: none; border: 2px dashed var(--paper-line); box-shadow: none; display: grid; place-items: center; font: 800 17px var(--display); color: var(--paper-quiet); }
   #sheet h2 { font-family: var(--display); font-weight: 800; font-size: 25px; line-height: 1.1; margin: 0; color: var(--paper-ink); text-wrap: balance; }
   #sheet-body { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
   #sheet-body .row { display: flex; flex-direction: column; gap: 1px; }
@@ -404,7 +423,7 @@
 <section id="intro" aria-labelledby="title">
   <div class="card">
     <h1 id="title">Hush Island</h1>
-    <p>Somewhere quiet. Sit by the fire, fish off the dock, howl at the stars, and help build the boat with whoever else is here.</p>
+    <p>You wash ashore on a small island. A stag keeps a fire burning on the beach and is building a boat. He will not say where it is going. Find out, with whoever else is here.</p>
     <div class="who">
       <div><small>You arrive as</small><strong id="who-name">Sleepy Otter</strong> <span id="who-code"></span></div>
       <div class="namers"><button class="ghost" id="reroll" type="button">Another name</button><button class="ghost" id="rename" type="button">Choose my own</button></div>
@@ -426,7 +445,7 @@
 </section>
 
 <div id="top" class="hud">
-  <div class="brand"><b>Hush Island</b><span id="count">Just you and the keeper</span></div>
+  <div class="brand"><b>Hush Island</b><span id="count">Just you and the Keeper</span></div>
   <div id="day" role="img" aria-label="Island time"><div id="daybar"><i id="daystar"></i><i id="daydot" class="sun"></i></div><span id="daytext"></span></div>
   <div class="tools">
     <button class="chip" id="btn-music" type="button" aria-pressed="true">Music on</button>
@@ -443,10 +462,11 @@
 
 <div id="goal" class="hud" hidden role="status" aria-live="polite"><span id="goal-arrow" aria-hidden="true">➤</span><span id="goal-text"></span><span id="goal-dist"></span></div>
 
-<aside id="tasks" class="hud" aria-label="The keeper's list for today">
-  <button id="tasks-head" type="button" aria-expanded="true">The keeper's list <span id="tasks-count"></span></button>
+<aside id="tasks" class="hud" aria-label="Quests">
+  <button id="tasks-head" type="button" aria-expanded="true">Quests <span id="tasks-count"></span></button>
   <ul id="tasks-list"></ul>
   <div id="camp"></div>
+  <div id="tide-note"></div>
   <button id="journal-btn" type="button">Your journal <span id="journal-count"></span></button>
 </aside>
 
@@ -468,13 +488,13 @@
   <p>By day, butterflies settle on anyone who keeps still, and the flat stone holds the sun. When rain comes, trees keep you dry.</p>
   <p>Things go better in company. Answer a call when you hear one. Driftwood counts twice with another animal beside you, and the fire warms you faster with someone else resting at it. Tracks on the ground show who was here before you.</p>
   <p>Stand beside another animal and a row of things to do with them appears: nuzzle, play-bow, share what you are carrying, or curl up beside them if they are resting. You can also ask to be friends. Friends are told when the other is on the island, can whisper to each other, and can leave notes for when one of them is away.</p>
-  <p>Keep it kind. Slurs, sexual talk and heavy swearing are not passed on, and whoever writes them is muted for a while. Press an animal's name in the chat to stop hearing them or to report them to the keeper.</p>
+  <p>Keep it kind. Slurs, sexual talk and heavy swearing are not passed on, and whoever writes them is muted for a while. Press an animal's name in the chat to stop hearing them or to report them to the Keeper.</p>
   <p>When two or more animals are resting at the fire, any of them can start a dance. Everyone who joins circles the fire for a minute, and comes away warm right through.</p>
   <p>To play tag, walk up to another animal and ask. If they say yes, you are it. Whoever is it has a glowing ring and runs a little faster; touch another player to pass it on. A round lasts two minutes, anyone can join in from the line at the top, and players who sit or lie down are safe.</p>
   <p>You are not the only ones here. Crabs keep to the sand, an owl watches from the dead tree at night, and Clover the cow grazes her way round the island.</p>
-  <h3>The keeper's list for today</h3>
+  <h3>What the Keeper asks today</h3>
   <ul id="list"></ul>
-  <p>Each job done puts two planks on the boat being built on the west beach.</p>
+  <p>Each one done puts two planks on the boat on the west beach. Quests are different: each is done once, and tells you a little more about this place. Your journal keeps them.</p>
   <p id="music-credit" hidden></p>
   <p id="nights">Nights on the island: 1. A scarf comes on night 3.</p>
   <button class="ghost" id="help-close" type="button">Close</button>

@@ -1,4 +1,5 @@
 import { timeNow } from './now.js';
+import { FAR } from './terrain.js';
 // Island time. One island day takes 48 real minutes and runs off the clock on the wall,
 // so every visitor is always in the same hour of the same day.
 export const DAY_MS = 48 * 60000;
@@ -34,6 +35,14 @@ const KEYS = [
   { h: 19.6, top: 0x050a1e, mid: 0x0d1c40, hor: 0x142a4d, sky: 0x6f8fd8, ground: 0x333c66, hemi: 1.45, key: 0x9db8ff, keyI: 1.5, fill: 0.3, dark: 1, fog: 0.0105, sea: 0x1a4a68, far: 0x0b1730 },
   { h: 24, top: 0x050a1e, mid: 0x0d1c40, hor: 0x142a4d, sky: 0x6f8fd8, ground: 0x333c66, hemi: 1.45, key: 0x9db8ff, keyI: 1.5, fill: 0.3, dark: 1, fog: 0.0105, sea: 0x1a4a68, far: 0x0b1730 },
 ];
+// Lantern Rock has its own weather: a low gold light through sea mist by day, and a green-black night.
+if (FAR) {
+  const night = { top: 0x04121a, mid: 0x0c2a33, hor: 0x1a3f44, sky: 0x7fb0b0, ground: 0x2c4444, hemi: 1.35, key: 0xa8e0d0, keyI: 1.35, fill: 0.3, fog: 0.016, sea: 0x143f48, far: 0x0a1e24 };
+  const day = { top: 0x6f9ab0, mid: 0xcfd0b0, hor: 0xf0deb4, sky: 0xfff0cc, ground: 0x9a8660, hemi: 1.6, key: 0xffd9a0, keyI: 2.2, fill: 0.4, fog: 0.0082, sea: 0x4f8e90, far: 0xc8bc98 };
+  const dawn = { top: 0x3a5a78, mid: 0xb89aa0, hor: 0xf4b890, sky: 0xe0b8b0, ground: 0x6a5a58, hemi: 1.45, key: 0xffa878, keyI: 1.5, fog: 0.015, sea: 0x4a7a84, far: 0x8a7a80 };
+  const dusk = { top: 0x2a3058, mid: 0x8a5a78, hor: 0xf08a58, sky: 0xc09aa8, ground: 0x5e4c50, hemi: 1.4, key: 0xff9060, keyI: 1.5, fog: 0.015, sea: 0x3f6470, far: 0x4a3c50 };
+  [night, night, dawn, day, day, dusk, night, night].forEach((look, i) => Object.assign(KEYS[i], look));
+}
 const mixHex = (a, b, t) => {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255, br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
   return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);

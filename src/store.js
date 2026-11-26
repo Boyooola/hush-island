@@ -205,7 +205,82 @@ export function createStore() {
     try { await db.collection('boat').add({ n, name: clean(name, 22), code: /^\d{4}$/.test(String(code)) ? String(code) : '', at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; }
   }
 
+  // ---- the Mapmaker's record ----
+  // Who reached each place first, and who has walked the whole island. cb(firsts, roll, state): firsts is keyed by
+  // place ('a-woods' for an area, 's-tower' for a sight). Without storage, your own firsts are kept on this device.
+  function watchFirsts(cb) {
+    const mine = () => local.get('ember.footprints') || {};
+    ready.then(() => {
+      if (!db) { cb(mine(), [], 'off'); return; }
+      try {
+        db.collection('firsts').orderBy('at', 'asc').limit(1000).onSnapshot((snap) => {
+          const firsts = {}, roll = [];
+          for (const d of snap.docs) {
+            const r = d.data() || {}, rec = { name: clean(r.name, 22) || 'A visitor', code: /^\d{4}$/.test(String(r.code)) ? String(r.code) : '', at: Number(r.at) || 0, mine: r.by === me() };
+            if (d.id.startsWith('first-')) firsts[d.id.slice(6)] = rec; else if (d.id.startsWith('whole-')) roll.push(rec);
+          }
+          cb(firsts, roll, 'ok');
+        }, () => cb(mine(), [], 'off'));
+      } catch (e) { cb(mine(), [], 'off'); }
+    });
+  }
+  // 'ok': the place is yours. 'late': somebody was there before you. 'local': kept on this device only.
+  async function claimFirst(place, name, code) {
+    await ready;
+    const rec = { place: 'first-' + place, name: clean(name, 22) || 'A visitor', code: /^\d{4}$/.test(String(code)) ? String(code) : '', by: me() };
+    if (!db || canWrite === false) { const f = local.get('ember.footprints') || {}; if (!f[place]) { f[place] = { name: rec.name, code: rec.code, at: Date.now(), mine: true }; local.set('ember.footprints', f); } return 'local'; }
+    try { await db.collection('firsts').doc(rec.place).set(rec); return 'ok'; } catch (e) { return /409/.test(String(e && e.message)) ? 'late' : 'fail'; }
+  }
+  async function signRoll(name, code) {
+    await ready;
+    if (!db || canWrite === false) return 'local';
+    const id = 'whole-' + String(me()).replace(/[^\w-]/g, '').slice(0, 40).padEnd(6, '0');
+    try { await db.collection('firsts').doc(id).set({ place: id, name: clean(name, 22) || 'A visitor', code: /^\d{4}$/.test(String(code)) ? String(code) : '', by: me() }); return 'ok'; } catch (e) { return /409/.test(String(e && e.message)) ? 'ok' : 'fail'; }
+  }
+
+  // ---- the tower on Lantern Rock ----
+  // Every load carried to the tower is one small record; what has been brought of each kind is their sum.
+  // cb(totals, state, crew): totals { stone, timber, glass, oil }, crew the names with what each has carried.
+  function watchLight(cb) {
+    const mine = () => { const v = local.get('ember.light'); return v && typeof v === 'object' ? v : {}; };
+    cb(mine(), 'loading');
+    ready.then(() => {
+      if (!db) { cb(mine(), 'off'); return; }
+      try {
+        db.collection('light').orderBy('at', 'desc').limit(1000).onSnapshot((snap) => {
+          const totals = { stone: 0, timber: 0, glass: 0, oil: 0 }, by = new Map();
+          for (const d of snap.docs) {
+            const rec = d.data() || {}, n = Math.max(0, Math.min(6, Math.floor(Number(rec.n) || 0)));
+            if (!(rec.kind in totals)) continue;
+            totals[rec.kind] += n;
+            const name = (clean(rec.name, 22) || 'A visitor') + (/^\d{4}$/.test(String(rec.code)) ? ` #${rec.code}` : '');
+            by.set(name, (by.get(name) || 0) + n);
+          }
+          cb(totals, 'ok', [...by.entries()].map(([name, n]) => ({ name, n })).sort((p, q) => q.n - p.n));
+        }, () => cb(mine(), 'off'));
+      } catch (e) { cb(mine(), 'off'); }
+    });
+  }
+  async function addLight(kind, n, name, code) {
+    const v = local.get('ember.light') || {}; v[kind] = (Number(v[kind]) || 0) + n; local.set('ember.light', v);
+    await ready;
+    if (!db || canWrite === false) return 'local';
+    try { await db.collection('light').add({ kind, n, name: clean(name, 22), code: /^\d{4}$/.test(String(code)) ? String(code) : '', at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; }
+  }
+
+  // ---- the wayfarers' cairn: one stone for each time anybody has laid one ----
+  function watchCairn(cb) {
+    ready.then(() => {
+      if (!db) return;
+      try { db.collection('cairn').orderBy('at', 'desc').limit(1000).onSnapshot((snap) => cb(snap.size), () => {}); } catch (e) { /* the visitor's own stones still show */ }
+    });
+  }
+  async function addCairn(name) { await ready; if (!db || canWrite === false) return 'local'; try { await db.collection('cairn').add({ n: 1, name: clean(name, 22), at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; } }
+
   return {
+    watchCairn, addCairn,
+    watchLight, addLight,
+    watchFirsts, claimFirst, signRoll,
     ready, watchBoat, addPlanks, watchCarvings, carve, findBottle, throwBottle, replyBottle, passBottle, finishBottle, countNight,
     get available() { return !!db; },
     get canWrite() { return !!db && canWrite !== false; },

@@ -1,0 +1,14 @@
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+import fs from 'fs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox'] });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
+const p = await ctx.newPage();
+await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(6000);
+const url = await p.evaluate(() => { const w = window.__ember.world, f = {}, n = ['Mira', 'Odo', 'Juniper Longname', 'Pip'];
+  ['woods', 'flats', 'hollow', 'valley', 'meadow', 'point', 'farbeach'].forEach((id, i) => { if (i !== 3) f['a-' + id] = { name: n[i % 4] }; });
+  ['summit', 'tower', 'wreck', 'hollowtree', 'spring', 'whale', 'seat', 'moonpool'].forEach((id, i) => { f['s-' + id] = { name: n[i % 4] }; });
+  w.setMap({ firsts: f, walked: new Set(['landing', 'woods', 'meadow', 'point']), cards: new Set(['tower', 'hollowtree']), named: true, namer: 'Odo' });
+  return w.mapmaker.canvas().toDataURL('image/png'); });
+fs.writeFileSync('/home/claude/ember-isle/shots/map.png', Buffer.from(url.split(',')[1], 'base64'));
+await browser.close();

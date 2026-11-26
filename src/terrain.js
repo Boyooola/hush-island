@@ -41,21 +41,60 @@ export const FAR = ISLE === 'far';
 // Key places (metres, y up, the fire at the origin). On the far shore the fire is the camp at the Landing, on
 // the island's eastern tip, and the land runs away west from it.
 export const FIRE = { x: 0, z: 0 };
-export const HILL = FAR ? { x: -66, z: -10 } : { x: -15, z: -12 };       // home: the hill behind the fire; far: the High Meadow
+export const HILL = FAR ? { x: -270, z: -20 } : { x: -15, z: -12 };       // home: the hill behind the fire; far: the High Meadow
 export const SPAWN = FAR ? { x: 19.5, z: 3.4 } : { x: 0.5, z: 24.2 };
 export const DOCK = FAR ? { x0: 25.2, x1: 41.7, z0: -1.15, z1: 1.15, y: 0.55 } : { x0: 29.5, x1: 46, z0: -1.15, z1: 1.15, y: 0.55 };
 export const WOODPILE = { x: 3.1, z: 5.0 };
 export const SIGN = FAR ? { x: 14.5, z: 4.6 } : { x: -3.7, z: 20.6 };
 // The areas of the far shore, for the map and for saying where you are. Each is a centre and a reach.
+// Other places on the far shore that the land is shaped around.
+export const WOODS = { x: -78, z: -8, r: 46 }, FLATS = { x: -100, z: 132, r: 40 }, VALLEY = { x: -200, z: 0, r: 46 }, POINT = { x: -310, z: 6 }, HOLLOW = { x: -168, z: -84 }, FARBEACH = (() => { const a = Math.atan2(-96, -292), r = FAR ? shoreRadius(a) - 11 : 300; return { x: Math.cos(a) * r, z: Math.sin(a) * r, a }; })();
+export const POOL = { x: VALLEY.x - 4, z: VALLEY.z + 27, r: 14.5, y: 2.55 };      // Stillwater's pool, under the valley's southern wall
+export const CRAG = { x: POOL.x, z: POOL.z + 14.6, y: 3.0 };                    // the crag the water falls from, with the hollow behind the fall
+// Stepping stones across the pool, from the path's side to the falls.
+export const STONES = FAR ? [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({ x: POOL.x + 2.2 - i * 0.25 + (i % 2 ? 0.7 : -0.5), z: POOL.z - 12.6 + i * 3.05 })) : [];
+export const HOLLOW_TREE = { x: WOODS.x - 15, z: WOODS.z + 27, ry: 0.7 };      // deep in Whisper Woods, off the path
+export const SUMMIT = { x: -265, z: -2 };      // the highest point of the island, a crag above the High Meadow
+// The ring of seven standing stones on the High Meadow, one for each light.
+export const STANDING = FAR ? [0, 1, 2, 3, 4, 5, 6].map((i) => { const a = i / 7 * Math.PI * 2 + 0.3; return { x: HILL.x + Math.cos(a) * 7.2, z: HILL.z + Math.sin(a) * 7.2, a }; }) : [];
+export const COTTAGE = { x: -304.5, z: 19, y: 23.2, ry: Math.atan2(-7, -9) };      // the keeper's cottage, a little way from his tower
+// The Tide Flats: mud that the sea covers and uncovers. Out on it lies the wreck; beyond it a causeway of stones
+// runs to an islet that can only be reached, and left, while the tide is out.
+const FLAT_A = Math.atan2(FLATS.z, FLATS.x), FU = { x: Math.cos(FLAT_A), z: Math.sin(FLAT_A) };
+export const TIDE = { low: -0.35, high: 0.92, flat: 0.42, period: 16 * 60000 };
+export const FLAT_EDGE = FAR ? (() => { const r = shoreRadius(FLAT_A); return { x: FU.x * r, z: FU.z * r }; })() : { x: 0, z: 0 };
+export const ISLET = { x: FLAT_EDGE.x + FU.x * 44, z: FLAT_EDGE.z + FU.z * 44 };
+export const WRECK = { x: FLATS.x + FU.x * 9 - FU.z * 15, z: FLATS.z + FU.z * 9 + FU.x * 15 };
+export const FLAT_SHORE = { x: FLATS.x - FU.x * 46, z: FLATS.z - FU.z * 46 };      // dry ground above the flats, where the sea puts back anyone it catches
+// How high the tide stands at a given moment (the same for everyone), and how far through its turn it is (0 and 1 = high water, 0.5 = low).
+export function tideAt(now) { const ph = (now % TIDE.period) / TIDE.period; return { y: lerp(TIDE.low, TIDE.high, 0.5 + 0.5 * Math.cos(ph * Math.PI * 2)), ph }; }
+// Above the Far Beach, a ledge on the cliff with a hot spring on it; on the beach itself, a shelter of driftwood.
+export const SPRING = (() => { const a = FARBEACH.a + 0.105, r = FAR ? shoreRadius(a) - 7.5 : 300; return { x: Math.cos(a) * r, z: Math.sin(a) * r, y: 5.6 }; })();
+export const SHELTER = { x: FARBEACH.x - Math.cos(FARBEACH.a) * 7 + Math.sin(FARBEACH.a) * 6, z: FARBEACH.z - Math.sin(FARBEACH.a) * 7 - Math.cos(FARBEACH.a) * 6 };
+// Hidden places in the open country, where no path goes.
+export const MOONPOOL = { x: -70, z: -95, y: 4.4 };       // a pool in a dell in the north-east that takes light at night
+export const BONES = { x: -106, z: -134 };                // what is left of a whale, on the cliff top above the north shore
+export const SEAT = { x: 29.5, z: 46 };                   // a chair cut from a boulder on the south-east cliff, facing home
+export const WAYCAIRN = { x: -20, z: 88 };                // a cairn on the south cliffs that every visitor adds to
+export const GARDEN = { x: VALLEY.x + 9, z: VALLEY.z - 24 };
+export const LIGHTHOUSE = { x: -319, z: 7, y: 22.6 };      // on Lantern Point
 export const AREAS = FAR ? [
-  { id: 'landing', name: 'The Landing', x: 6, z: 0, r: 24 },
-  { id: 'woods', name: 'Whisper Woods', x: -30, z: -2, r: 22 },
-  { id: 'flats', name: 'The Tide Flats', x: -32, z: 40, r: 22 },
-  { id: 'hollow', name: 'Hollow Hill', x: -40, z: -40, r: 18 },
-  { id: 'meadow', name: 'The High Meadow', x: -66, z: -10, r: 19 },
-  { id: 'point', name: 'Lantern Point', x: -98, z: 8, r: 16 },
-  { id: 'farbeach', name: 'The Far Beach', x: -84, z: -38, r: 17 },
+  { id: 'landing', name: 'The Landing', x: 6, z: 0, r: 30 },
+  { id: 'woods', name: 'Whisper Woods', x: WOODS.x, z: WOODS.z, r: 48 },
+  { id: 'flats', name: 'The Tide Flats', x: FLATS.x, z: FLATS.z, r: 42 },
+  { id: 'hollow', name: 'Hollow Hill', x: HOLLOW.x, z: HOLLOW.z, r: 30 },
+  { id: 'valley', name: 'Stillwater', x: VALLEY.x, z: VALLEY.z, r: 44 },
+  { id: 'meadow', name: 'The High Meadow', x: HILL.x, z: HILL.z, r: 30 },
+  { id: 'point', name: 'Lantern Point', x: POINT.x, z: POINT.z, r: 30 },
+  { id: 'farbeach', name: 'The Far Beach', x: FARBEACH.x, z: FARBEACH.z, r: 30 },
 ] : [];
+// Where each sight lies, for the Mapmaker's map.
+export const SIGHT_AT = FAR ? {
+  stillwater: [VALLEY.x, VALLEY.z], hollowtree: [HOLLOW_TREE.x, HOLLOW_TREE.z], underhill: [-150, -70], paintings: [-166, -84], deeppool: [-190, -76],
+  stones: [HILL.x, HILL.z], summit: [SUMMIT.x, SUMMIT.z], tower: [LIGHTHOUSE.x, LIGHTHOUSE.z], cottage: [COTTAGE.x, COTTAGE.z], wreck: [WRECK.x, WRECK.z],
+  islet: [ISLET.x, ISLET.z], farbeach: [FARBEACH.x, FARBEACH.z], spring: [SPRING.x, SPRING.z], moonpool: [MOONPOOL.x, MOONPOOL.z], whale: [BONES.x, BONES.z],
+  seat: [SEAT.x, SEAT.z], waycairn: [WAYCAIRN.x, WAYCAIRN.z], grotto: [CRAG.x, CRAG.z],
+} : {};
 export function areaAt(x, z) {
   let best = null, bd = 1e9;
   for (const a of AREAS) { const d = Math.hypot(x - a.x, z - a.z) / a.r; if (d < 1 && d < bd) { bd = d; best = a; } }
@@ -66,8 +105,12 @@ export function areaAt(x, z) {
 // the camp on the east side, over a hundred metres away to the west.
 export function shoreRadius(theta) {
   if (FAR) {
-    const k = Math.pow((1 - Math.cos(theta)) / 2, 1.45);
-    return (27 + 84 * k) * (1 + 0.07 * Math.sin(3 * theta + 1) + 0.05 * Math.sin(5 * theta + 2.3) + 0.045 * Math.sin(8 * theta + 0.6) * k);
+    // A long island, about 400 m east to west and 300 north to south: pointed at the Landing, broad behind it.
+    // Worked out on a stretched sheet (so that it is longer than it is wide) and squeezed back.
+    const Q = 0.72, cs = Math.cos(theta), sn = Math.sin(theta), t2 = Math.atan2(sn / Q, cs);
+    const k = Math.pow((1 - Math.cos(t2)) / 2, 1.45);
+    const R = (27 + 330 * k) * (1 + 0.06 * Math.sin(3 * t2 + 1) + 0.05 * Math.sin(5 * t2 + 2.3) + 0.05 * Math.sin(9 * t2 + 0.6) * k + 0.03 * Math.sin(14 * t2 + 2) * k);
+    return R / Math.hypot(cs, sn / Q);
   }
   return 30 + 3 * Math.sin(3 * theta + 1) + 2 * Math.sin(5 * theta + 2.3) + 1.2 * Math.sin(2 * theta);
 }
@@ -90,6 +133,10 @@ export const LANDING = FAR ? [
   { kind: 'lantern_pole', x: 17.4, z: 2.4, ry: Math.PI / 2, r: 0.16, clear: 1 },
   { kind: 'lantern_pole', x: 22.2, z: -1.8, ry: -Math.PI / 2, r: 0.16, clear: 1 },
 ] : [];
+// Things left on Hush Island from before: a carved post by the dock, a lamp lens in the sand, the Keeper's chest.
+export const POST = { x: 26.6, z: 3.6 };
+export const LENS = (() => { const a = 0.78, r = (30 + 3 * Math.sin(3 * a + 1) + 2 * Math.sin(5 * a + 2.3) + 1.2 * Math.sin(2 * a)) * 0.925; return { x: Math.cos(a) * r, z: Math.sin(a) * r }; })();
+export const CHEST = { x: 4.9, z: 6.3 };
 export const WALL = { x: -6.6, z: 3.4, yaw: 0.85 };       // driftwood wall for carvings
 export const CRATE = FAR ? { x: 17.5, z: -8.2 } : { x: 6.2, z: 23.2 };                  // empty bottles on the beach
 // Places along the beach where a bottle can wash up (the south beach at home, the landing beach on the far shore).
@@ -102,28 +149,129 @@ export const BOTTLE_SPOTS = (FAR ? [-26, -15, 15, 27] : [66, 79, 102, 114]).map(
 const bump = (x, z, cx, cz, h, sig) => h * Math.exp(-((x - cx) * (x - cx) + (z - cz) * (z - cz)) / (2 * sig * sig));
 // The far shore: low and wooded in the middle, a hill with caves to the north, a high flat meadow to the west,
 // a cliff at the western point, and wide flats to the south that barely clear the water.
-function farHeight(x, z) {
-  const r = Math.hypot(x, z), theta = Math.atan2(z, x), shore = shoreRadius(theta), inland = shore - r;
-  let h = inland >= 0 ? 1.7 * (1 - Math.pow(r / shore, 2.2)) : -Math.min(5, -inland * 0.217);
-  const land = smoothstep(-0.5, 7, inland);
-  // Whisper Woods: rolling ground.
-  h += (0.9 * noise2(x * 0.045 + 5, z * 0.045 - 2) + 0.9) * smoothstep(12, 34, r) * land;
-  // Hollow Hill.
-  h += bump(x, z, -40, -40, 9.5, 10.5) * land;
-  // The High Meadow: a broad table with a flat top.
-  { const d = Math.hypot(x - HILL.x, z - HILL.z); h += 7.6 * (1 - smoothstep(11, 24, d)) * land; }
-  // Lantern Point: high ground right up to the western edge, so it ends in a cliff.
-  h += bump(x, z, -99, 8, 9, 9) * smoothstep(-0.5, 2.2, inland);
+export const PATHS = FAR ? [
+  [[5.4, 0.3], [15, 0.4], [25.4, 0]],                                                                  // camp to the jetty
+  [[-5.4, 0.2], [-40, -4], [-78, -8], [-118, -3], [-150, 0], [-176, 2], [-200, 0]],                   // west through the woods and the gorge into Stillwater
+  [[-78, -8], [-108, -40], [-134, -58], [-150, -70]],                                                  // north-west to Hollow Hill
+  [[-40, -4], [-60, 46], [-84, 98], [-100, 126]],                                                      // south to the flats
+  [[-200, 0], [-236, -10], [-270, -20], [-292, -8], [-310, 6]],                                       // up out of the valley, over the meadow, to Lantern Point
+  [[-270, -20], [-286, -56], [-306, -86], [FARBEACH.x + 5, FARBEACH.z + 4]],                                                             // down to the Far Beach
+] : [
+  [[0.5, 22.5], [0.9, 14], [0.3, 5.6]],
+  [[5.4, 0.4], [16, -0.6], [29.6, 0]],
+  [[-3.8, -3.0], [-9.5, -6.6], [-13.4, -10.6]],
+  [[-5.2, 0.4], [-11, 3.2], [-17, 9.2], [-22.6, 13.2]],
+];
+// How far a spot is from the nearest way across the island.
+export function pathDist(x, z) {
+  let d = 1e9;
+  for (const p of PATHS) for (let i = 0; i < p.length - 1; i++) {
+    const ax = p[i][0], az = p[i][1], bx = p[i + 1][0] - ax, bz = p[i + 1][1] - az;
+    const k = clamp(((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz), 0, 1);
+    d = Math.min(d, Math.hypot(x - ax - bx * k, z - az - bz * k));
+  }
+  return d;
+}
+// Lantern Rock is not a round green hump like home: it stands out of the sea on cliffs, climbs in shelves of rock,
+// and has a broken ridge along its north side. Only three places come gently down to the water: the Landing in the
+// east, the Tide Flats in the south and the Far Beach behind the hills.
+const COVES = [[0, 1.05], [Math.atan2(FLATS.z, FLATS.x), 0.3], [Math.atan2(FARBEACH.z, FARBEACH.x), 0.16]];
+const turn = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+export function cliffAmount(theta) { let c = 1; for (const [a, w] of COVES) c *= smoothstep(w * 0.55, w * 1.2, turn(theta, a)); return c; }
+function farRaw(x, z) {
+  const r = Math.hypot(x, z), theta = Math.atan2(z, x), shore = shoreRadius(theta), inland = shore - r, c = cliffAmount(theta);
+  if (inland < 0) {
+    let h = -Math.min(5, -inland * (0.217 + 0.9 * c));
+    if (Math.abs(x - ISLET.x) < 60 && Math.abs(z - ISLET.z) < 60) {
+      // The islet, and the stones that lead out to it.
+      const di = Math.hypot(x - ISLET.x, z - ISLET.z);
+      h = Math.max(h, 4.4 * Math.exp(-di * di / (2 * 7.5 * 7.5)) - 0.5 + 0.2 * noise2(x * 0.3, z * 0.3));
+      const bx = ISLET.x - FLAT_EDGE.x, bz = ISLET.z - FLAT_EDGE.z, k = clamp(((x - FLAT_EDGE.x) * bx + (z - FLAT_EDGE.z) * bz) / (bx * bx + bz * bz), -0.15, 1), dc = Math.hypot(x - FLAT_EDGE.x - bx * k, z - FLAT_EDGE.z - bz * k);
+      h = Math.max(h, lerp(-1.2, TIDE.flat - 0.12, 1 - smoothstep(1.6, 4.2, dc)));
+    }
+    return h;
+  }
+  const land = smoothstep(-0.5, 9, inland), way = 1 - smoothstep(4, 12, pathDist(x, z));
+  // The edge: a beach in the coves, a wall of rock everywhere else.
+  let h = 1.7 * (1 - Math.pow(r / shore, 2.2)) * (1 - 0.7 * c) + (4.5 + 3.5 * noise2(x * 0.02 + 1, z * 0.02)) * c * smoothstep(0, 3.2, inland) * smoothstep(9, 40, r);      // the high ground begins a walk away from the camp
+  // Rolling ground inland, in big swells and small.
+  h += (2.6 * noise2(x * 0.016 + 5, z * 0.016 - 2) + 1.4 * noise2(x * 0.04 + 5, z * 0.04 - 2) + 2.6) * smoothstep(14, 50, r) * land;
+  // Stillwater: a valley in the middle of the island that cannot be seen from outside. High ground stands all
+  // round it; the only easy ways in are the gorge from the woods and the path over the western lip.
+  const vd = Math.hypot(x - VALLEY.x, z - VALLEY.z);
+  { const rim = Math.exp(-Math.pow((vd - 64) / 17, 2)); h += (13 + 4 * noise2(x * 0.03 + 9, z * 0.03 + 2)) * rim * (1 - 0.92 * way) * land; }
+  // Hollow Hill, on the valley's northern rim.
+  h += bump(x, z, HOLLOW.x - 4, HOLLOW.z - 2, 17, 21) * land;
+  // The High Meadow: a broad table with a flat top, west of the valley.
+  { const d = Math.hypot(x - HILL.x, z - HILL.z); h += 7 * (1 - smoothstep(16, 34, d)) * land; }
+  // Lantern Point: the highest ground, right up to the western edge, so it ends in a great cliff.
+  h += bump(x, z, POINT.x, POINT.z, 17, 20) * smoothstep(-0.5, 2.6, inland);
+  // A broken ridge of crags along the north coast.
+  { const n = 1 - Math.abs(noise2(x * 0.03 + 3, z * 0.03 + 8)); h += n * n * n * 10 * smoothstep(-30, -80, z) * smoothstep(-30, -80, x) * smoothstep(1, 14, inland) * (1 - way); }
   // The Far Beach behind the hills stays low.
-  h -= bump(x, z, -84, -40, 1.2, 10) * land;
+  h *= 1 - 0.85 * Math.exp(-(Math.pow(x - FARBEACH.x, 2) + Math.pow(z - FARBEACH.z, 2)) / (2 * 20 * 20));
+  // Shelves: the high ground climbs in steps of bare rock, except where a way has been worn up it.
+  if (h > 3) { const S = 2.6, f = h / S, fl = Math.floor(f), st = (fl + smoothstep(0.7, 0.98, f - fl)) * S; h = lerp(h, st, 0.8 * (1 - way) * smoothstep(3, 4.6, h) * smoothstep(16, 36, r)); }      // and not round the camp, which lies in easy ground
+  // The floor of Stillwater: flat and sheltered, with a hollow in the middle for the pool.
+  h = lerp(h, 3.2 + 0.5 * noise2(x * 0.08, z * 0.08) - 1.15 * (1 - smoothstep(7, 15.5, Math.hypot(x - POOL.x, z - POOL.z))), 1 - smoothstep(30, 47, vd));
+  // Level ground under the crag at the falls, so that the hollow behind the water has a floor.
+  h = lerp(CRAG.y, h, smoothstep(6.5, 11, Math.hypot(x - CRAG.x, z - CRAG.z - 2.5)));
   // Small bumps everywhere.
   h += (0.22 * noise2(x * 0.16, z * 0.16) + 0.08 * noise2(x * 0.45 + 9, z * 0.45 - 4)) * land;
   // The Tide Flats: pressed down almost to the water.
-  { const m = Math.exp(-((x + 32) * (x + 32) + (z - 42) * (z - 42)) / (2 * 16 * 16)); if (inland > -2) h = lerp(h, 0.14 + 0.07 * noise2(x * 0.3, z * 0.3), Math.min(1, m * 1.15) * smoothstep(-2, 3, inland)); }
+  { const m = Math.exp(-(Math.pow(x - FLATS.x, 2) + Math.pow(z - FLATS.z, 2)) / (2 * 30 * 30)); h = lerp(h, TIDE.flat + 0.07 * noise2(x * 0.3, z * 0.3), Math.min(1, m * 1.2) * smoothstep(-2, 3, inland)); }
+  // The ledge the hot spring sits on, with a dip in it for the water.
+  { const d = Math.hypot(x - SPRING.x, z - SPRING.z); h = lerp(SPRING.y - 0.5 * (1 - smoothstep(1.2, 2.6, d)), h, smoothstep(4, 7.5, d)); }
+  // The dell the moon pool lies in.
+  { const d = Math.hypot(x - MOONPOOL.x, z - MOONPOOL.z); h = lerp(MOONPOOL.y - 0.45 * (1 - smoothstep(1.5, 3.2, d)), h, smoothstep(4.2, 9, d)); }
+  // Level ground for the keeper's cottage.
+  h = lerp(COTTAGE.y, h, smoothstep(5, 9.5, Math.hypot(x - COTTAGE.x, z - COTTAGE.z)));
+  // Level ground for the lighthouse to stand on.
+  h = lerp(LIGHTHOUSE.y, h, smoothstep(5, 11, Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z)) );
   // The camp clearing.
   h = lerp(1.62, h, smoothstep(5.5, 11, r));
   return h;
 }
+// The caves under Hollow Hill: a way cut through the hill from its eastern foot to its western, with two chambers
+// on it (the dark gallery, then the round echo chamber). The ground is dug out along it; the hill itself, drawn
+// separately as a lid (world.js), is the roof.
+export const CAVE = { pts: [[-150, -70], [-166, -84], [-182, -92], [-204, -102]], y0: 9.6, y1: 3.2, half: 2.7, rooms: [[1, 6.5], [2, 7.5]], roof: 4.4,
+  // A side passage from the round chamber, shut by a stone door until the chamber is made to ring, and at its end
+  // a small room with a pool in it.
+  branch: [[-182, -92], [-190, -76]], pool: { x: -190, z: -76, r: 5.6 }, door: { x: -185.6, z: -84.8 } };
+const caveLens = CAVE.pts.slice(1).map((p, i) => Math.hypot(p[0] - CAVE.pts[i][0], p[1] - CAVE.pts[i][1])), caveLen = caveLens.reduce((a, b) => a + b, 0);
+// For a spot: e, how far it is outside the hollowed space (negative inside it); u, how far along the way (0..1);
+// floor, the height of the cave floor there; top, the height of the cave roof.
+export function caveAt(x, z) {
+  let best = 1e9, u = 0, acc = 0;
+  for (let i = 0; i < CAVE.pts.length - 1; i++) {
+    const ax = CAVE.pts[i][0], az = CAVE.pts[i][1], bx = CAVE.pts[i + 1][0] - ax, bz = CAVE.pts[i + 1][1] - az;
+    const k = clamp(((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz), 0, 1), d = Math.hypot(x - ax - bx * k, z - az - bz * k);
+    if (d < best) { best = d; u = (acc + k * caveLens[i]) / caveLen; }
+    acc += caveLens[i];
+  }
+  let e = best - CAVE.half, lift = 0;
+  for (const [i, r] of CAVE.rooms) { const d = Math.hypot(x - CAVE.pts[i][0], z - CAVE.pts[i][1]); e = Math.min(e, d - r); lift = Math.max(lift, 1.8 * (1 - smoothstep(0, r, d))); }
+  let floor = lerp(CAVE.y0, CAVE.y1, u);
+  { // the side passage: measured the same way, and taken if it is the nearer
+    const [a, b] = CAVE.branch, bx = b[0] - a[0], bz = b[1] - a[1], k = clamp(((x - a[0]) * bx + (z - a[1]) * bz) / (bx * bx + bz * bz), 0, 1);
+    const d = Math.hypot(x - a[0] - bx * k, z - a[1] - bz * k), dp = Math.hypot(x - CAVE.pool.x, z - CAVE.pool.z), eb = Math.min(d - 2.4, dp - CAVE.pool.r);
+    if (eb < e) { e = eb; u = BRANCH_U; floor = BRANCH_Y - 1.0 * k - 0.5 * (1 - smoothstep(1.5, CAVE.pool.r - 1, dp)); lift = 1.2 * (1 - smoothstep(0, CAVE.pool.r, dp)); }
+  }
+  return { e, u, floor, top: floor + CAVE.roof + lift };
+}
+const BRANCH_U = (caveLens[0] + caveLens[1]) / caveLen, BRANCH_Y = lerp(CAVE.y0, CAVE.y1, BRANCH_U);
+const nearCave = (x, z) => x < -138 && x > -218 && z < -56 && z > -116;
+function farHeight(x, z) {
+  const h = farRaw(x, z);
+  if (!nearCave(x, z)) return h;
+  const c = caveAt(x, z);
+  return c.e > 2.4 || h <= c.floor ? h : lerp(c.floor, h, smoothstep(0, 2.4, c.e));
+}
+// The land as it would be with no cave dug in it (the hill's outside), and whether a spot has the hill for a roof.
+export const terrainRaw = (x, z) => (FAR ? farRaw(x, z) : terrainHeight(x, z));
+export function caveRoofed(x, z, reach = 2.6) { if (!FAR || !nearCave(x, z)) return false; const c = caveAt(x, z); return c.e < reach && farRaw(x, z) > c.top + 0.7; }
+export const inCave = (x, z) => caveRoofed(x, z, 0.4);
 export function terrainHeight(x, z) {
   if (FAR) return farHeight(x, z);
   const r = Math.hypot(x, z);
@@ -167,18 +315,6 @@ export function onDock(x, z) {
 
 // The worn paths: from the beach up to the fire, and from the fire out to the dock, the hill and the boatyard.
 // pathAmount is 1 on a path, 0 well off it, with a ragged edge.
-export const PATHS = FAR ? [
-  [[5.4, 0.3], [15, 0.4], [25.4, 0]],                                              // camp to the jetty
-  [[-5.4, 0.2], [-16, -2], [-30, -4], [-45, -8], [-57, -10]],                     // west through the woods to the meadow
-  [[-30, -4], [-34, -18], [-38, -30]],                                             // north to Hollow Hill
-  [[-16, -2], [-21, 12], [-27, 26]],                                               // south to the flats
-  [[-57, -10], [-76, -3], [-91, 6]],                                               // on to Lantern Point
-] : [
-  [[0.5, 22.5], [0.9, 14], [0.3, 5.6]],
-  [[5.4, 0.4], [16, -0.6], [29.6, 0]],
-  [[-3.8, -3.0], [-9.5, -6.6], [-13.4, -10.6]],
-  [[-5.2, 0.4], [-11, 3.2], [-17, 9.2], [-22.6, 13.2]],
-];
 export function pathAmount(x, z) {
   let d = 1e9;
   for (const p of PATHS) for (let i = 0; i < p.length - 1; i++) {
@@ -194,6 +330,7 @@ export function groundHeight(x, z) {
   const h = terrainHeight(x, z);
   if (onDock(x, z) && h < DOCK.y) return DOCK.y;
   if (onSlip(x, z)) return Math.max(h, slipHeight(x, z));
+  for (const st of STONES) if (Math.abs(x - st.x) < 0.75 && Math.abs(z - st.z) < 0.75 && Math.hypot(x - st.x, z - st.z) < 0.72) return Math.max(h, POOL.y + 0.1);      // a stepping stone
   return h;
 }
 

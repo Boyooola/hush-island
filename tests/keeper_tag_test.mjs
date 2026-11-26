@@ -23,8 +23,8 @@ const nearKeeper = (p, d = 1.9) => p.evaluate((d) => { const e = window.__ember,
 const a = await open(4, 1280, 720);
 const home = await kpos(a);
 await nearKeeper(a); await a.waitForTimeout(1000);
-ok('beside the keeper you can ask him to play', (await a.evaluate(() => window.__ember.actions)).includes('Ask the keeper to play tag'), JSON.stringify(await a.evaluate(() => window.__ember.actions)));
-await a.evaluate(() => { const e = window.__ember; e.run(e.actions.indexOf('Ask the keeper to play tag')); });
+ok('beside the keeper you can ask him to play', (await a.evaluate(() => window.__ember.actions)).includes('Ask the Keeper to play tag'), JSON.stringify(await a.evaluate(() => window.__ember.actions)));
+await a.evaluate(() => { const e = window.__ember; e.run(e.actions.indexOf('Ask the Keeper to play tag')); });
 ok('he gets up, the game is on and you are it', await until(a, () => { const e = window.__ember; return e.game > 0 && e.it === 'me' && e.keeperLoose && e.keeper.mode === 'stand'; }) && await has(a, 'The keeper gets to his feet'));
 // Chase him: he should run.
 await a.evaluate(() => window.__ember.cam(0.6, 0.5, 9));
@@ -65,7 +65,7 @@ await b.evaluate(() => { window.__ember.tagTime = 1; });
 ok('when time is up he walks back to the fire and lies down', await until(b, () => { const e = window.__ember; return !e.keeperLoose && e.keeper.mode === 'lie'; }, 180000) && Math.hypot((await kpos(b))[0] - home[0], (await kpos(b))[1] - home[1]) < 0.5, JSON.stringify(await kpos(b)));
 console.log('state', JSON.stringify(await b.evaluate(() => window.__ember.keeperState)));
 await nearKeeper(b); await b.waitForTimeout(1500);
-await b.evaluate(() => { const e = window.__ember; e.tagTime = 900; const i = e.actions.indexOf('Ask the keeper to play tag'); if (i >= 0) e.run(i); });
+await b.evaluate(() => { const e = window.__ember; e.tagTime = 900; const i = e.actions.indexOf('Ask the Keeper to play tag'); if (i >= 0) e.run(i); });
 ok('asked again straight away, he wants a rest', await has(b, 'Let me get my breath back first', 8000), JSON.stringify(await b.evaluate(() => window.__ember.actions)));
 console.log(errs.length ? 'page errors: ' + errs.join(' | ') : 'no page errors');
 await browser.close();

@@ -35,7 +35,7 @@ await ev(() => { const e = window.__ember; e.run(e.actions.findIndex((x) => /by 
 const kp = await ev(() => { const k = window.__ember.keeper; return [k.x, k.z]; });
 await ev((kp) => { const e = window.__ember; e.standUp(); const d = Math.hypot(kp[0], kp[1]); e.teleport(kp[0] * (1 + 1.9 / d), kp[1] * (1 + 1.9 / d)); }, kp);
 await page.waitForTimeout(1200);
-await ev(() => { const e = window.__ember; e.run(e.actions.indexOf('Greet the keeper')); }); await page.waitForTimeout(3000);
+await ev(() => { const e = window.__ember; e.run(e.actions.indexOf('Greet the Keeper')); }); await page.waitForTimeout(3000);
 const after = await stats(), d = (k) => (after[k] || 0) - (before[k] || 0);
 ok('finding things alone is still counted: fire, rest, keeper, not the stick', d('g1') === 1 && d('g2') === 1 && d('g4') === 1 && d('g3') === 0, ['g0', 'g1', 'g2', 'g3', 'g4'].map((k) => k + ':' + d(k)).join(' '));
 await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(2500);

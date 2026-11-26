@@ -5,6 +5,18 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
+// Batches (a wood of trees drawn as one piece) cannot fade one tree at a time when it comes between the camera and
+// the visitor, so instead a hole is cut through them: whatever lies close to the line from the camera to the
+// visitor, and above the visitor's head, is not drawn. main.js keeps these two points up to date.
+export const cutaway = { cam: { value: new THREE.Vector3() }, me: { value: new THREE.Vector3(0, -999, 0) } };
+export function cutInto(material, inner, outer) {
+  material.onBeforeCompile = (sh) => {
+    sh.uniforms.uCutCam = cutaway.cam; sh.uniforms.uCutMe = cutaway.me;
+    sh.vertexShader = 'varying vec3 vCutP;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vec4 cutP = vec4(transformed, 1.0);\n  #ifdef USE_INSTANCING\n  cutP = instanceMatrix * cutP;\n  #endif\n  vCutP = (modelMatrix * cutP).xyz;');
+    sh.fragmentShader = 'varying vec3 vCutP;\nuniform vec3 uCutCam;\nuniform vec3 uCutMe;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n  { vec3 ab = uCutMe - uCutCam; float ck = clamp(dot(vCutP - uCutCam, ab) / dot(ab, ab), 0.0, 1.0); float cd = length(vCutP - (uCutCam + ab * ck)); if (ck > 0.02 && vCutP.y > uCutMe.y + 1.25 && cd < ${outer.toFixed(2)}) { if (cd < ${inner.toFixed(2)} || mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 1.0) discard; } }`);
+  };
+  return material;
+}
 let loading = null;
 const baked = new Map();
 // Resolves to a maker: make(name, skip) gives a fresh copy of the named piece (or null), with all its small parts
@@ -39,6 +51,7 @@ export function loadProps() {
       // scattered in their hundreds (a wood of trees) and must cost one draw between them, not one each.
       const lumps = new Map();
       const paint = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+      cutInto(paint, 1.4, 2.0);
       const single = (name, skip) => {
         const key = name + '|' + (skip || '');
         if (lumps.has(key)) return lumps.get(key);

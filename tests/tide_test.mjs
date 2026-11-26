@@ -1,0 +1,35 @@
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox'] });
+const errs = []; let fails = 0;
+const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
+const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
+await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); });
+await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);
+const S = '/home/claude/ember-isle/shots/', P = 16 * 60000;
+const go = async (x, z, yaw, cam, wait = 2500) => { await p.evaluate(([x, z, yaw, cam]) => { const e = window.__ember; e.teleport(x, z, yaw); e.cam(...cam); }, [x, z, yaw, cam]); await p.waitForTimeout(wait); };
+const run = (label) => p.evaluate((label) => { const e = window.__ember, i = e.actions.indexOf(label); if (i < 0) return e.actions.join(' | '); e.run(i); return 'ok'; }, label);
+const toPhase = (ph) => p.evaluate(([ph, P]) => { const e = window.__ember, now = e.timeNow(), cur = (now % P) / P; e.shiftTime(((ph - cur + 1) % 1) * P); }, [ph, P]);
+const F = await p.evaluate(() => { const f = window.__ember.world.flats; return { w: { x: f.wreck.x, z: f.wreck.z }, st: f.wreck.stern, bell: { x: f.bell.x, z: f.bell.z } }; });
+await toPhase(0.5);      // dead low water
+await go(-100, 122, 3, [0.3, 0.45, 26], 5000); await p.screenshot({ path: S + 'f1.png' });
+console.log(' ', await p.evaluate(() => document.getElementById('tide-note').textContent));
+await go(F.st.x, F.st.z, 0, [-0.8, 0.3, 9], 3000); await p.screenshot({ path: S + 'f2.png' });
+ok((await run('Look at the name on her stern')) === 'ok', 'at low tide the wreck\'s name can be read'); await p.waitForTimeout(900); await p.keyboard.press('Escape'); await p.waitForTimeout(2500);
+ok(await p.evaluate(() => !!window.__emberCards().wreck), 'the wreck is a stamp');
+await p.waitForTimeout(10000);
+await go(-134.5, 177.5, 0, [0.4, 0.4, 16], 3500); await p.screenshot({ path: S + 'f3.png' });
+ok(await p.evaluate(() => Math.abs(window.__ember.me.x + 134.5) < 2), 'the causeway is dry at low tide');
+await go(F.bell.x + 1.2, F.bell.z + 0.6, 0, [0.4, 0.35, 10], 4000); await p.screenshot({ path: S + 'f4.png' });
+ok((await run('Ring the bell')) === 'ok', 'the bell on the islet can be rung');
+ok(await p.evaluate(() => !!window.__emberCards().islet), 'the islet is a stamp');
+await toPhase(0.02);     // high water
+await go(-100, 122, 3, [0.3, 0.45, 26], 4500); await p.screenshot({ path: S + 'f5.png' });
+ok(await p.evaluate(() => Math.hypot(window.__ember.me.x + 100, window.__ember.me.z - 122) > 15), 'at high tide the sea carries you off the flats');
+console.log(' ', await p.evaluate(() => document.getElementById('tide-note').textContent), '||', await p.evaluate(() => window.__ember.log.slice(-1)[0]));
+await go(F.bell.x + 1.2, F.bell.z + 0.6, 0, [0.4, 0.5, 30], 3500); await p.screenshot({ path: S + 'f6.png' });
+ok(await p.evaluate(([x, z]) => Math.hypot(window.__ember.me.x - x, window.__ember.me.z - z) < 3, [F.bell.x, F.bell.z]), 'but the islet stays dry');
+console.log(errs.length ? [...new Set(errs)].slice(0, 5).join('\n') : 'no page errors', fails ? `${fails} FAILED` : '');
+await browser.close();

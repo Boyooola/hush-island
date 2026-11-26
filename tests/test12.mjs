@@ -35,7 +35,7 @@ ok('carrying a fish offers to eat it', (await acts())[0] === 'Eat the fish', JSO
 const kp = await ev(() => { const k = window.__ember.keeper; return [k.x, k.z]; });
 await ev((kp) => { const d = Math.hypot(kp[0], kp[1]); window.__ember.teleport(kp[0] * (1 + 2.2 / d), kp[1] * (1 + 2.2 / d)); }, kp);
 await page.waitForTimeout(600);
-ok('near the keeper offers to leave it', (await acts())[0] === 'Leave the fish for the keeper', JSON.stringify(await acts()));
+ok('near the keeper offers to leave it', (await acts())[0] === 'Leave the fish for the Keeper', JSON.stringify(await acts()));
 await ev(() => window.__ember.run(0));
 await page.waitForTimeout(2600);
 ok('keeper thanks you', (await log()).some((l) => l.startsWith('Keeper')) && (await ev(() => window.__ember.held)) === 0, JSON.stringify(await log()));

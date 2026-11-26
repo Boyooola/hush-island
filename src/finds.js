@@ -26,6 +26,19 @@ export const FINDS = [
   { id: 'star', group: 'Sky and sea', name: 'Shooting star', hint: 'Lie on the hilltop at night and call out.' },
   { id: 'dolphin', group: 'Sky and sea', name: 'Dolphins', hint: 'They come alongside the boat on her way round.' },
   { id: 'whale', group: 'Sky and sea', name: 'A whale', hint: 'Far out, now and then. Be on the dock, the hill or the boat.' },
+  { id: 'lens', group: 'Left behind', name: 'An old lamp lens', hint: 'Something glints in the sand on the east beach.' },
+  { id: 'page', group: 'Left behind', name: 'A page in a bottle', hint: 'Now and then an old bottle lies on the sand. Nobody here sent it.' },
+  { id: 'logpage', group: 'On Lantern Rock', far: true, name: 'A page of the logbook', hint: 'Six pages were torn out and blown about the island. Each lies under a pebble.' },
+  { id: 'firefly', group: 'On Lantern Rock', far: true, name: 'A firefly on your nose', hint: 'Stand still in Whisper Woods after dark.' },
+  { id: 'glowcap', group: 'On Lantern Rock', far: true, name: 'Glow caps', hint: 'Something by the pool in Stillwater shines once the sun is down.' },
+  { id: 'echo', group: 'On Lantern Rock', far: true, name: 'Your own echo', hint: 'Call out inside Hollow Hill.' },
+  { id: 'crystal', group: 'On Lantern Rock', far: true, name: 'A singing crystal', hint: 'In the round room under the hill, call out close to one.' },
+  { id: 'starfish', group: 'On Lantern Rock', far: true, name: 'A starfish', hint: 'Look into the rock pools on the Tide Flats.' },
+  { id: 'warmwater', group: 'On Lantern Rock', far: true, name: 'Warm water', hint: 'Stand in the hot spring until it has soaked right through.' },
+  { id: 'hare', group: 'On Lantern Rock', far: true, name: 'A hare that came close', hint: 'On the High Meadow, lie down and keep still. It has to be the hare\'s idea.' },
+  { id: 'seal', group: 'On Lantern Rock', far: true, name: 'A seal that answered', hint: 'They haul out on the islet. Do not go close. Call to them from the stepping stones.' },
+  { id: 'fog', group: 'On Lantern Rock', far: true, name: 'A fog night', hint: 'Some nights the fog comes in off the sea and the stars go out. Be on the island for one.' },
+  { id: 'moonwater', group: 'On Lantern Rock', far: true, name: 'The sky in a pool', hint: 'Be at the moon pool on a clear night.' },
 ];
 export const FIND = Object.fromEntries(FINDS.map((f) => [f.id, f]));
 
@@ -49,6 +62,7 @@ export function createFinds(scene) {
     seaglass: () => { const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.12), mat(0x6fd3b0, { transparent: true, opacity: 0.8, roughness: 0.25 })); m.scale.set(1, 0.45, 0.8); m.position.y = 0.05; return m; },
     moonshell: () => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 7, 5), mat(0xeaf2ff, { emissiveIntensity: 0.9 })); m.scale.y = 0.7; m.position.y = 0.07; return m; },
     conch: () => { const m = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.4, 7), mat(0xf5a3a8)); m.rotation.z = 1.2; m.position.y = 0.12; return m; },
+    page: () => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.3, 6), mat(0x6f9a8a, { transparent: true, opacity: 0.85 })); m.rotation.z = 1.4; m.position.y = 0.07; return m; },
     feather: () => { const m = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.46), mat(0xf7f7f2, { side: THREE.DoubleSide })); m.rotation.set(-1.4, 0.4, 0.3); m.position.y = 0.05; return m; },
   };
   const glow = makeGlowTexture();
@@ -68,6 +82,7 @@ export function createFinds(scene) {
   loadProps().then((make) => {
     if (!make || !make('find_cockle')) return;
     for (const kind of Object.keys(shapes)) shapes[kind] = () => {
+      if (kind === 'page') { const b = make('bottle'), g = new THREE.Group(); b.rotation.z = 1.35; b.position.y = 0.1; b.scale.setScalar(0.9); g.add(b); return g; }      // an old bottle on its side, half in the sand
       const m = make('find_' + kind);
       m.traverse((o) => { if (o.isMesh && o.material.name === 'f_seaglass') { o.material.transparent = true; o.material.opacity = 0.82; } });
       return m;
@@ -85,7 +100,7 @@ export function createFinds(scene) {
           // A new turn of the tide: something else lies here, or nothing.
           it.turn = turn; it.taken = false;
           const h = hash(turn * 31 + i * 7.3), h2 = hash(turn * 17 + i * 3.1);
-          const kind = it.hill ? (h < 0.45 ? 'feather' : '') : h < 0.03 ? 'conch' : h < 0.2 ? 'cockle' : h < 0.36 ? 'whelk' : h < 0.5 ? 'moonshell' : h < 0.62 ? 'seaglass' : '';
+          const kind = it.hill ? (h < 0.45 ? 'feather' : '') : h < 0.03 ? 'conch' : h < 0.2 ? 'cockle' : h < 0.36 ? 'whelk' : h < 0.5 ? 'moonshell' : h < 0.62 ? 'seaglass' : h < 0.67 ? 'page' : '';
           if (kind !== it.kind) { if (it.mesh) it.g.remove(it.mesh); it.mesh = kind ? shapes[kind]() : null; if (it.mesh) { it.mesh.castShadow = true; it.g.add(it.mesh); } it.kind = kind; }
           it.g.rotation.y = h2 * 6.28;
         }

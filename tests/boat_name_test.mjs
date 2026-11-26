@@ -3,7 +3,7 @@ import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
 const errs = [];
 const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
-const open = async (ua) => { const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: ua }); await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort()); const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(1500); await p.evaluate(() => localStorage.setItem('ember.starter', '4')); await p.reload(); await p.waitForTimeout(2500); await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; }); return p; };
+const open = async (ua) => { const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, userAgent: ua }); await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort()); const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message)); await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(1500); await p.evaluate(() => localStorage.setItem('ember.starter', '4')); await p.reload(); await p.waitForTimeout(2500); await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; }); return p; };
 const until = async (p, fn, ms = 25000, arg) => { const end = Date.now() + ms; while (Date.now() < end) { if (await p.evaluate(fn, arg)) return true; await p.waitForTimeout(400); } return false; };
 const a = await open('ua-a');
 await a.click('#rename');
@@ -42,7 +42,7 @@ await b.evaluate(() => { const e = window.__ember; e.closeSheet(); e.setBoat(126
 await b.waitForTimeout(1500); await b.screenshot({ path: '/home/claude/ember-isle/shots/n4-boat.png' });
 await b.evaluate(() => window.__ember.lookAtBoat()); await b.waitForTimeout(400);
 txt = await b.evaluate(() => document.getElementById('sheet').innerText);
-ok('a finished boat says so, names its builders, and says the voyages are under construction', txt.includes('The boat is built') && txt.includes('under construction') && txt.includes('Built by') && txt.includes('Shy Fox') && txt.includes('1 plank'), txt.slice(0, 160).replace(/\n+/g, ' / '));
+ok('a finished boat says so, names its builders, and says the voyages are under construction', txt.includes('boat is built') && txt.includes('only goes round the island') && txt.includes('Built by') && txt.includes('Shy Fox') && txt.includes('1 plank'), txt.slice(0, 160).replace(/\n+/g, ' / '));
 await b.screenshot({ path: '/home/claude/ember-isle/shots/n5-boat-sheet.png' });
 console.log(errs.length ? 'page errors: ' + errs.join(' | ') : 'no page errors');
 await browser.close();

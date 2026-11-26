@@ -55,8 +55,8 @@ if (part === 'a') {
   await ev((kp) => { const d = Math.hypot(kp[0], kp[1]); window.__ember.teleport(kp[0] * (1 + 1.9 / d) , kp[1] * (1 + 1.9 / d)); }, kp);
   await page.waitForTimeout(600);
   a = await acts();
-  ok('keeper can be greeted', a.includes('Greet the keeper'), JSON.stringify(a));
-  await ev(() => { const e = window.__ember; const i = e.actions.indexOf('Greet the keeper'); e.run(i); });
+  ok('keeper can be greeted', a.includes('Greet the Keeper'), JSON.stringify(a));
+  await ev(() => { const e = window.__ember; const i = e.actions.indexOf('Greet the Keeper'); e.run(i); });
   await page.waitForTimeout(2600);
   ok('keeper answers', (await log()).some((l) => l.startsWith('Keeper')), JSON.stringify(await log()));
 }

@@ -168,7 +168,7 @@ export class Island extends DurableObject {
     try { const raw = await request.text(); if (raw.length <= 3000) m = JSON.parse(raw); } catch (e) { m = null; }
     if (!m || typeof m !== 'object') return json({ error: 'bad request' }, 400);
     const coll = m.coll, now = Date.now();
-    if (coll !== 'boat' && coll !== 'carvings' && coll !== 'bottles') return json({ error: 'no such collection' }, 404);
+    if (coll !== 'boat' && coll !== 'carvings' && coll !== 'bottles' && coll !== 'firsts' && coll !== 'light' && coll !== 'cairn') return json({ error: 'no such collection' }, 404);
     const write = m.op === 'put' || m.op === 'patch' || m.op === 'del';
     const h = (await this.hashOf(request)) || 'none', minute = Math.floor(now / 60000);
     let r = this.dbRate.get(h);
@@ -197,6 +197,12 @@ export class Island extends DurableObject {
         const size = JSON.stringify(d).length;
         const fine = coll === 'boat' ? (d.n === 1 || d.n === 2) && size < 300
           : coll === 'carvings' ? text(d.text, 60) && size < 600
+          // What has been carried to the tower on Lantern Rock: one record for each load set down.
+          : coll === 'cairn' ? d.n === 1 && size < 160
+          : coll === 'light' ? ['stone', 'timber', 'glass', 'oil'].includes(d.kind) && Number.isInteger(d.n) && d.n >= 1 && d.n <= 6 && size < 300
+          // The Mapmaker's record: the first name to reach each place (the id is the place, so a second claim meets
+          // the one already there), and the roll of those who walked the whole island (one line per visitor).
+          : coll === 'firsts' ? /^(first-[as]-[a-z]{3,12}|whole-[\w-]{6,40})$/.test(m.id) && d.place === m.id && text(d.name, 22) && (d.code === '' || /^\d{4}$/.test(d.code)) && size < 260
           : d.state === 'adrift' && text(d.text, 140) && size < 900;
         if (!fine) return json({ error: 'not allowed' }, 403);
         d.at = now;

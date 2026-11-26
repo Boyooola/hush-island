@@ -23,6 +23,7 @@ export function createAudio() {
   let scheduledTo = 0;
   let crackleAt = 0, cricketAt = 0;
 
+  let fallsGain = null, windGain = null, dripAt = 2;
   function makeNoise() {
     const len = ctx.sampleRate * 4;
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -165,6 +166,14 @@ export function createAudio() {
 
     cricketGain = ctx.createGain(); cricketGain.gain.value = 0.05; cricketGain.connect(ambBus);
 
+    // Falling water: a steady rush, heard only near a waterfall. Wind: a low moan with a slow rise and fall, for high ground.
+    fallsGain = ctx.createGain(); fallsGain.gain.value = 0;
+    { const n = noiseSource(), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = 0.35; const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
+      n.connect(bp).connect(lp).connect(fallsGain).connect(ambBus); n.start(); lfo(0.31, 180, bp.frequency); }
+    windGain = ctx.createGain(); windGain.gain.value = 0;
+    { const n = noiseSource(), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 420; bp.Q.value = 1.4; const gust = ctx.createGain(); gust.gain.value = 0.6;
+      n.connect(bp).connect(gust).connect(windGain).connect(ambBus); n.start(); lfo(0.13, 170, bp.frequency); lfo(0.19, 0.38, gust.gain); }
+
     scheduledTo = Date.now() + 100;
     timer = setInterval(scheduleMusic, 200);
     // Recorded tracks, if the site has any: the players are made now, inside the click that started the sound.
@@ -271,9 +280,13 @@ export function createAudio() {
     const near = clamp(1 / (1 + Math.pow(info.fireDist / 5, 2)), 0, 1);
     const firePower = 0.2 + 0.9 * info.heat;
     fireGain.gain.setTargetAtTime(0.02 + 0.42 * near * firePower, t, 0.2);
-    waveGain.gain.setTargetAtTime(0.16 + 0.42 * info.shore, t, 0.4);
-    surfGain.gain.setTargetAtTime(0.03 + 0.2 * info.shore, t, 0.4);
-    cricketGain.gain.setTargetAtTime(0.012 + 0.035 * (1 - info.shore), t, 0.5);
+    const open = 1 - (info.cave || 0);      // under the hill the sea, the wind and the crickets are shut out
+    waveGain.gain.setTargetAtTime((0.16 + 0.42 * info.shore) * (0.12 + 0.88 * open), t, 0.4);
+    surfGain.gain.setTargetAtTime((0.03 + 0.2 * info.shore) * open, t, 0.4);
+    cricketGain.gain.setTargetAtTime((0.012 + 0.035 * (1 - info.shore)) * open, t, 0.5);
+    fallsGain.gain.setTargetAtTime(0.3 * (info.falls || 0) * (0.25 + 0.75 * open), t, 0.3);
+    windGain.gain.setTargetAtTime(0.2 * (info.wind || 0) * open, t, 0.6);
+    if (info.cave > 0.5) { dripAt -= dt; if (dripAt <= 0) { drip(0.6 + Math.random() * 0.4); dripAt = 0.9 + Math.random() * 3.6; } }
     crackleAt -= dt;
     if (crackleAt <= 0) {
       crackle();
@@ -322,6 +335,55 @@ export function createAudio() {
   }
 
   // A soft pop, for a marshmallow catching fire or being eaten.
+  // A struck bell: a few partials that are not quite in tune with each other, dying away slowly.
+  function bell(volume = 1) {
+    if (!ctx || ctx.state !== 'running') return;
+    const t0 = ctx.currentTime + 0.01;
+    for (const [mult, peak, secs] of [[1, 0.16, 3.4], [2.02, 0.09, 2.4], [2.76, 0.07, 1.8], [4.1, 0.04, 1.1], [5.43, 0.03, 0.7]]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = 392 * mult;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(peak * volume, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0002, t0 + secs);
+      o.connect(g).connect(ambBus); o.start(t0); o.stop(t0 + secs + 0.05);
+    }
+  }
+  // A stone or a crystal that sings when it is touched: a clear note with a little shimmer above it.
+  function chime(freq = 520, volume = 1, secs = 1.8) {
+    if (!ctx || ctx.state !== 'running') return;
+    const t0 = ctx.currentTime + 0.01;
+    for (const [mult, peak, wave] of [[1, 0.12, 'sine'], [2, 0.035, 'sine'], [3.01, 0.018, 'triangle']]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.type = wave; o.frequency.value = freq * mult;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(peak * volume, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0002, t0 + secs / mult);
+      o.connect(g).connect(ambBus); o.start(t0); o.stop(t0 + secs + 0.05);
+    }
+  }
+  // One drop falling into still water somewhere in the dark, and its echo.
+  function drip(volume = 1) {
+    if (!ctx || ctx.state !== 'running') return;
+    const f = 900 + Math.random() * 900;
+    for (const [dt, v] of [[0, 0.05], [0.19, 0.018], [0.38, 0.007]]) {
+      const t0 = ctx.currentTime + 0.01 + dt, o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine';
+      o.frequency.setValueAtTime(f, t0); o.frequency.exponentialRampToValueAtTime(f * 2.1, t0 + 0.05);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v * volume, t0 + 0.004); g.gain.exponentialRampToValueAtTime(0.0002, t0 + 0.12);
+      o.connect(g).connect(ambBus); o.start(t0); o.stop(t0 + 0.15);
+    }
+  }
+  // Something going into the water: a short burst of noise that closes down quickly.
+  function splash(volume = 1) {
+    if (!ctx || ctx.state !== 'running') return;
+    const t0 = ctx.currentTime + 0.01, n = noiseSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain(); bp.type = 'bandpass'; bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(2400, t0); bp.frequency.exponentialRampToValueAtTime(500, t0 + 0.35);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.13 * volume, t0 + 0.015); g.gain.exponentialRampToValueAtTime(0.0003, t0 + 0.45);
+    n.connect(bp).connect(g).connect(ambBus); n.start(t0); n.stop(t0 + 0.5);
+  }
+  // A seal: two short hoarse barks.
+  function bark(volume = 1) {
+    if (!ctx || ctx.state !== 'running') return;
+    for (const dt of [0, 0.3]) {
+      const t0 = ctx.currentTime + 0.01 + dt, o = ctx.createOscillator(), g = ctx.createGain(), bp = ctx.createBiquadFilter(); o.type = 'sawtooth'; bp.type = 'bandpass'; bp.frequency.value = 620; bp.Q.value = 2.2;
+      o.frequency.setValueAtTime(210, t0); o.frequency.linearRampToValueAtTime(300, t0 + 0.05); o.frequency.linearRampToValueAtTime(170, t0 + 0.2);
+      g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.2 * volume, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0003, t0 + 0.22);
+      o.connect(bp).connect(g).connect(ambBus); o.start(t0); o.stop(t0 + 0.25);
+    }
+  }
   function pop(freq = 520) {
     if (!ctx || ctx.state !== 'running') return;
     const t0 = ctx.currentTime + 0.01;
@@ -397,7 +459,7 @@ export function createAudio() {
 
   return {
     start,
-    tick,
+    tick, bell, chime, drip, splash, bark,
     whoosh,
     blip,
     step,

@@ -1,0 +1,42 @@
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox'] });
+const errs = []; let fails = 0;
+const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
+const S = '/home/claude/ember-isle/shots/';
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
+await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
+await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); window.__ember.setRain(0); });
+await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);
+const go = async (x, z, wait = 3000, cam = [0.6, 0.5, 9]) => { await p.evaluate(([x, z, cam]) => { const e = window.__ember; e.teleport(x, z, 0); e.cam(...cam); }, [x, z, cam]); await p.waitForTimeout(wait); };
+const run = (label) => p.evaluate((label) => { const e = window.__ember, i = e.actions.indexOf(label); if (i < 0) return e.actions.join(' | '); e.run(i); return 'ok'; }, label);
+const light = () => p.evaluate(() => JSON.parse(JSON.stringify(window.__ember.light)));
+const put = (kind, total) => p.evaluate(async ([kind, total]) => { for (let i = 0; i < total; i += 6) await fetch('/room/db', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'put', coll: 'light', id: 'test-' + kind + '-' + i + '-' + Math.random().toString(36).slice(2, 8), data: { kind, n: Math.min(6, total - i), name: 'Odo', code: '' } }) }); }, [kind, total]);
+const far = async (name) => { await p.evaluate(() => { const e = window.__ember, T = e.world.lighthouse.group.position; e.cutTo([T.x + 24, T.y + 12, T.z + 22], [T.x, T.y + 11, T.z], 6); }); await p.waitForTimeout(3000); await p.screenshot({ path: S + name }); await p.waitForTimeout(4500); };
+const W = await p.evaluate(() => { const w = window.__ember.world; return { src: w.sources.map((q) => ({ kind: q.kind, x: q.x, z: q.z })), door: w.lighthouse.door }; });
+const stone = W.src.find((q) => q.kind === 'stone');
+await go(stone.x + 1.9, stone.z + 0.6, 3000, [0.6, 0.45, 6]); await p.screenshot({ path: S + 'l1.png' });
+for (let i = 0; i < 7; i++) { const r = await run('Take a stone from the heap'); if (i === 0) ok(r === 'ok', 'stone can be taken from a heap', r); await p.waitForTimeout(1600); }
+let L = await light(); ok(L.bag.stone === 6, 'the satchel holds six and no more', JSON.stringify(L.bag));
+await go(W.door.x + 1.6, W.door.z + 0.4, 3000, [1.2, 0.3, 9]); await p.screenshot({ path: S + 'l2.png' });
+ok((await run('Climb the tower')) === 'ok', 'the tower can be tried'); await p.waitForTimeout(500); ok(!(await light()).perch, 'but not climbed before there is a gallery');
+ok((await run('Set down your stone for the tower')) === 'ok', 'stone can be set down at the tower', await run('zz')); await p.waitForTimeout(2500);
+L = await light(); ok(L.totals.stone === 6 && !L.bag.stone, 'six stones are counted for everyone', JSON.stringify(L));
+await far('l3.png');
+await put('stone', 54); await p.waitForTimeout(4000); await p.screenshot({ path: S + 'l4.png' }); await p.waitForTimeout(6000);
+L = await light(); ok(L.stage === 1, 'sixty stones: the wall stands', JSON.stringify(L.totals));
+await put('timber', 40); await p.waitForTimeout(10000); L = await light(); ok(L.stage === 2, 'forty timbers: the gallery is up'); await far('l5.png');
+ok((await run('Climb the tower')) === 'ok', 'climb'); await p.waitForTimeout(2500); L = await light(); ok(L.perch, 'now the tower can be climbed');
+await p.evaluate(() => window.__ember.cam(2.2, 0.35, 7)); await p.waitForTimeout(2500); await p.screenshot({ path: S + 'l6.png' });
+await p.evaluate(() => window.__ember.cam(5.0, 0.25, 6)); await p.waitForTimeout(2500); await p.screenshot({ path: S + 'l7.png' });
+ok((await run('Climb down')) === 'ok', 'and climbed down'); await p.waitForTimeout(1500);
+await p.waitForTimeout(50000); await put('glass', 30); await p.waitForTimeout(9000); await put('oil', 30); await p.waitForTimeout(10000); L = await light(); ok(L.stage === 4, 'glass and oil: the lamp is ready', JSON.stringify(L.totals)); await far('l8.png');
+// the other sources
+for (const kind of ['timber', 'oil']) { const sc = W.src.find((q) => q.kind === kind); await go(sc.x + 2.0, sc.z + 0.7, 3000, [0.6, 0.45, 6]); await p.screenshot({ path: S + `l9_${kind}.png` }); const r = await run(kind === 'timber' ? 'Take a length of timber' : 'Pick a head of lamp-seed'); ok(r === 'ok', `${kind} can be taken`, r); await p.waitForTimeout(1600); }
+const gl = W.src.find((q) => q.kind === 'glass'); await go(gl.x + 1.2, gl.z + 0.8, 6000); const r = await run('Work a shard of crystal loose'); ok(r === 'ok', 'crystal can be taken under the hill', r);
+const d = await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('ember.quests') || '{}')).filter((k) => /lr-(took|gave|s\d|climb)/.test(k)));
+console.log('  quests:', d.join(','));
+console.log(' ', await p.evaluate(() => window.__ember.log.slice(-3).join(' || ')));
+console.log(errs.length ? [...new Set(errs)].slice(0, 5).join('\n') : 'no page errors', fails ? `${fails} FAILED` : '');
+await browser.close();

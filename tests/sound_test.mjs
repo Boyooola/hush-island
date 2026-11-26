@@ -1,0 +1,28 @@
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
+const errs = []; let fails = 0;
+const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
+const S = '/home/claude/ember-isle/shots/';
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
+await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
+await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); window.__ember.setRain(0); window.__ember.setFog(false); });
+await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);
+const go = async (x, z, wait = 3000, cam = [0.6, 0.5, 9]) => { await p.evaluate(([x, z, cam]) => { const e = window.__ember; e.teleport(x, z, 0); e.cam(...cam); }, [x, z, cam]); await p.waitForTimeout(wait); };
+const run = (label) => p.evaluate((label) => { const e = window.__ember, i = e.actions.indexOf(label); if (i < 0) return e.actions.join(' | '); e.run(i); return 'ok'; }, label);
+ok(await p.evaluate(() => window.__ember.audio ? window.__ember.audio.running : 'no hook'), 'sound is running');
+await p.evaluate(() => { const e = window.__ember, P = 16 * 60000, now = e.timeNow(), cur = (now % P) / P; e.shiftTime(((0.5 - cur + 1) % 1) * P); }); await p.waitForTimeout(1500);
+const W = await p.evaluate(() => { const e = window.__ember; return { crabs: e.shy.crabs.map((c) => ({ x: c.x, z: c.z })), bell: e.world.flats.bell, stone: e.world.stones[1] }; });
+ok(W.crabs.length >= 4, 'there are crabs by the rock pools', W.crabs.length);
+await go(W.crabs[0].x + 9, W.crabs[0].z + 6, 4000);
+const cy = await p.evaluate(() => window.__ember.shy.crabs[0].g.position.y);
+await p.evaluate(([x, y, z]) => window.__ember.cutTo([x + 1.1, y + 0.6, z + 1.3], [x, y + 0.08, z], 6), [W.crabs[0].x, cy, W.crabs[0].z]); await p.waitForTimeout(3000); await p.screenshot({ path: S + 's1.png' }); await p.waitForTimeout(4500);
+await p.evaluate(() => { const e = window.__ember, c = e.shy.crabs[0]; e.teleport(c.x + 1.5, c.z + 0.5, 0); }); await p.waitForTimeout(4000);
+const d = await p.evaluate(() => { const e = window.__ember, c = e.shy.crabs[0]; return Math.hypot(c.x - e.me.x, c.z - e.me.z); });
+ok(d > 2.4, 'a crab scuttles away from a visitor', d.toFixed(1) + ' m; ' + await p.evaluate(() => window.__ember.log.slice(-1)[0]));
+await go(W.bell.x + 1.2, W.bell.z + 0.6, 3000); await run('Pick up the page'); await p.waitForTimeout(1000); await p.keyboard.press('Escape'); ok((await run('Ring the bell')) === 'ok', 'the bell rings'); await p.waitForTimeout(1500);
+await go(W.stone.x + 1.3, W.stone.z + 0.6, 3000); ok((await run('Touch the standing stone')) === 'ok', 'a stone sings'); await p.waitForTimeout(1500);
+await go(-182, -92, 9000); await go(-196, -12, 6000);      // under the hill (drips), then by the falls
+console.log(errs.length ? [...new Set(errs)].slice(0, 5).join('\n') : 'no page errors', fails ? `${fails} FAILED` : '');
+await browser.close();

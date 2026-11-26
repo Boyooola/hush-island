@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   clamp, lerp, smoothstep, groundHeight, moveWithCollision, shoreProximity,
-  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip, FAR, ISLE, areaAt, MAPMAKER } from './terrain.js';
+  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip, FAR, ISLE, areaAt, MAPMAKER, POST, LENS, CHEST, POOL, CRAG, HOLLOW_TREE, CAVE, inCave, caveAt, SUMMIT, LIGHTHOUSE, COTTAGE, TIDE, tideAt, FLATS, ISLET, FLAT_SHORE, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN, AREAS, MAP_BOARD, WOODS as WOODS_AT, PATHS, SIGHT_AT } from './terrain.js';
 import { buildWorld } from './world.js';
 import { Avatar, SPECIES, PLAYABLE, NAME_WORDS, POSE } from './avatar.js';
 import { buildCritters } from './critters.js';
@@ -13,10 +13,16 @@ import { buildLife, showerState } from './life.js';
 import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
 import { voyageAt, BOARD_MS } from './voyage.js';
-import { timeNow, clockSkew } from './now.js';
+import { timeNow, clockSkew, setIslandTime } from './now.js';
 import { campfireAt, clockTime, inWords, bothTimes } from './campfire.js';
 import { FINDS, FIND, fishKind, createFinds } from './finds.js';
 import { buildTraces } from './traces.js';
+import { CHAPTERS, STORY, storyById, PAGES, LOGBOOK } from './quests.js';
+import { SIGHTS, ISLE_NAME, stampDate, postmark } from './stamps.js';
+import { cutaway } from './props.js';
+import { makeGlowTexture } from './labels.js';
+import { buildShy } from './shy.js';
+import { DAY_MS } from './clock.js';
 import { judge } from './words.js';
 
 const $ = (id) => document.getElementById(id);
@@ -88,6 +94,8 @@ if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.ra
 const fullName = (name, code) => (code ? `${name} #${code}` : name);
 // The journal: every kind of thing found so far, with how many times and when first. Kept on the device.
 let journal = (() => { const j = store('ember.finds'); return j && typeof j === 'object' && !Array.isArray(j) ? j : {}; })();
+const beenFar = () => FAR || !!store('ember.walked') || !!store('ember.seen');
+const myFinds = () => FINDS.filter((f) => !f.far || beenFar());
 const journalCount = () => FINDS.filter((f) => journal[f.id]).length;
 let fires = (() => { const r = store('ember.fires'); return r && Number.isFinite(r.count) ? r : { count: 0, last: 0 }; })();      // campfire hours been at, and the last one
 let sailed = Number(store('ember.sailed')) || 0;      // times round the island in the boat
@@ -114,7 +122,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 1200);
-const world = buildWorld(scene, { pixelRatio: PR });
+const world = buildWorld(scene, { pixelRatio: PR, low: !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches), camera });
 const life = buildLife(scene, world);
 const seaReady = life.loadSea();            // modelled fish arrive a moment after the island does
 const yard = buildSite(scene);
@@ -148,11 +156,11 @@ me.onStep = (left) => {
   if (surf === 'water') world.ripple(me.x, me.z);
 };
 
-// The keeper: part of the island, clearly not a player.
+// The Keeper: part of the island, clearly not a player.
 const KEEPER_SEAT = 3;
 // On the far shore his place is taken by the Mapmaker, an old tortoise who stands by the map board. The Mapmaker is
-// a model of his own (see world.js): the keeper's body is hidden there, and only his name and his words are used.
-const KNAME = FAR ? 'Mapmaker' : 'Keeper', KSUB = FAR ? 'keeps the map' : 'island keeper', KWHO = FAR ? 'the Mapmaker' : 'the keeper';
+// a model of his own (see world.js): the Keeper's body is hidden there, and only his name and his words are used.
+const KNAME = FAR ? 'Mapmaker' : 'Keeper', KSUB = FAR ? 'keeps the map' : 'keeps the fire', KWHO = FAR ? 'the Mapmaker' : 'the Keeper';
 const keeper = new Avatar({ species: 5, palette: 0, name: KNAME, sub: KSUB });
 if (FAR) { keeper.parts.rig.visible = false; keeper.shadow.visible = false; }
 const bodyLen = (av) => (av.parts && av.parts.bodyLength) || SPECIES[av.species].height * 1.2;
@@ -170,18 +178,21 @@ const KEEPER_LINES = FAR ? [
   'There is a hill to the north with a hole in it.', 'The far point had a light once.', 'Take your time. The island is not going anywhere.',
   'The tents are for anyone who is tired.', 'When the tide is out, the flats to the south are worth a look.',
 ] : [
-  'Drop a stick on if it burns low.', 'The stars are clearer from the hill.', 'Mind the dock. It creaks.',
-  'No hurry here.', 'Good weather for it.', 'Lie as long as you like.', 'The sand stays warm near the fire.',
-  'The sea is calm.', 'Sticks are on the pile.', 'The boat needs driftwood. The beaches are full of it.',
+  'It is not much of a light. But it is a light.', 'I used to keep a bigger one.', 'On a clear night you could see the next island from here. Not any more.',
+  'No hurry here.', 'Lie as long as you like.', 'The sand stays warm near the fire.', 'Mind the dock. It creaks.',
+  'Sticks are on the pile. I would be glad of one on the fire.', 'The boat needs driftwood. The beaches are full of it.',
+  'The current runs west from here. Everything does, in the end.', 'I count the days by the fire. I have lost count twice.',
+  'You came from the sea, like everyone. I came from further.', 'The stars are clearer from the hill. Look west, if you go.',
 ];
-const KEEPER_HELLO = FAR ? ['Ah. Fresh legs.', 'Welcome to the Landing.', 'Have a look at the map. There is not much on it yet.', 'You came a long way. Sit by the fire if you like.'] : ['Evening.', 'Good to see you.', 'Find a warm spot.', 'Welcome back to the fire.'];
+const KEEPER_HELLO = FAR ? ['Ah. Fresh legs.', 'Welcome to the Landing.', 'Have a look at the map. Every name on it got there first.', 'You came a long way. Sit by the fire if you like.'] :
+  ['Evening.', 'Good to see you.', 'Find a warm spot.', 'Welcome back to the fire.', 'Still here. So am I.', 'Sit. Get warm. Then, if you like, there is a boat that needs hands.'];
 let keeperNext = 14, keeperLowAt = -999;
 
 // ---------- state ----------
 let entered = false;
 let enterBlend = 0;
 let camYaw = 0, camPitch = 0.32, camDist = 7.5, skyEl = 1.0;
-const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), cutLook = new THREE.Vector3();
 const keys = new Set();
 const vel = { x: 0, z: 0 };
 let moveTarget = null, stuckFor = 0;   // moveTarget is a list of points still to walk through
@@ -290,9 +301,9 @@ const hearFrom = (x, z, reach) => clamp(1 - Math.hypot(x - me.x, z - me.z) / rea
 critters.events.onHoot = () => { if (entered) audio.hoot(hearFrom(critters.owl.x, critters.owl.z, 38)); };
 critters.events.onMoo = () => { if (entered) audio.call('moo', hearFrom(critters.cow.x, critters.cow.z, 40)); };
 
-// The keeper knows when the stars will fall.
+// The Keeper knows when the stars will fall.
 function keeperHello() {
-  if (FAR) return KEEPER_HELLO[Math.floor(Math.random() * KEEPER_HELLO.length)];
+  if (FAR) return mapmakerHello();
   if (bottle && bottle.kind === 'reply') return 'A bottle came back for you. It is on the beach.';
   const st = showerState();
   const todo = listToday().find((id) => !listState().done.includes(id));
@@ -309,7 +320,7 @@ life.events.onShower = (on) => {
   else addLog('', 'The sky is quiet again.', 'sys');
 };
 
-// The keeper's list: three small jobs a day. Each one done adds planks to the boat in your name.
+// The Keeper's list: three small jobs a day. Each one done adds planks to the boat in your name.
 const TASKS = {
   wood: 'Bring driftwood to the boat', dock: 'Go after the fish at the dock', fire: 'Feed the fire a stick',
   warm: 'Get warm right through by the fire', hill: 'Call out from the hilltop, lying under the sky',
@@ -335,23 +346,113 @@ const STARTER = [
   { text: touch ? 'Walk up to the fire. Tap the ground to move' : 'Walk up to the fire. W A S D, or click the ground', where: () => FIRE, done: () => fireDist() < 5.5 },
 ];
 // The rest is left to be found. The island still counts, once per visitor, who went on to rest by the fire (g2),
-// feed it (g3) and greet the keeper (g4), so that the keeper can see what newcomers discover by themselves.
+// feed it (g3) and greet the Keeper (g4), so that the Keeper can see what newcomers discover by themselves.
 const firsts = (() => { const f = store('ember.firsts'), old = store('ember.starter') || 0; return f && typeof f === 'object' ? f : { g2: old >= 2, g3: old >= 3, g4: old >= 4 }; })();
 function first(k) { if (firsts[k]) return; firsts[k] = true; store('ember.firsts', firsts); net.note(k); }
 let starterAt = store('ember.starter');
 if (!Number.isInteger(starterAt)) starterAt = 0;
 if (FAR) starterAt = Math.max(starterAt, STARTER.length);      // nobody reaches the far shore without having found the fire at home
+// ---------- quests ----------
+// Story quests (quests.js) are done once each and kept with the visitor. They come in chapters; the one at the top
+// of the screen is the first open quest of the story. When there is none, the Keeper's requests for the day take
+// its place.
+const quests = (() => { const q = store('ember.quests'); return q && typeof q === 'object' ? q : {}; })();
+if (!FAR && starterAt >= STARTER.length && !quests.cold) { quests.cold = Date.now(); store('ember.quests', quests); }      // visitors from before there were quests have already found the fire
+let myPlanks = store('ember.myPlanks'); if (!Number.isFinite(myPlanks)) myPlanks = 0;
+const SAND = ['cockle', 'whelk', 'seaglass', 'moonshell', 'conch', 'feather'];
+const MY_CHAPTERS = CHAPTERS.filter((c) => (c.isle || 'home') === ISLE), MY_STORY = STORY.filter((q) => MY_CHAPTERS.includes(q.chapter));
+// On Lantern Rock whatever has happened stays happened: a quest that waits on a moment is done if the moment ever came.
+const seenKeys = (() => { const k = store('ember.seen'); return k && typeof k === 'object' ? k : {}; })();
+const logs = (() => { const l = store('ember.logs'); return Array.isArray(l) ? l.filter((i) => Number.isInteger(i) && i >= 0 && i < LOGBOOK.length) : []; })();      // pages of the keeper's logbook in the satchel
+const FAR_FINDS = FINDS.filter((f) => f.far);
+const QUEST_CHECK = {
+  area: (q) => (walked.has(q.arg) ? 1 : 0), card: (q) => (cards[q.arg] ? 1 : 0), logs: () => logs.length, painted: () => stonesSeen(), door: () => (echoOpen ? 1 : 0), tune: () => (tuneKnown ? 1 : 0),
+  stage: (q) => (lightStage() >= q.arg ? 1 : 0), mylight: () => myLight,
+  walked: () => walked.size, farfinds: () => FAR_FINDS.filter((f) => journal[f.id]).length,
+  stamps: () => MY_SIGHTS.filter((sg) => cards[sg.id]).length,
+  shore: () => SAND.filter((id) => journal[id]).length, planks: () => myPlanks, nights: () => nights, finds: () => journalCount(),
+  gaze: () => (stargazing && skyNow.dark > 0.6 ? 1 : 0), sail: () => (voyageSeated && voyageNow && voyageNow.phase === 'sail' ? 1 : 0),
+};
+const chapterLeft = (c) => c.quests.filter((q) => !quests[q.id]).length;
+// A chapter of the story is open once the one before it is finished but for one quest; the side chapters always are.
+const checkNow = (q) => { try { return Number(QUEST_CHECK[q.check](q)) || 0; } catch (e) { return 0; } };      // some of what is counted is not set up until later in the page
+const chapterOpen = (c) => { if (c.isle === 'far') return true; if (c.side) return !!quests.cold; const main = MY_CHAPTERS.filter((k) => !k.side), i = main.indexOf(c); return i === 0 || (chapterOpen(main[i - 1]) && chapterLeft(main[i - 1]) <= 1); };
+const questOpen = (q) => !quests[q.id] && chapterOpen(q.chapter) && (!q.needsBoat || boatBuilt());
+const questNow = () => MY_STORY.find((q) => !q.chapter.side && questOpen(q)) || null;
+const chapterNow = () => { const q = questNow(); return q ? q.chapter : null; };
+const questsDone = () => MY_STORY.filter((q) => quests[q.id]).length;
+const questAsk = (q) => (q.need > 1 ? `${q.ask} (${Math.min(q.need, checkNow(q))} of ${q.need})` : q.ask);
+const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+function questDone(id) {
+  if (quests[id] || !entered) return;
+  const q = storyById[id], wasOpen = MY_CHAPTERS.filter(chapterOpen);
+  quests[id] = Date.now(); store('ember.quests', quests);
+  questAt = Date.now();
+  flash(q.title, 'A quest is done');
+  audio.pop(700);
+  addLog('', `${q.title}. ${q.tells}`, 'sys');
+  if (q.says) setTimeout(() => { if (keeper.bubbleFade > 0.3) keeperSays(q.says); else addLog(KNAME, q.says, 'sys'); keeperNext = Math.max(keeperNext, t + 30); }, 2200);
+  showList();
+  if (id === 'lr-mapmaker') setTimeout(() => addLog('', 'He unhooks a canvas satchel from the map board and holds it out in his beak. It is for what you find. Your journal has it, under Satchel.', 'sys'), 4200);
+  const opened = MY_CHAPTERS.find((c) => !c.side && chapterOpen(c) && !wasOpen.includes(c)), next = questNow();
+  if (opened) setTimeout(() => { flash(opened.title, 'A new chapter'); addLog('', `A new chapter: ${opened.title}. Your journal has what it asks.`, 'sys'); }, 5200);
+  else if (questsDone() === MY_STORY.length) setTimeout(() => addLog('', FAR ? 'That is every quest on this island, for now. The tower on the point is still dark.' : 'That is every quest on this island. The west is still dark.', 'sys'), 5200);
+  else if (next && !q.chapter.side && !FAR) setTimeout(() => addLog('', `${next.from} has something else for you: ${lower(next.ask)}.`, 'sys'), 5200);
+}
+// Something happened that a quest may have been waiting for.
+function questEvent(key) {
+  if (!entered) return;
+  if (FAR && !seenKeys[key]) { seenKeys[key] = 1; store('ember.seen', seenKeys); }
+  if (FAR && Date.now() - questAt < 4000) return;      // one has only just been told: the frame's own check will come back to this
+  for (const q of MY_STORY) if (q.on && q.on.includes(key) && questOpen(q)) { questDone(q.id); return; }      // one at a time: the next is told a moment later
+}
+let questAt = 0;
+function questChecks() {
+  if (Date.now() - questAt < 9000) return;      // never two at once: each gets its moment
+  for (const q of MY_STORY) if (questOpen(q) && ((q.check && checkNow(q) >= (q.need || 1)) || (FAR && q.on && q.on.some((k) => seenKeys[k])))) { questDone(q.id); return; }
+}
+const QUEST_WHERE = {
+  fire: () => FIRE, feed: () => (held === 1 ? FIRE : WOODPILE), keeper: () => keeper, stone: () => life.stone, meadow: () => life.meadowNear(me.x, me.z).meadow || FIRE,
+  dock: () => ({ x: DOCK.x1 - 0.6, z: 0 }), beach: () => ({ x: SPAWN.x, z: SPAWN.z + 3 }), wall: () => WALL, crate: () => CRATE,
+  wood: () => (held === 3 ? yard.site : yard.pieces[0] || yard.site), yard: () => yard.site, hill: () => HILL,
+  post: () => POST, lens: () => LENS, chest: () => CHEST,
+};
 const TASK_WHERE = {
   wood: () => (held === 3 ? yard.site : yard.pieces[0] || yard.site), dock: () => ({ x: DOCK.x1 - 0.6, z: 0 }), fire: () => (held === 1 ? FIRE : WOODPILE),
   warm: () => FIRE, hill: () => HILL, mark: () => WALL, bottle: () => CRATE, shake: () => ({ x: SPAWN.x, z: SPAWN.z + 4.6 }),
   butterfly: () => life.meadowNear(me.x, me.z).meadow || FIRE, stone: () => life.stone,
 };
+// Where each quest on Lantern Rock is to be done, for the arrow.
+const nearestOf = (list) => list.slice().sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z))[0] || null;
+const pageAt = () => nearestOf(world.logPages.filter((pg) => pg.there)), forTower = () => { const L = LIGHT[lightStage()]; return !L ? world.lighthouse.door : (bag[L.kind] || 0) >= (bagCount() >= BAG_MAX ? 1 : BAG_MAX) || ((bag[L.kind] || 0) > 0 && Math.hypot(me.x - world.lighthouse.door.x, me.z - world.lighthouse.door.z) < 40) ? world.lighthouse.door : nearestOf(world.sources.filter((sc) => sc.kind === L.kind && !sc.tide)); };
+const xz = (a) => ({ x: a[0], z: a[1] });
+const FAR_WHERE = {
+  'lr-mapmaker': () => keeper, 'lr-map': () => MAP_BOARD, 'lr-woods': () => WOODS_AT, 'lr-tree': () => HOLLOW_TREE, 'lr-page': () => world.logPages[1].there ? world.logPages[1] : pageAt(), 'lr-valley': () => POOL,
+  'lr-hermit': () => world.hermit, 'lr-lantern': () => world.hermit, 'lr-painted': () => (lamp ? xz(CAVE.pts[1]) : world.hermit), 'lr-door': () => xz(CAVE.pts[2]), 'lr-mark': () => world.echo.mark,
+  'lr-wind': () => HILL, 'lr-tune': () => HILL, 'lr-summit': () => SUMMIT, 'lr-heron': () => world.heron, 'lr-carving': () => world.cottage.door,
+  'lr-flats': () => FLATS, 'lr-stern': () => world.flats.wreck.stern || FLATS, 'lr-bell': () => world.flats.bell, 'lr-islet': () => ISLET, 'lr-logbook': pageAt,
+  'lr-farbeach': () => SHELTER, 'lr-spring': () => SPRING, 'lr-grotto': () => CRAG, 'lr-moon': () => MOONPOOL, 'lr-whale': () => BONES, 'lr-seat': () => SEAT, 'lr-cairn': () => WAYCAIRN,
+  'lr-took': forTower, 'lr-gave': forTower, 'lr-s1': forTower, 'lr-s2': forTower, 'lr-s3': forTower, 'lr-s4': forTower, 'lr-twenty': forTower, 'lr-climb': () => world.lighthouse.door,
+};
+// A question mark over anybody who has something to ask: whoever an open quest of the story comes from.
+function makeMark() {
+  const c = document.createElement('canvas'); c.width = c.height = 96; const g = c.getContext('2d');
+  g.font = '900 84px Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round'; g.lineWidth = 12; g.strokeStyle = 'rgba(40,24,10,0.9)'; g.strokeText('?', 48, 52); g.fillStyle = '#ffc45a'; g.fillText('?', 48, 52);
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, transparent: true, depthWrite: false, fog: false })); sp.scale.setScalar(0.8); sp.visible = false; sp.renderOrder = 5; return sp;
+}
+const marks = [];
+function addMark(group, from, y) { const sp = makeMark(); sp.position.y = y; group.add(sp); marks.push({ sp, from, y }); }
+function showMarks() { for (const m of marks) { m.sp.visible = entered && MY_STORY.some((q) => !q.chapter.side && q.from === m.from && questOpen(q)); m.sp.position.y = m.y + Math.sin(performance.now() / 420) * 0.07; } }
+addMark(keeper.group, FAR ? 'The Mapmaker' : 'The Keeper', FAR ? 3.15 : 2.75);
 let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
-  if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
-  if (FAR) return null;      // the far shore has no list from the keeper: it is there to be explored
+  if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The Keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
+  if (FAR) { const fq = questNow(); if (!fq) return null; let at = null; try { at = (FAR_WHERE[fq.id] || (() => null))(); } catch (e) { at = null; } return { text: questAsk(fq), at: at && Number.isFinite(at.x) ? at : null, step: '' }; }
   if (starterAt < STARTER.length) return { text: typeof STARTER[starterAt].text === 'function' ? STARTER[starterAt].text() : STARTER[starterAt].text, at: STARTER[starterAt].where(), step: '' };
+  const q = questNow();
+  if (q) return { text: (q.id === 'west' || q.id === 'star') && skyNow.dark < 0.6 ? `${q.ask}. Wait for night` : questAsk(q), at: (QUEST_WHERE[q.where] || (() => me))(), step: '' };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
 }
@@ -380,15 +481,17 @@ function updateGuide(now) {
       store('ember.starter', starterAt);
       net.note('g' + starterAt);
       audio.pop(560);
-      if (starterAt >= STARTER.length) addLog('', touch ? 'This is the fire. The words at the bottom are what you can do where you stand. If you want something to do, the keeper has three small jobs a day: the next one is at the top of the screen.' : 'This is the fire. E and R do whatever is in reach where you stand. If you want something to do, the keeper has three small jobs a day: the next one is at the top of the screen.', 'sys');
+      if (starterAt >= STARTER.length) { questDone('cold'); addLog('', touch ? 'The words at the bottom of the screen are what you can do where you stand.' : 'E and R do whatever is in reach where you stand.', 'sys'); }
     }
     if (starterAt >= STARTER.length) {
       if (me.mode !== 'stand' && fireDist() < 5.5) first('g2');
       if (guideFlags.fire) first('g3');
       if (guideFlags.greet) first('g4');
+      if (guideFlags.greet) questEvent('keeper');
+      questChecks(); updateSights();
     }
-    goal = asleepSince ? null : findGoal();
-    // The keeper's list stays out of the way until the fire is reached: one thing at a time.
+    goal = asleepSince ? null : findGoal(); showMarks();
+    // The Keeper's list stays out of the way until the fire is reached: one thing at a time.
     $('tasks').dataset.fresh = starterAt < STARTER.length ? 'true' : 'false';
     const el = $('goal');
     el.hidden = !goal;
@@ -397,7 +500,8 @@ function updateGuide(now) {
       if (label !== el.dataset.shown) { el.dataset.shown = label; $('goal-text').textContent = label; }
     }
   }
-  if (!goal) { beacon.visible = false; return; }
+  $('goal-arrow').style.display = $('goal-dist').style.display = goal && !goal.at ? 'none' : '';
+  if (!goal || !goal.at) { beacon.visible = false; return; }
   const dx = goal.at.x - me.x, dz = goal.at.z - me.z, d = Math.hypot(dx, dz);
   // The arrow points to where the goal lies as seen on screen: straight up means dead ahead.
   const rel = Math.atan2(dx, dz) - (camYaw + Math.PI);
@@ -414,19 +518,26 @@ function updateGuide(now) {
 }
 
 function showList() {
-  const st = listState(), today = listToday();
+  const st = listState(), today = listToday(), q = questNow();
   for (const el of [$('list'), $('tasks-list')]) {
     el.textContent = '';
-    for (const id of today) {
+    if (el.id === 'tasks-list') {
+      // The chapter being followed: its quest at the top of the screen in full, the others still open by name.
+      const ch = chapterNow();
+      const head = document.createElement('li'); head.className = 'asks'; head.textContent = ch ? ch.title : 'The story so far'; el.appendChild(head);
+      if (ch && q) { const li = document.createElement('li'); li.className = 'now quest'; const b = document.createElement('b'); b.textContent = q.title; li.append(b, document.createElement('br'), questAsk(q)); el.appendChild(li); }      // one quest at a time: the rest are in the journal
+      else { const li = document.createElement('li'); li.className = 'done quest'; li.textContent = 'Every quest of the story is done'; el.appendChild(li); }
+      if (!FAR) { const h = document.createElement('li'); h.className = 'asks'; h.textContent = 'The Keeper asks today'; el.appendChild(h); }
+    }
+    for (const id of FAR ? [] : today) {
       const li = document.createElement('li');
       li.textContent = TASKS[id];
       if (st.done.includes(id)) li.className = 'done';
-      else if (id === today.find((k) => !st.done.includes(k))) li.className = 'now';
+      else if (!q && id === today.find((k) => !st.done.includes(k))) li.className = 'now';
       el.appendChild(li);
     }
   }
-  const n = today.filter((id) => st.done.includes(id)).length;
-  $('tasks-count').textContent = n === today.length ? 'all done today' : `${n} of ${today.length}`;
+  $('tasks-count').textContent = `${questsDone()} of ${MY_STORY.length}`;
 }
 // The list on the left folds away under its heading; small screens start with it folded.
 {
@@ -439,13 +550,14 @@ function showList() {
 }
 function did(id) {
   if (FAR) return;
+  questEvent(id);
   const today = listToday(), st = listState();
   if (!entered || !today.includes(id) || st.done.includes(id)) return;
   st.done.push(id);
   store('ember.list', st);
   showList();
   const left = today.length - st.done.length;
-  addLog('', `Done for the keeper: ${TASKS[id].toLowerCase()}. ${left ? `${left} more on today's list.` : 'That is the whole list for today.'} Two planks go on the boat in your name.`, 'sys');
+  addLog('', `The Keeper nods. ${left ? (left === 1 ? 'One more thing he asks today.' : `${left} more things he asks today.`) : 'That is all he asks today.'} Two planks go on the boat in your name.`, 'sys');
   addPlanks(2);
   if (!left) setTimeout(() => playEmote('hop'), 800);
 }
@@ -456,6 +568,7 @@ function companion(reach) {
   return best;
 }
 function addPlanks(n) {
+  myPlanks += n; store('ember.myPlanks', myPlanks);
   saved.addPlanks(n, me.name, myCode).then((r) => { if (r === 'local') { boatTotal += n; yard.setProgress(boatTotal); } });
 }
 function pickUpDriftwood(i) {
@@ -490,18 +603,19 @@ function sniffTracks(tr) {
 }
 // The boat and the names of everyone who put a plank on it.
 function lookAtBoat() {
+  questEvent('look');
   const built = boatTotal >= BOAT_GOAL;
   const crew = boatCrew.slice(0, 40).map((c) => ({ text: c.name, meta: c.n === 1 ? '1 plank' : `${c.n} planks` }));
   const more = boatCrew.length > 40 ? [{ text: `and ${boatCrew.length - 40} more` }] : [];
   openSheet({
-    title: built ? 'The boat is built' : 'The keeper\'s boat',
+    title: built ? 'The Keeper\'s boat is built' : 'The Keeper\'s boat',
     lines: [
       { text: built
-        ? `All ${BOAT_GOAL} planks are on. She lies afloat at the end of the gangplank, ready for a sail round the island: go down to the water and climb in, alone or with others. One day she will carry animals to the other islands.`
-        : `${boatTotal} of ${BOAT_GOAL} planks so far. When she is built she will carry animals to the other islands. Driftwood washes up on the beaches, and it counts twice with another animal beside you.` },
+        ? `All ${BOAT_GOAL} planks are on. She lies afloat at the end of the gangplank. For now she only goes round the island: go down to the water and climb in, alone or with others. The Keeper built her to go back west. He has not said when.`
+        : `${boatTotal} of ${BOAT_GOAL} planks so far. The Keeper is building her to go back west, and he will not say what is there. Driftwood washes up on the beaches, and it counts twice with another animal beside you.` },
       ...(crew.length ? [{ text: built ? 'Built by' : 'Built so far by', kind: 'head' }, ...crew, ...more] : [{ text: 'Nobody has added a plank yet. Yours could be the first.' }]),
     ],
-    note: built ? 'More driftwood still helps: it goes into the stores for the first voyage.' : '',
+    note: built ? 'More driftwood still helps: it goes into the stores for the crossing.' : '',
   });
 }
 
@@ -532,28 +646,29 @@ function eatFish() {
   setTimeout(() => { setHeld(0); audio.pop(440); addLog('', 'You ate the fish.', 'sys'); pushPresence(true); }, 700);
 }
 function giveFish() {
+  setTimeout(() => questEvent('fishgift'), 2500);
   if (held !== 2) return;
   me.targetYaw = Math.atan2(keeper.x - me.x, keeper.z - me.z);
   playEmote('throw');
   setTimeout(() => {
     setHeld(0); pushPresence(true);
-    addLog('', 'You left the fish for the keeper.', 'sys');
+    addLog('', 'You left the fish for the Keeper.', 'sys');
     setTimeout(() => { keeper.play('greet'); keeperSays(['For me? Thank you.', 'A fine one. Thank you.', 'You are quick with a paw.'][fishTonight % 3]); keeperNext = Math.max(keeperNext, t + 30); }, 700);
   }, 300);
 }
 
 // Calls: each animal has its own voice, and it carries.
-// ---------- the keeper plays tag ----------
-// Ask the keeper and he gets up and plays like anyone else: he runs from whoever is it, and chases when it is him.
+// ---------- the Keeper plays tag ----------
+// Ask the Keeper and he gets up and plays like anyone else: he runs from whoever is it, and chases when it is him.
 // One player's game moves him (the "host": the player whose id sorts first) and tells the others where he is, so
 // everyone sees the same chase. If that player goes, the next one carries on.
-const K = { av: keeper, data: { name: 'the keeper', species: keeper.species, game: 0, it: 0, tagAt: 0, tagTo: '', mode: 'stand', asleep: false, code: '', muted: 0 } };
+const K = { av: keeper, data: { name: 'the Keeper', species: keeper.species, game: 0, it: 0, tagAt: 0, tagTo: '', mode: 'stand', asleep: false, code: '', muted: 0 } };
 let keeperLoose = false, keeperHoming = false, keeperItAt = -99, keeperRestUntil = 0, keeperTagSeen = 0, keeperHead = 0, wasHost = false, keeperSaid = 0;
 const myWireId = () => net.id || 'solo';
 function* folk() { yield* peers; if (K.data.game) yield ['keeper', K]; }
 const folkGet = (id) => (id === 'keeper' ? (K.data.game ? K : undefined) : peers.get(id));
 const folkHas = (id) => !!folkGet(id);
-// Who moves the keeper: of the visitors in his game, the one whose id sorts first.
+// Who moves the Keeper: of the visitors in his game, the one whose id sorts first.
 function keeperHost() {
   const g = K.data.game;
   if (!g) return null;
@@ -573,8 +688,8 @@ function askKeeper() {
   keeperLoose = true; keeperHoming = false; keeperHead = Math.atan2(keeper.x - me.x, keeper.z - me.z);
   keeper.mode = 'stand'; keeper.play('hop');
   setTimeout(() => keeperSays('Tag? Ha. You will have to catch me first.'), 400);
-  flash('You are it!', 'Catch the keeper');
-  addLog('', 'The keeper gets to his feet. You are it! Catch him.', 'sys');
+  flash('You are it!', 'Catch the Keeper');
+  addLog('', 'The Keeper gets to his feet. You are it! Catch him.', 'sys');
   audio.pop(700);
   net.note('game');
   me.setName(me.name, mySub());
@@ -585,7 +700,7 @@ function keeperMadeIt(at) {
   K.data.it = at; keeperItAt = nowSec();
   keeper.play('hop');
 }
-// Something the keeper did reaches everyone here: he has tagged someone.
+// Something the Keeper did reaches everyone here: he has tagged someone.
 function keeperTagged() {
   const d = K.data;
   if (!(d.tagAt > keeperTagSeen)) return;
@@ -595,8 +710,8 @@ function keeperTagged() {
   if (d.tagTo === myWireId()) {
     if (!game || game !== d.game) return;
     myIt = d.tagAt; myItAt = nowSec();
-    flash('You are it!', 'The keeper tagged you');
-    addLog('', 'The keeper tagged you. You are it!', 'sys');
+    flash('You are it!', 'The Keeper tagged you');
+    addLog('', 'The Keeper tagged you. You are it!', 'sys');
     ripple(me.x, me.z, 4, 0xffb04a); audio.pop(480);
     if (!me.emote) playEmote('hop');
     me.setName(me.name, mySub()); pushPresence(true);
@@ -604,8 +719,8 @@ function keeperTagged() {
     const q = peers.get(d.tagTo);
     if (!q) return;
     ripple(q.av.x, q.av.z, 4, 0xffb04a);
-    addLog('', `The keeper tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
-    if (game && game === d.game) flash(`${q.data.name} is it`, 'The keeper tagged them');
+    addLog('', `The Keeper tagged ${q.data.name}. ${q.data.name} is it.`, 'sys');
+    if (game && game === d.game) flash(`${q.data.name} is it`, 'The Keeper tagged them');
   }
 }
 function keeperStep(dt, tx, tz, speed, away) {
@@ -624,7 +739,7 @@ function keeperStep(dt, tx, tz, speed, away) {
   keeper.speed = lerp(keeper.speed, Math.hypot(n.x - keeper.x, n.z - keeper.z) / Math.max(dt, 1e-3), 0.3);
   keeper.x = n.x; keeper.z = n.z; keeper.targetYaw = keeperHead;
 }
-// Called every frame before the keeper is drawn. Returns true while he is up and about, false when he is by the fire.
+// Called every frame before the Keeper is drawn. Returns true while he is up and about, false when he is by the fire.
 function updateKeeperGame(dt) {
   if (FAR) return false;      // the Mapmaker is too old for tag
   const d = K.data, now = nowSec();
@@ -685,11 +800,11 @@ function updateKeeperGame(dt) {
   if (keeperLoose) { keeper.mode = 'stand'; keeper.y = groundHeight(keeper.x, keeper.z); }
   else if (partyStand) { if (keeper.mode !== 'stand') keeper.mode = 'stand'; }          // on his feet for the dance
   else if (keeper.mode !== 'lie') { keeper.mode = 'lie'; keeper.speed = 0; }
-  const sub = `${itWho === 'keeper' ? '§i' : ''}island keeper`;
+  const sub = `${itWho === 'keeper' ? '§i' : ''}${KSUB}`;
   if (keeper.sub !== sub) keeper.setName('Keeper', sub);
   return keeperLoose;
 }
-// What the host tells everyone about the keeper, riding along with their own position.
+// What the host tells everyone about the Keeper, riding along with their own position.
 const keeperWire = () => (wasHost && (K.data.game || keeperHoming) ? [K.data.game || -1, Math.round(keeper.x * 100) / 100, Math.round(keeper.z * 100) / 100, K.data.it, K.data.tagTo, K.data.tagAt] : null);
 
 // ---------- tag ----------
@@ -756,6 +871,7 @@ function acceptTag() {
   pushPresence(true);
 }
 function joinTag() {
+  questEvent('tag');
   if (!seenGame || game || !entered) return;
   game = seenGame; myIt = 0; alone = 0;
   playEmote('hop'); audio.pop(700);
@@ -824,7 +940,7 @@ function heardTag(id, p, data) {
     const q = folkGet(data.tagTo);
     if (!q) return;
     ripple(q.av.x, q.av.z, 4, 0xffb04a);
-    const whom = data.tagTo === 'keeper' ? 'The keeper' : q.data.name;
+    const whom = data.tagTo === 'keeper' ? 'The Keeper' : q.data.name;
     addLog('', `${data.name} tagged ${q.data.name}. ${whom} is it.`, 'sys');
     if (game && data.game === game) flash(`${whom} is it`, `${data.name} tagged ${data.tagTo === 'keeper' ? 'him' : 'them'}`);
   }
@@ -860,7 +976,7 @@ function updateTag() {
   if (who !== 'me' && myIt && game) { let later = false; for (const id of players) { const d = folkGet(id).data; if (d.it > myIt && d.it > d.tagAt) later = true; } if (later) { myIt = 0; pushPresence(true); } }
   if (who !== itWho) { itWho = who; me.setName(me.name, mySub()); for (const [id, p] of peers) p.av.setName(p.data.name, peerSub(id, p.data)); pushPresence(true); }
   const left = g ? tagTime - (timeNow() - g) / 1000 : 0;
-  const itName = who === 'me' ? 'You' : who === 'keeper' ? 'The keeper' : who ? folkGet(who).data.name : '';
+  const itName = who === 'me' ? 'You' : who === 'keeper' ? 'The Keeper' : who ? folkGet(who).data.name : '';
   if (game) {
     // Your game ends when time is up, when everyone else has gone, or when whoever was it has left.
     alone = players.length ? 0 : alone || now;
@@ -914,7 +1030,7 @@ $('game-btn').addEventListener('click', () => { if (voyage) { if (voyageNow && v
 // ---------- a dance at the fire ----------
 // When a few animals are resting at the fire, one of them can start a dance. Everyone who joins circles the fire
 // together for a minute, hopping on the beat and calling out on every fourth bar; the fire burns higher the more
-// there are, and the keeper gets up and joins in. Like tag, there is no referee: each dancer says which dance they
+// there are, and the Keeper gets up and joins in. Like tag, there is no referee: each dancer says which dance they
 // are in (its number is the moment it began) and works out their own place in the ring from the list of dancers.
 const PARTY_MS = 60000, PARTY_R = 5.0, BEAT_MS = 800;
 let party = 0, seenParty = 0, partyBeat = -1, partyAlone = 0, partyJoinedAt = 0, partyLine = '', partyCalled = 0, partyPhase = 'ring', partyAng = 0, partyTick = 0;
@@ -937,6 +1053,7 @@ function startParty() {
 }
 function joinParty() {
   if (party || !seenParty || game || voyage || !entered) return;
+  questEvent('dance');
   party = seenParty; partyJoinedAt = timeNow(); partyAlone = 0; partyBeat = -1;
   if (me.mode !== 'stand') standUp();
   setHeld(0); walkToRing();
@@ -1015,7 +1132,7 @@ function updateParty(dt) {
       if (party) audio.call(SPECIES[me.species].call, 0.5);
       voices.slice(0, 4).forEach((p, j) => setTimeout(() => audio.call(SPECIES[p.data.species].call, 0.3 * hearFrom(p.av.x, p.av.z, 30)), 60 + j * 70));
     }
-    // The keeper keeps time, on his feet by his place.
+    // The Keeper keeps time, on his feet by his place.
     if (!keeperLoose && beat % 2 === 0) keeper.play('hop');
   }
   world.setParty(on ? Math.min(1, n / 5) * 0.6 + 0.4 : 0);
@@ -1284,6 +1401,7 @@ function onSocial(m) {
     audio.pop(700);
   } else if (m.t === 'fyes') {
     flash('Friends!', `You and ${m.name}`);
+    questEvent('friend');
     addLog('', `You and ${m.name} are friends now. You can whisper to each other, and leave notes when one of you is away.`, 'sys');
     audio.pop(880); if (!me.emote) playEmote('hop');
   } else if (m.t === 'fno') addLog('', 'Your friends list is full.', 'sys');
@@ -1338,7 +1456,7 @@ function openFriends() {
 $('btn-friends').addEventListener('click', openFriends);
 
 // Calling and answering. A call you hear can be answered for a few seconds; a call nobody answers is picked up
-// by the owl or Clover if they are near, and otherwise by the keeper, so no call falls flat.
+// by the owl or Clover if they are near, and otherwise by the Keeper, so no call falls flat.
 let answerTo = null;                 // the call you could answer now: { name, until }
 let myCallOpen = -99, answeredBy = new Set();
 let lonely = null;                   // the latest call no other animal has answered yet: { at, mine, by }
@@ -1370,11 +1488,14 @@ function updateCalls() {
     keeper.play('call');
     audio.call('bellow', Math.max(0.1, hearFrom(keeper.x, keeper.z, 55)) * 0.75);
     ripple(keeper.x, keeper.z, 5, 0xffc978);
-    if (mine && t - keeperCallLogAt > 40) { keeperCallLogAt = t; addLog('', 'By the fire, the keeper lifts his head and answers you.', 'sys'); }
+    if (mine && t - keeperCallLogAt > 40) { keeperCallLogAt = t; addLog('', 'By the fire, the Keeper lifts his head and answers you.', 'sys'); }
   }
 }
 // Every call on the island passes through here: yours (by = null) and everyone else's.
 function noteCall(by, x, z) {
+  echoCall(x, z);
+  if (shy && by === null) shy.heard(x, z);
+  if (FAR && by === null && caveNow > 0.5 && !journal.echo) setTimeout(() => { addLog('', 'Your voice goes off down the dark, and a moment later something very like it comes back.', 'sys'); found('echo', true); }, 900);
   const mine = by === null;
   ripple(x, z, mine ? 6 : 5, 0xfff1d6);
   const taken = critters.heard(x, z, skyNow.dark);
@@ -1398,7 +1519,7 @@ function callOut() {
 }
 // Greeting: a dip of the head and a wagging tail.
 function greet(av, name) {
-  if (av === keeper) guideFlags.greet = true;
+  if (av === keeper) guideFlags.greet = true; else if (av !== critters.cow) questEvent('hello');
   me.targetYaw = Math.atan2(av.x - me.x, av.z - me.z);
   playEmote('greet');
   addLog('', `You greet ${name}.`, 'sys');
@@ -1441,13 +1562,13 @@ function setMuted(until, why) {
 // A note for whoever looks after the island.
 function openFeedback() {
   openSheet({
-    title: 'Tell the keeper',
+    title: 'Tell the Keeper',
     lines: [{ text: 'What did you like? What was confusing, broken or missing? Whoever looks after the island reads every note.' }],
     input: { free: true, max: 500, placeholder: 'Your note', button: 'Send it', submit: async (text) => {
       if (text.length < 3) { $('sheet-note').textContent = 'Write a few words first.'; return; }
       let status = 0;
       try { status = (await fetch('/room/feedback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, name: fullName(me.name, myCode) }) })).status; } catch (e) { status = 0; }
-      if (status === 200) { closeSheet(); flash('Thank you', 'Your note is with the keeper'); audio.pop(660); addLog('', 'Your note is with the keeper. Thank you.', 'sys'); }
+      if (status === 200) { closeSheet(); flash('Thank you', 'Your note is with the Keeper'); audio.pop(660); addLog('', 'Your note is with the Keeper. Thank you.', 'sys'); }
       else $('sheet-note').textContent = status === 429 ? 'That is plenty for one day, thank you. Come back tomorrow with more.' : 'That did not go through. Try again in a moment.';
     } },
     note: 'No name or address is attached, only the animal you are today.',
@@ -1462,7 +1583,7 @@ audio.listReady.then((list) => {
   el.textContent = named.length ? 'Music: ' + named.map((x) => (x.artist ? `"${x.title}" by ${x.artist}` : `"${x.title}"`)).join(', ') + '.' : audio.credit;
   el.hidden = false;
 });
-// Another visitor: stop hearing them, or tell the keeper what they said.
+// Another visitor: stop hearing them, or tell the Keeper what they said.
 function openVisitor(id) {
   const p = peers.get(id);
   if (!p) return;
@@ -1474,13 +1595,13 @@ function openVisitor(id) {
       const sent = net.report(id, p.lines || [], note);
       p.reported = true; ignored.add(id);
       closeSheet();
-      addLog('', sent ? `Thank you. The keeper will read your report about ${name}, and you will not hear them again this visit.` : `You will not hear ${name} again this visit.`, 'sys');
+      addLog('', sent ? `Thank you. The Keeper will read your report about ${name}, and you will not hear them again this visit.` : `You will not hear ${name} again this visit.`, 'sys');
     } },
     extras: !p.data.pid || !myPid ? [] : friendOf(p.data.pid)
       ? [{ label: `Whisper to ${name}`, run: () => openWhisper(p.data.pid) }, { label: 'Stop being friends', run: () => { net.social({ t: 'unfriend', pid: p.data.pid }); closeSheet(); addLog('', `You and ${name} are no longer friends. They are not told.`, 'sys'); } }]
       : [{ label: askedMe(p.data.pid) ? `Be friends with ${name}` : `Ask ${name} to be friends`, run: () => { closeSheet(); askFriend(p.data.pid, name); } }],
     extra: { label: deaf ? `Hear ${name} again` : `Stop hearing ${name}`, run: () => { if (deaf) ignored.delete(id); else ignored.add(id); closeSheet(); addLog('', deaf ? `You can hear ${name} again.` : `You will not hear ${name} until you leave. They are not told.`, 'sys'); } },
-    note: p.reported ? 'You have reported this animal.' : 'A report sends the keeper the last things this animal said. Animals reported by several others are muted.',
+    note: p.reported ? 'You have reported this animal.' : 'A report sends the Keeper the last things this animal said. Animals reported by several others are muted.',
   });
 }
 function tidyMessage(text, max = 200) {
@@ -1529,7 +1650,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, cf: fires.count, jn: journalCount(), gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
+    lp: lamp ? 1 : 0, ev: myEvent, it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, cf: fires.count, jn: journalCount(), gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -1555,6 +1676,7 @@ const net = createNet({
         if (entered) addLog('', friendOf(data.pid) ? `Your friend ${data.name} came ashore.` : `${data.name} came ashore.`, 'sys');
         if (entered && friendOf(data.pid)) { flash(`${data.name} is here`, 'Your friend'); showFriendsCount(); }
       }
+      if (data.ev && data.ev.at > (p.evAt || 0)) { const fresh = p.evAt !== undefined; p.evAt = data.ev.at; if (fresh && entered) heardEvent(data); } else if (p.evAt === undefined) p.evAt = data.ev ? data.ev.at : 0;
       p.data = data;
       heardTag(id, p, data);
       heardGesture(id, p, data);
@@ -1630,12 +1752,14 @@ const sheet = $('sheet');
 let sheetSubmit = null, stopCarvings = null, sheetFree = false;
 function closeSheet() {
   sheet.hidden = true;
+  if (sheet.dataset.kind === 'journal') delete sheet.dataset.kind;
   sheetSubmit = null;
   if (stopCarvings) { stopCarvings(); stopCarvings = null; }
   canvas.focus();
 }
 // One panel for everything you read or write: a title, some lines, an optional box to write in.
 function openSheet({ title, lines = [], input = null, extra = null, extras = null, note = '' }) {
+  if (sheet.dataset.kind === 'journal') delete sheet.dataset.kind;
   if (stopCarvings) { stopCarvings(); stopCarvings = null; }
   $('sheet-title').textContent = title;
   setSheetLines(lines);
@@ -2078,7 +2202,7 @@ function comeAshore(q = {}) {
   store('ember.identity', identity);
   document.body.classList.add('playing');
   me.targetYaw = Math.atan2(FIRE.x - SPAWN.x, FIRE.z - SPAWN.z);      // turn to face the fire
-  addLog('', 'You came ashore. The fire is straight ahead.', 'sys');
+  addLog('', FAR ? 'You step onto a shore nobody has mapped. A camp fire is burning up the path.' : (quests.cold ? 'You come ashore again. The fire is still burning.' : 'You wash ashore on a small island. Someone has kept a fire burning here for a long time.'), 'sys');
   // When to find company: said to everyone on arrival, since the beach is often empty.
   setTimeout(() => { if (entered) addLog('', campLine(), 'sys'); }, 3500);
   // Signs of the others: how many have been here today, and whose tracks are still on the ground.
@@ -2092,7 +2216,7 @@ function comeAshore(q = {}) {
   const laid = traces.setLeft(q.tracks, (sp) => !!(SPECIES[sp] && SPECIES[sp].hoof), (sp) => (SPECIES[sp] ? SPECIES[sp].height : 1));
   if (Number.isFinite(q.today)) {
     const others = Math.max(0, q.today - 1);
-    const line = others === 0 ? 'You are the first animal ashore today.' : others === 1 ? 'One other animal has been here today.' : `${others} other animals have been here today.`;
+    const line = others === 0 ? 'Nobody else has come ashore yet today.' : others === 1 ? 'One other animal has washed up here today.' : `${others} other animals have washed up here today.`;
     setTimeout(() => addLog('', !laid ? line : others ? `${line} Some of their tracks are still on the ground.` : `${line} Tracks from earlier visitors are still on the ground.`, 'sys'), 2500);
   }
   pushPresence(true);
@@ -2101,7 +2225,7 @@ function comeAshore(q = {}) {
   setTimeout(() => { if (!fireRec.stamp) { fireRec.stamp = fireRec.at; pushPresence(true); } }, 3000);
   if (!comeAshore.before) { comeAshore.before = true; welcomeBack(); } else setTimeout(lookForBottle, 4000);
   showList();
-  setTimeout(() => { if (!FAR && starterAt >= STARTER.length && listState().done.length < 3) addLog('', 'The keeper has three small jobs today. They are listed on the left, and the next one is at the top of the screen.', 'sys'); }, 9000);
+  if (quests.cold) setTimeout(() => { const q = questNow(); if (!FAR && starterAt >= STARTER.length && q) addLog('', `${q.from} asks: ${lower(q.ask)}. It is at the top of the screen.`, 'sys'); }, 9000);
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { me.tag.userData.draw(me.name, me.sub); keeper.tag.userData.draw(keeper.name, keeper.sub); });
 setInterval(() => { me.setName(me.name, mySub()); pushPresence(false); }, 20000);
@@ -2118,7 +2242,7 @@ function updateActions() {
     if (Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) main = { label: 'Add the driftwood to the boat', run: addToBoat };
     alt = { label: 'Leave the driftwood here', run: () => { setHeld(0); pushPresence(true); } };
   } else if (held === 2) {
-    main = !FAR && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 3.2 ? { label: 'Leave the fish for the keeper', run: giveFish } : { label: 'Eat the fish', run: eatFish };
+    main = !FAR && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 3.2 ? { label: 'Leave the fish for the Keeper', run: giveFish } : { label: 'Eat the fish', run: eatFish };
     alt = main.run === giveFish ? { label: 'Eat the fish', run: eatFish } : null;
   } else if (me.mode !== 'stand') {
     if (me.mode === 'sit') main = { label: 'Lie down', run: () => { setMode('lie', mySeat); pushPresence(true); } };
@@ -2128,7 +2252,7 @@ function updateActions() {
     if (Math.hypot(me.x - WOODPILE.x, me.z - WOODPILE.z) < 1.7) opts.push({ label: 'Pick up a stick', run: pickUpLog });
     const seat = nearestFreeSeat(1.9);
     if (seat >= 0) opts.push({ label: hoofed() ? 'Lie down by the fire' : 'Sit by the fire', run: () => { setMode('sit', seat); pushPresence(true); }, side: true });
-    // Someone close enough to greet: the nearest visitor, or the keeper.
+    // Someone close enough to greet: the nearest visitor, or the Keeper.
     let who = null, wd = 2.0;
     for (const p of peers.values()) { const d = Math.hypot(p.av.x - me.x, p.av.z - me.z); if (d < wd && p.fade > 0.5) { wd = d; who = { av: p.av, name: p.data.name }; } }
     if (!who && Math.hypot(keeper.x - me.x, keeper.z - me.z) < (FAR ? 3.2 : 2.6)) who = { av: keeper, name: KWHO };
@@ -2139,6 +2263,30 @@ function updateActions() {
     // Something small on the ground: it goes straight into the journal, not the mouth.
     if (lying.near(me.x, me.z) >= 0) opts.push({ label: 'See what that is', run: pickUpFind });
     if (!FAR && Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) opts.push({ label: 'Look over the boat', run: lookAtBoat });
+    if (FAR) { const pi = world.logPages.findIndex((pg) => pg.there && Math.hypot(pg.x - me.x, pg.z - me.z) < 2.3 && (!pg.cave || caveNow > 0.5)); if (pi >= 0) opts.unshift({ label: 'Pick up the page', run: () => pickPage(pi) }); }
+    if (FAR && perch) opts.unshift({ label: 'Climb down', run: climbDown });
+    if (FAR && !perch) {
+      const sc = world.sources.find((q) => Math.hypot(q.x - me.x, q.z - me.z) < (q.tide ? 6 : 2.6) && (!q.cave || caveNow > 0.5) && (!q.tide || tideAt(timeNow()).y < TIDE.flat - 0.14));
+      if (sc) opts.push({ label: LIGHT.find((l) => l.kind === sc.kind).take, run: () => takeFrom(sc) });
+      const dd = Math.hypot(world.lighthouse.door.x - me.x, world.lighthouse.door.z - me.z), L = LIGHT[lightStage()];
+      if (dd < 4.2 && L && bag[L.kind] > 0) opts.unshift({ label: `Set down your ${L.many} for the tower`, run: giveToTower });
+      if (dd < 3.2) opts.push({ label: 'Climb the tower', run: climbTower, side: opts.length > 0 });
+    }
+    if (FAR && Math.hypot(MAP_BOARD.x - me.x, MAP_BOARD.z - me.z) < 3.4) opts.unshift({ label: 'Look at the map', run: lookAtMap });
+    if (FAR && Math.hypot(world.hermit.x - me.x, world.hermit.z - me.z) < 3.3) { opts.unshift({ label: lamp ? 'Give back the lantern' : 'Ask for the lantern', run: askLantern }, { label: 'Greet the Hermit', run: greetHermit, side: true }); }
+    if (FAR && Math.hypot(world.heron.x - me.x, world.heron.z - me.z) < 3.6) opts.push({ label: 'Greet the Lamplighter', run: greetHeron, side: opts.length > 0 });
+    if (FAR && Math.hypot(world.cottage.door.x - me.x, world.cottage.door.z - me.z) < 2.6) opts.push({ label: 'Look at the carving over the door', run: lookAtCarving });
+    if (FAR && Math.hypot(world.flats.wreck.stern.x - me.x, world.flats.wreck.stern.z - me.z) < 3.4) opts.push({ label: 'Look at the name on her stern', run: lookAtStern });
+    if (FAR && Math.hypot(world.flats.bell.x - me.x, world.flats.bell.z - me.z) < 2.4) opts.push({ label: 'Ring the bell', run: ringBell });
+    if (FAR && world.flats.pools.some((q) => Math.hypot(q.x - me.x, q.z - me.z) < 2.4)) opts.push({ label: 'Look into the rock pool', run: lookInPool });
+    if (FAR && Math.hypot(WAYCAIRN.x - me.x, WAYCAIRN.z - me.z) < 2.8) opts.push({ label: 'Lay a stone on the cairn', run: layStone });
+    if (FAR && Math.hypot(SEAT.x + 1 - me.x, SEAT.z - me.z) < 2.6) opts.push({ label: 'Sit in the stone seat', run: sitInSeat });
+    if (FAR && caveNow < 0.5) { const si = world.stones.findIndex((st) => Math.hypot(st.x - me.x, st.z - me.z) < 2.3); if (si >= 0) opts.push({ label: 'Touch the standing stone', run: () => touchStone(si) }); }
+    if (FAR && caveNow > 0.5 && Math.hypot(world.echo.mark.x - me.x, world.echo.mark.z - me.z) < 3.4) opts.push({ label: 'Look at the mark on the rock', run: lookAtMark });
+    if (FAR && caveNow > 0.5) { const pn = world.paintings.find((q) => Math.hypot(q.x - me.x, q.z - me.z) < 3.6); if (pn && litNow()) opts.push({ label: 'Look at the painted stone', run: () => lookAtStone(pn) }); else if (pn && !stoneHint) { stoneHint = true; addLog('', 'There is something on this stone. It is too dark to make out.', 'sys'); } }
+    if (!FAR && Math.hypot(POST.x - me.x, POST.z - me.z) < 2.3) opts.push({ label: 'Read the carved post', run: readPost });
+    if (!FAR && !journal.lens && Math.hypot(LENS.x - me.x, LENS.z - me.z) < 2.1) opts.push({ label: 'See what is in the sand', run: findLens });
+    if (!FAR && Math.hypot(CHEST.x - me.x, CHEST.z - me.z) < 1.9) opts.push({ label: 'Try the chest', run: tryChest });
     const tr = traces.near(me.x, me.z);
     if (tr && !who && drift < 0) opts.push({ label: 'Sniff at the tracks', run: () => sniffTracks(tr) });
     const mn = life.meadowNear(me.x, me.z);
@@ -2177,7 +2325,7 @@ function updateActions() {
       if (play) { if (!main) main = play; else if (!alt) alt = play; }
     }
     else if (!FAR && !game && !seenGame && !held && !myInvite && !near && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 2.8) {
-      const play = { label: 'Ask the keeper to play tag', run: askKeeper };
+      const play = { label: 'Ask the Keeper to play tag', run: askKeeper };
       if (!main) main = play; else if (!alt) alt = play;
     }
   }
@@ -2198,36 +2346,427 @@ const lying = createFinds(scene);
 function found(id, quiet = false) {
   const f = FIND[id];
   if (!f || !entered) return;
+  setTimeout(() => questEvent('found:' + id), 1500);
   const first = !journal[id];
   journal[id] = { n: (journal[id] ? journal[id].n : 0) + 1, at: journal[id] ? journal[id].at : Date.now() };
   store('ember.finds', journal);
   if (first) {
     flash('New in your journal', f.name); audio.pop(820);
-    addLog('', `${f.name}: new in your journal. That is ${journalCount()} of ${FINDS.length}.`, 'sys');
+    addLog('', `${f.name}: new in your journal. That is ${journalCount()} of ${myFinds().length}.`, 'sys');
     net.note('find'); pushPresence(true);
   } else if (!quiet) addLog('', `${f.name}. You have found ${journal[id].n} of these.`, 'sys');
   showJournalCount();
 }
-function showJournalCount() { $('journal-count').textContent = `${journalCount()} of ${FINDS.length}`; }
+function showJournalCount() { const n = Object.keys(cards).filter((k) => MY_SIGHTS.some((sg) => sg.id === k)).length; $('journal-count').textContent = `${n === 1 ? '1 stamp' : `${n} stamps`}, ${journalCount()} finds`; }
+// ---------- sights and stamps ----------
+// Reaching a sight takes a picture of it as it is just then, from a good spot, and keeps it as a postcard.
+const MY_SIGHTS = SIGHTS[ISLE] || [];
+const cards = (() => { const c = store('ember.cards'); return c && typeof c === 'object' ? c : {}; })();
+const cardCam = new THREE.PerspectiveCamera(48, 1.5, 0.1, 1200);
+let cardWanted = null, cardAt = 0, hollowSaid = false, treeSaid = false, caveSaid = false, roundSaid = false, caveNow = 0;
+const caveGlow = new THREE.PointLight(0xbfe8ff, 0, 9, 1.6); caveGlow.position.set(0, 1.2, 0); me.group.add(caveGlow);
+// ---------- the Hermit of Hollow Hill, and his lantern ----------
+// An old badger who sits at the mouth of the cave. Like the Mapmaker he is a model of his own; an unseen animal
+// stands in his place to carry his name and his words. He lends his lantern to anyone who asks, and by its light
+// the painted stones in the dark gallery can be read.
+const hermit = FAR ? new Avatar({ species: 5, palette: 0, name: 'Hermit', sub: 'lives in the hill' }) : null;
+if (hermit) addMark(hermit.group, 'The Hermit', 2.6);
+let lamp = false, hermitNext = 20, stoneHint = false;
+const stonesSeen = () => world.paintings.filter((pn) => pn.seen).length;
+if (hermit) { hermit.parts.rig.visible = false; hermit.shadow.visible = false; hermit.mode = 'stand'; scene.add(hermit.group); for (const id of store('ember.stones') || []) { const pn = world.paintings.find((q) => q.id === id); if (pn) pn.seen = true; } }
+function hermitSays(line) { hermit.say(line); addLog('Hermit', line, 'sys'); hermitNext = Math.max(hermitNext, t + 30); }
+const HERMIT_LINES = ['Mind your head in there.', 'I do not get many callers. I did not think I minded.', 'The small lights on the roof are alive. Do not ask me how.', 'It goes right through, if you keep on. Comes out above the far beach.', 'There is a round room further in. It likes voices. More than one, if you have them.', 'I had a garden once, over in the valley. I still go, when nobody is looking.'];
+function greetHermit() {
+  questEvent('hermit');
+  me.targetYaw = Math.atan2(world.hermit.x - me.x, world.hermit.z - me.z); playEmote('greet'); addLog('', 'You greet the Hermit.', 'sys');
+  const n = stonesSeen();
+  setTimeout(() => hermitSays(n >= 3 ? ['So you have seen them. I painted them so that I would not be the only one who knew.', 'He was my friend, the keeper. So was the otter. One went into the sea and one went east, and I went into the hill.', 'If you ever see him, tell him the tower is still standing. Most of it.'][hermitTold++ % 3]
+    : lamp ? 'Hold it up to the stones in the first room. Then come and tell me what you make of them.' : n > 0 ? 'There are three stones. You have not seen them all.' : 'You will want a light in there. Ask, and I will lend you mine.'), 700);
+}
+let hermitTold = 0;
+function askLantern() {
+  me.targetYaw = Math.atan2(world.hermit.x - me.x, world.hermit.z - me.z);
+  if (lamp) { lamp = false; audio.pop(520); addLog('', 'You give the lantern back.', 'sys'); setTimeout(() => hermitSays('Thank you. It is the only one I have.'), 600); return; }
+  lamp = true; questEvent('lantern'); audio.pop(760); flash('The Hermit\'s lantern', 'It lights the dark for you and for anyone close by');
+  addLog('', 'The Hermit unhooks his lantern and holds it out. It is warm, and heavier than it looks.', 'sys');
+  setTimeout(() => hermitSays('Bring it back. And look at the walls of the first room while you have it.'), 700);
+}
+function lookAtStone(pn) {
+  me.targetYaw = Math.atan2(pn.x - me.x, pn.z - me.z);
+  const first = !pn.seen; pn.seen = true; store('ember.stones', world.paintings.filter((q) => q.seen).map((q) => q.id));
+  openSheet({ title: pn.title, lines: [{ text: pn.text }], note: stonesSeen() >= 3 ? 'That is all three. The Hermit might have something to say about them.' : `${stonesSeen()} of 3 stones seen.` });
+  if (first && stonesSeen() >= 3) { const A = CAVE.pts[1]; setTimeout(() => wantStamp('paintings', [A[0] + 4.6, me.y + 2.2, A[1] + 4.2], [A[0] - 2.4, me.y + 1.5, A[1] - 3.4]), 400); }
+}
+// ---------- the tide ----------
+// The sea covers the flats and uncovers them every sixteen minutes, the same for everyone. Whoever is caught out on
+// the mud when it comes in is carried back to dry ground, wet through and none the worse.
+let springSaid = false, shelterSaid = false;
+// ---------- hidden places ----------
+let moonSaid = false, bonesSaid = false, seatSaid = false, cairnLaid = store('ember.cairn');
+if (!cairnLaid || typeof cairnLaid !== 'object') cairnLaid = { n: 0, day: '' };
+if (FAR) world.setCairn(cairnLaid.n);
+let cairnAll = 0;
+if (FAR) saved.watchCairn((n) => { cairnAll = Math.max(n, cairnLaid.n); world.setCairn(cairnAll); });
+function layStone() {
+  questEvent('cairn');
+  me.targetYaw = Math.atan2(WAYCAIRN.x - me.x, WAYCAIRN.z - me.z); playEmote('paw');
+  if (cairnLaid.day === todayKey()) { addLog('', 'You have laid your stone for today. The cairn will still be here tomorrow.', 'sys'); return; }
+  cairnLaid = { n: cairnLaid.n + 1, day: todayKey() }; store('ember.cairn', cairnLaid); cairnAll = Math.max(cairnAll + 1, cairnLaid.n); world.setCairn(cairnAll); saved.addCairn(me.name); audio.step('wood', 0.7);
+  addLog('', cairnLaid.n === 1 ? 'You find a flat stone and set it at the foot of the cairn. Everyone who comes this far leaves one. Now you have.' : `You set another stone by the cairn. That is ${cairnLaid.n} of yours, and ${cairnAll} from everybody who has come this way.`, 'sys');
+  if (!cards.waycairn) setTimeout(() => wantStamp('waycairn', [WAYCAIRN.x - 6, me.y + 2.6, WAYCAIRN.z - 5], [WAYCAIRN.x + 4, me.y + 0.6, WAYCAIRN.z + 8]), 400);
+}
+function sitInSeat() {
+  questEvent('seat');
+  me.x = SEAT.x + 0.35; me.z = SEAT.z; me.targetYaw = me.yaw = Math.PI / 2 + 0.12; moveTarget = null; world.hideMarker(); playEmote('wag');
+  const night = skyNow.dark > 0.5;
+  addLog('', night ? 'The stone is cold and fits you well. Far out on the eastern sea there is a spark of orange, very small and very steady. Somebody over there is keeping a fire.' : 'The stone is worn to the shape of whoever sat here. It looks east over open sea, to a smudge of an island on the horizon. Come back after dark.', 'sys');
+  if (!cards.seat) setTimeout(() => wantStamp('seat', [SEAT.x - 6.5, me.y + 2.6, SEAT.z + 3], [SEAT.x + 30, me.y + 0.5, SEAT.z - 1]), 500);
+}
+let tideWarned = -1, sternSeen = false, bellSaid = false, flatsSaid = '', isletSaid = false, poolLine = 0;
+const DRY = TIDE.flat - 0.14;      // below this the mud and the stones are clear of water
+// In plain words: is the tide out, and for how much longer.
+function tideWords() {
+  const now = timeNow(), out = tideAt(now).y < DRY;
+  let ms = 0; while (ms < TIDE.period && (tideAt(now + ms).y < DRY) === out) ms += 10000;
+  const m = Math.max(1, Math.round(ms / 60000));
+  return out ? `The tide is out. It turns in about ${m} min.` : `The tide is in. The flats will be clear in about ${m} min.`;
+}
+function updateTide() {
+  const onMud = Math.hypot(me.x - FLATS.x, me.z - FLATS.z) < FLATS.r + 14 || Math.hypot(me.x - ISLET.x, me.z - ISLET.z) < 62;
+  $('tide-note').textContent = Math.hypot(me.x - FLATS.x, me.z - FLATS.z) < 120 ? tideWords() : '';
+  if (!onMud) return;
+  const y = tideAt(timeNow()).y, depth = y - groundHeight(me.x, me.z), turn = Math.floor(timeNow() / TIDE.period);
+  if (depth > 0.12 && depth < 0.4 && tideWarned !== turn) { tideWarned = turn; addLog('', 'The water is over your paws and coming on. Make for dry ground, or for the islet.', 'sys'); }
+  if (depth > 0.44) {
+    me.x = FLAT_SHORE.x; me.z = FLAT_SHORE.z; moveTarget = null; world.hideMarker(); audio.whoosh();
+    flash('The tide', 'It carried you back to the shore'); addLog('', 'The sea lifts you off your feet and sets you down on the shore, wet through. Nothing is lost but your dignity.', 'sys'); playEmote('shake');
+  }
+}
+function lookAtStern() {
+  questEvent('stern');
+  sternSeen = true;
+  openSheet({ title: 'On her stern', lines: [
+    { text: 'Under the weed, in letters that were once white: KITTIWAKE.' },
+    { text: 'Smaller, cut beneath with a knife: "her master, the Ferryman of the Lantern Isles".' },
+    { text: 'She is stove in along one side. Whatever she was carrying is gone, except for a square of clean wood in the bottom boards where something heavy and round was lashed down.' },
+  ], note: 'About the size of a lamp lens.' });
+  setTimeout(() => wantStamp('wreck', [world.flats.wreck.x + 9, me.y + 3.4, world.flats.wreck.z + 8], [world.flats.wreck.x, me.y + 1, world.flats.wreck.z]), 300);
+}
+function ringBell() {
+  questEvent('bell');
+  me.targetYaw = Math.atan2(world.flats.bell.x - me.x, world.flats.bell.z - me.z); playEmote('paw'); world.ringBell(); tellEvent('bell', 0); audio.bell(1); setTimeout(() => audio.bell(0.8), 620); ripple(me.x, me.z, 12, 0xfff1d6);
+  if (!bellSaid) { bellSaid = true; addLog('', 'The bell goes out flat and clear over the water. Anyone on the shore would hear it, and know that somebody was out here.', 'sys'); }
+}
+const POOL_LINES = ['A red anemone, shut tight as a fist. It opens while you watch.', 'Something very small with too many legs goes sideways under a stone.', 'The water in the pool is warmer than the sea. A shrimp you can see straight through hangs in the middle of it.', 'Your own face looks up at you, and behind it the sky.'];
+// ---------- the Lamplighter of Lantern Point ----------
+// A heron who stayed when the keeper left, and has been mending the tower one stone at a time ever since.
+const heron = FAR ? new Avatar({ species: 5, palette: 0, name: 'Lamplighter', sub: 'mends the tower' }) : null;
+if (heron) addMark(heron.group, 'The Lamplighter', 3.6);
+let heronNext = 25, heronTold = 0, carvingSeen = false, cottageSaid = false;
+if (heron) { heron.parts.rig.visible = false; heron.shadow.visible = false; heron.mode = 'stand'; scene.add(heron.group); }
+function heronSays(line) { heron.say(line); addLog('Lamplighter', line, 'sys'); heronNext = Math.max(heronNext, t + 30); }
+const HERON_LINES = ['One stone a day. Some days the wind takes it back.', 'She was a fine tower. She will be again.', 'I can lift. I cannot carry. That is the trouble with being a heron.', 'The lamp room went into the sea, and the lens with it. Or so I have always thought.', 'He used to whistle, all night. I complained. I would give a good deal to hear it now.', 'Mind the scaffold.'];
+function greetHeron() {
+  questEvent('heron');
+  me.targetYaw = Math.atan2(world.heron.x - me.x, world.heron.z - me.z); playEmote('greet'); addLog('', 'You greet the Lamplighter.', 'sys');
+  const lines = [];
+  if (journal.lens) lines.push('You found a lens? On his beach? Then it was not lost. Then there is a point to all this.');
+  if (store('ember.tune')) lines.push('That was you, on the meadow. I heard it. I had to sit down.');
+  const k = lightStage(), L = LIGHT[k];
+  lines.push('You came all the way up from the Landing? Then you have legs. I could use legs.');
+  lines.push(L ? `${L.says} ${L.where} We have ${Math.min(L.need, lightTotals[L.kind] || 0)} of the ${L.need} it wants.` : 'She is mended, all but her eye. I light the wick every evening anyway. It does not carry past the rocks.');
+  setTimeout(() => heronSays(heronTold === 0 || Math.random() < 0.5 ? lines[lines.length - 1] : lines[heronTold % lines.length]), 700); heronTold++;
+}
+function lookAtCarving() {
+  questEvent('carving');
+  carvingSeen = true;
+  openSheet({ title: 'Over the door', lines: [
+    { text: 'Somebody has cut two animals into the lintel, small and with care: a stag with his head up, and beside him, no taller than his knee, an otter.' },
+    { text: 'Under them is one word, worn almost flat by the weather: HOME.' },
+  ], note: 'The cuts are old. The same hand made the new peg on the post by the dock.' });
+}
+function updateHeron(dt) {
+  const H = world.heron, d = Math.hypot(me.x - H.x, me.z - H.z);
+  heron.x = H.x; heron.z = H.z; heron.y = groundHeight(H.x, H.z) + 0.9; heron.bubbleFade = 1 - smoothstep(10, 14, d);
+  if (heron.parts.rig.visible) { heron.parts.rig.visible = false; heron.shadow.visible = false; }
+  heron.update(dt, t);
+  if (H.group) { const want = d < 8 ? Math.atan2(-(me.z - H.z), me.x - H.x) : H.home; let dy = want - H.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); H.group.rotation.y += dy * (1 - Math.exp(-dt * 1.3)); }
+  if (entered && d < 10 && t > heronNext) { heronNext = t + 50 + Math.random() * 40; heronSays(HERON_LINES[Math.floor(Math.random() * HERON_LINES.length)]); }
+}
+// ---------- the standing stones ----------
+// Seven stones, seven notes. Every so often the wind plays five of them in a certain order; touch the same five in
+// the same order and the ring answers. It is the tune the keeper of the light used to whistle. Afterwards the ring
+// is an instrument: any stone touched gives its note, for one animal or several.
+const NOTES = [392, 440, 494, 587, 659, 784, 880], TUNE = [2, 5, 0, 3, 6];
+let tuneKnown = !!store('ember.tune'), tuneAt = 0, windAt = -99, windSaid = false, named = !!store('ember.named'), summitSaid = false;
+function sound(i, soft) { world.ringStone(i, soft ? 700 : 1100); audio.chime(NOTES[i], (soft ? 0.5 : 1) * Math.max(0.15, hearFrom(HILL.x, HILL.z, 80)), soft ? 1.3 : 2.2); const st = world.stones[i]; ripple(st.x, st.z, soft ? 2.5 : 4, 0x9ff0e0); }
+function windPlays() {
+  questEvent('wind');
+  windAt = t;
+  TUNE.forEach((n, k) => setTimeout(() => sound(n, true), 500 + k * 850));
+  if (!windSaid) { windSaid = true; addLog('', 'The wind comes over the meadow and the stones take it up, one after another. It is very nearly a tune.', 'sys'); }
+}
+function touchStone(i) { me.targetYaw = Math.atan2(world.stones[i].x - me.x, world.stones[i].z - me.z); playEmote('paw'); tellEvent('stone', i); stoneNote(i, true); }
+// A stone sounded by anybody: it is heard, and for whoever is in the ring it is the next note of the tune (or not).
+function stoneNote(i, mine) {
+  const inRing = Math.hypot(me.x - HILL.x, me.z - HILL.z) < 16;
+  if (mine || hearFrom(HILL.x, HILL.z, 90) > 0.05) sound(i, !mine);
+  if (tuneKnown || !inRing) return;
+  windAt = t;      // the wind waits while somebody is trying
+  if (i === TUNE[tuneAt]) tuneAt++; else tuneAt = i === TUNE[0] ? 1 : 0;
+  if (tuneAt < TUNE.length) return;
+  tuneKnown = true; store('ember.tune', true); tuneAt = 0;
+  setTimeout(() => { TUNE.concat([4, 1]).forEach((n, k) => setTimeout(() => sound(n), k * 260)); }, 900);
+  setTimeout(() => {
+    flash('The keeper\'s tune', 'The stones remember it'); cutTo([HILL.x + 13, me.y + 6.5, HILL.z + 4], [LIGHTHOUSE.x, LIGHTHOUSE.y + 6, LIGHTHOUSE.z], 7);
+    addLog('', 'The whole ring sounds at once, and the tune goes out over the island towards the broken tower. Somebody stood here and whistled this every night, so that it would carry.', 'sys');
+    setTimeout(() => wantStamp('stones', [HILL.x + 12, me.y + 4.6, HILL.z + 7], [HILL.x - 1, me.y + 1.6, HILL.z - 1]), 7600);
+  }, 1500);
+}
+// ---------- the echo chamber ----------
+// Three crystals stand round the chamber. Call out beside one and it takes the voice and rings for a while; when
+// all three are ringing at once, the stone door opens. Three animals do it easily; one can, with quick feet.
+const RING_MS = 24000;
+let echoOpen = !!store('ember.echo'), echoHint = 0, markSeen = false, poolSaid = false, scene3 = null;
+if (FAR) world.setEchoOpen(echoOpen);
+function echoCall(x, z) {
+  if (!FAR || echoOpen) return;
+  const E = world.echo, i = E.crystals.findIndex((c) => Math.hypot(c.x - x, c.z - z) < 3.8);
+  if (i < 0) { if (caveNow > 0.5 && Math.hypot(x - CAVE.pts[2][0], z - CAVE.pts[2][1]) < 7.5 && echoHint < 1) { echoHint = 1; addLog('', 'Your voice goes round the chamber and comes back. One of the big crystals hums with it, faintly, and stops.', 'sys'); } return; }
+  world.ringCrystal(i, RING_MS); if (!journal.crystal) setTimeout(() => found('crystal', true), 600); audio.chime(660 + i * 165, 1, 3.2); ripple(E.crystals[i].x, E.crystals[i].z, 5, 0x8fe6f0);
+  const ringing = E.crystals.filter((c) => c.until > Date.now()).length;
+  if (ringing >= 3) {
+    echoOpen = true; store('ember.echo', true); world.setEchoOpen(true);
+    const B = CAVE.pts[2], D = E.door, y = groundHeight(B[0], B[1]);
+    cutTo([B[0] + (B[0] - D.x) * 0.35, y + 2.3, B[1] + (B[1] - D.z) * 0.35], [D.x, y + 2.2, D.z], 6.5);
+    flash('The hill answers', 'A door is opening'); audio.pop(300); setTimeout(() => audio.pop(240), 500);
+    addLog('', 'All three crystals are ringing at once. The sound gathers in the middle of the chamber, and under it something heavy begins to move.', 'sys');
+  } else if (echoHint < 2) { echoHint = 2; addLog('', 'The crystal takes your voice and holds it, ringing. A ring of light comes up on the stone door. There are three rings, and three crystals, and this one will not ring for long.', 'sys'); }
+}
+function lookAtMark() {
+  questEvent('poolmark');
+  markSeen = true;
+  openSheet({ title: 'The mark by the pool', lines: [
+    { text: 'A small boat with one sail, scratched into the rock with something sharp.' },
+    { text: 'Above it, pressed into what was once wet clay: the print of a paw, four toes and a pad. It is not a badger\'s, and not a stag\'s. It is webbed.' },
+    { text: 'Beside it an arrow in chalk, pointing west.' },
+  ], note: 'The clay has been dry a long time. But the storm was longer ago than that.' });
+}
+// A short look elsewhere: the camera leaves the visitor, shows something, and comes back.
+function cutTo(pos, look, secs) { scene3 = { pos: new THREE.Vector3(...pos), look: new THREE.Vector3(...look), from: performance.now(), ms: secs * 1000 }; }
+function updateHermit(dt) {
+  const H = world.hermit, d = Math.hypot(me.x - H.x, me.z - H.z);
+  hermit.x = H.x; hermit.z = H.z; hermit.y = groundHeight(H.x, H.z) - 0.1; hermit.bubbleFade = 1 - smoothstep(9, 13, d);
+  if (hermit.parts.rig.visible) { hermit.parts.rig.visible = false; hermit.shadow.visible = false; }
+  hermit.update(dt, t);
+  if (H.group) { const want = d < 7 ? Math.atan2(-(me.z - H.z), me.x - H.x) : H.home; let dy = want - H.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); H.group.rotation.y += dy * (1 - Math.exp(-dt * 1.6)); H.group.scale.set(1.15, 1.15 * (1 + Math.sin(t * 1.1) * 0.012), 1.15); }
+  if (entered && d < 9 && t > hermitNext) { hermitNext = t + 50 + Math.random() * 40; hermitSays(HERMIT_LINES[Math.floor(Math.random() * HERMIT_LINES.length)]); }
+  // The lantern: carried light, and what it does to the painted stones. It does not leave the hill.
+  if (lamp && Math.hypot(me.x - CAVE.pts[1][0], me.z - CAVE.pts[1][1]) > 85) { lamp = false; addLog('', 'The lantern is not yours to carry off. You turn round, and it is back on its hook at the mouth of the cave.', 'sys'); }
+  if (me.parts && me.parts.lantern) me.parts.lantern.visible = lamp || nights >= 7;
+  lampLight.intensity = lamp ? 7 : nights >= 7 ? 4 : 0; lampLight.distance = lamp ? 17 : 9;
+  for (const pn of world.paintings) if (pn.mat) { const pd = Math.hypot(me.x - pn.x, me.z - pn.z); pn.mat.opacity = lerp(pn.mat.opacity, litNow() ? 0.06 + 0.94 * (1 - smoothstep(4.5, 10, pd)) : 0.035, 1 - Math.exp(-dt * 3)); }
+}
+function wantStamp(id, pos, look) {
+  if (cards[id] || cardWanted || !entered || Date.now() - cardAt < 12000 || !MY_SIGHTS.some((sg) => sg.id === id)) return;
+  cardWanted = { id, pos, look };
+}
+// Called from the frame, just before the picture the visitor sees is drawn: so the postcard's view never shows.
+function takeCard() {
+  const { id, pos, look } = cardWanted; cardWanted = null; cardAt = Date.now();
+  const sight = MY_SIGHTS.find((sg) => sg.id === id), el = renderer.domElement, w = el.width, h = el.height;
+  let img = '';
+  try {
+    cardCam.aspect = w / h; cardCam.position.set(pos[0], pos[1], pos[2]); cardCam.lookAt(look[0], look[1], look[2]); cardCam.updateProjectionMatrix();
+    cutaway.me.value.y = 9999;      // nothing is cut out of a postcard
+    const beam = beacon.visible; beacon.visible = false;      // the guide's column of light is not part of the view
+    renderer.render(scene, cardCam);
+    beacon.visible = beam;
+    const c = document.createElement('canvas'); c.width = 480; c.height = 320;
+    const sw = Math.min(w, h * 1.5), sh = sw / 1.5;
+    c.getContext('2d').drawImage(el, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, 480, 320);
+    img = c.toDataURL('image/jpeg', 0.74);
+  } catch (e) { img = ''; }
+  const company = [...peers.values()].filter((p) => p.fade > 0.5 && Math.hypot(p.av.x - me.x, p.av.z - me.z) < 7).map((p) => p.data.name).slice(0, 4);
+  cards[id] = { at: Date.now(), img, with: company, isle: ISLE };
+  try { localStorage.setItem('ember.cards', JSON.stringify(cards)); } catch (e) { cards[id].img = ''; store('ember.cards', cards); }      // no room for the picture: keep the stamp
+  flash('A stamp for your journal', sight.name); audio.pop(900); if (company.length) setTimeout(() => questEvent('card2'), 6000);
+  showMap();
+  addLog('', `${sight.name}: stamped in your journal${company.length ? `, with ${company.join(' and ')} beside you` : ''}.`, 'sys');
+  showJournalCount();
+}
+function updateSights() {
+  if (!entered) return;
+  const gy = me.y;
+  if (FAR) {
+    const inHollow = Math.abs(me.x - CRAG.x) < 2.4 && me.z > CRAG.z + 0.2 && me.z < CRAG.z + 4;
+    if (inHollow && !hollowSaid) { hollowSaid = true; addLog('', 'Behind the water the rock is hollow, and quiet. The flat stone in here is worn smooth: somebody used to sit on it.', 'sys'); }
+    const inTree = Math.hypot(me.x - HOLLOW_TREE.x, me.z - HOLLOW_TREE.z) < 1.5;
+    if (inTree && !treeSaid) { treeSaid = true; addLog('', 'The old tree is hollow right up into the dark. It smells of dry leaves. There is room in here for a dozen animals out of the rain.', 'sys'); }
+    if (caveNow > 0.5 && !caveSaid) { caveSaid = true; addLog('', 'The air is cool and still, and the day does not come this far in. Small lights hang on the roof. Somewhere ahead, water is dripping.', 'sys'); }
+    const B = CAVE.pts[2], inRound = caveNow > 0.5 && Math.hypot(me.x - B[0], me.z - B[1]) < 5;
+    if (inRound && !roundSaid) { roundSaid = true; addLog('', 'A round chamber, high as a tree. Your steps come back to you from the walls a moment late.', 'sys'); }
+    // Hidden places.
+    const atMoon = Math.hypot(me.x - MOONPOOL.x, me.z - MOONPOOL.z) < 5, atBones = Math.hypot(me.x - BONES.x, me.z - BONES.z) < 9;
+    if (atMoon && !moonSaid) { moonSaid = true; addLog('', skyNow.dark > 0.5 ? 'A ring of pale stones, and inside it a pool that has the whole sky in it. Small lights rise off the water and go out.' : 'A ring of pale stones set on edge round a dark pool. It is only a pool, by day. The stones look as if they are waiting for something.', 'sys'); }
+    if (atBones && !bonesSaid) { bonesSaid = true; addLog('', 'Ribs taller than a stag, bleached white, and a skull as long as a boat. It died here before there was a lighthouse, when the sea came higher. The grass has grown up through it.', 'sys'); }
+    if (!cards.moonpool && atMoon && skyNow.dark > 0.5) wantStamp('moonpool', [MOONPOOL.x + 6.5, gy + 3.2, MOONPOOL.z + 5], [MOONPOOL.x, gy + 0.2, MOONPOOL.z]);
+    else if (!cards.whale && atBones) wantStamp('whale', [BONES.x + 13, gy + 4, BONES.z + 9], [BONES.x, gy + 1.6, BONES.z]);
+    // The Far Beach, its shelter, and the hot spring on the ledge.
+    const inSpring = Math.hypot(me.x - SPRING.x, me.z - SPRING.z) < 2.1, atShelter = Math.hypot(me.x - SHELTER.x, me.z - SHELTER.z) < 4.2;
+    if (inSpring && !springSaid) { springSaid = true; addLog('', 'The water is hot, and smells faintly of struck matches. It comes up out of the rock and has nowhere to be. Neither, for the moment, have you.', 'sys'); }
+    if (atShelter && !shelterSaid) { shelterSaid = true; addLog('', 'Somebody leaned driftwood against a pole to keep the wind off, and hung shells in it to knock together. It faces west, where the sun goes down into open sea.', 'sys'); }
+    if (inSpring) warmth = Math.min(1, warmth + 0.05);      // a soak warms you right through, as the fire does
+    if (!cards.spring && inSpring) wantStamp('spring', [SPRING.x + 5.5, gy + 3, SPRING.z + 4.5], [SPRING.x - 1, gy + 0.4, SPRING.z - 1]);
+    else if (!cards.farbeach && atShelter) wantStamp('farbeach', [SHELTER.x - Math.cos(FARBEACH.a) * 10 + 4, gy + 3.2, SHELTER.z - Math.sin(FARBEACH.a) * 10 + 5], [SHELTER.x + Math.cos(FARBEACH.a) * 14, gy + 0.6, SHELTER.z + Math.sin(FARBEACH.a) * 14]);
+    // The Tide Flats and the islet.
+    updateTide();
+    const onIslet = Math.hypot(me.x - ISLET.x, me.z - ISLET.z) < 7;
+    if (onIslet && !isletSaid) { isletSaid = true; addLog('', 'A hump of rock and turf with the sea all round it, and a ship\'s bell on a post. From here the whole south side of the island can be seen, and none of it can reach you.', 'sys'); }
+    if (!cards.islet && onIslet) wantStamp('islet', [ISLET.x + 9, gy + 3.6, ISLET.z + 7], [ISLET.x - 6, gy + 0.4, ISLET.z - 14]);
+    // Lantern Point: the tower, and the cottage beside it.
+    const inCottage = world.cottage.inside(me.x, me.z);
+    if (inCottage && !cottageSaid) { cottageSaid = true; addLog('', 'One room. A table, a stool, the frame of a bed, and a hearth that has been cold for years. He left the book on the table.', 'sys'); }
+    if (!cards.cottage && inCottage) wantStamp('cottage', [world.cottage.door.x + (world.cottage.door.x - COTTAGE.x) * 2.4, gy + 2.6, world.cottage.door.z + (world.cottage.door.z - COTTAGE.z) * 2.4], [COTTAGE.x, gy + 1.6, COTTAGE.z]);
+    else if (!cards.tower && Math.hypot(me.x - LIGHTHOUSE.x, me.z - LIGHTHOUSE.z) < 11) wantStamp('tower', [LIGHTHOUSE.x + 15, gy + 3, LIGHTHOUSE.z + 9], [LIGHTHOUSE.x, gy + 5.5, LIGHTHOUSE.z]);
+    // The High Meadow: the wind plays the stones for anyone standing among them who has not yet played them back.
+    const inRing = Math.hypot(me.x - HILL.x, me.z - HILL.z) < 13;
+    if (inRing && !tuneKnown && t - windAt > 38) windPlays();
+    // The top of the island, where it gets its name back.
+    const onTop = Math.hypot(me.x - SUMMIT.x, me.z - SUMMIT.z) < 3.2;
+    if (onTop && !summitSaid) {
+      summitSaid = true;
+      addLog('', 'This is the top. The whole island lies under you: the woods, the hidden valley, the broken tower on its point, and sea on every side.', 'sys');
+      if (!named) { named = true; store('ember.named', true); setTimeout(() => { flash('Lantern Rock', 'The island has its name again'); addLog('', 'The Mapmaker calls it the far shore, because he had no other name for it. But there is one cut into an old post on the island you came from: Lantern Rock.', 'sys'); showIsleName(); showMap(); }, 3200); }
+      else { const top = prints['s-summit']; if (top && !top.mine) addLog('', `${fullName(top.name, top.code)} stood here before anyone, and remembered the name cut into the old post across the water. That is why the map says Lantern Rock.`, 'sys'); }
+    }
+    if (!cards.summit && onTop) wantStamp('summit', [SUMMIT.x + 7.5, gy + 3.4, SUMMIT.z - 4], [SUMMIT.x - 10, gy - 4, SUMMIT.z + 6]);
+    const inPool = caveNow > 0.5 && Math.hypot(me.x - CAVE.pool.x, me.z - CAVE.pool.z) < CAVE.pool.r - 0.5;
+    if (inPool && !poolSaid) { poolSaid = true; addLog('', 'A low room, and in it a pool so still it looks like glass. The water has its own light. Nobody has stood here for years.', 'sys'); }
+    if (!cards.deeppool && inPool) wantStamp('deeppool', [CAVE.pool.x - 3.6, gy + 2.1, CAVE.pool.z - 3.8], [CAVE.pool.x + 0.6, gy + 0.9, CAVE.pool.z + 3]);
+    else if (!cards.underhill && inRound) wantStamp('underhill', [B[0] + 5.4, gy + 2.4, B[1] + 2.6], [B[0] - 1, gy + 1.6, B[1] - 0.5]);
+    else if (!cards.hollowtree && inTree) { const a = -HOLLOW_TREE.ry; wantStamp('hollowtree', [HOLLOW_TREE.x + Math.cos(a) * 9, gy + 3.2, HOLLOW_TREE.z + Math.sin(a) * 9 + 3], [HOLLOW_TREE.x, gy + 3.4, HOLLOW_TREE.z]); }
+    else if (!cards.grotto && inHollow) wantStamp('grotto', [CRAG.x + 1.9, CRAG.y + 1.5, CRAG.z + 3.5], [CRAG.x - 0.8, CRAG.y + 1.3, CRAG.z - 8]);
+    else if (!cards.stillwater && Math.hypot(me.x - POOL.x, me.z - POOL.z) < POOL.r + 3) wantStamp('stillwater', [me.x + 7, gy + 4.2, me.z - 9], [CRAG.x, CRAG.y + 4.2, CRAG.z]);
+    return;
+  }
+  if (!cards.hill && Math.hypot(me.x - HILL.x, me.z - HILL.z) < 3.4) wantStamp('hill', [me.x + 6.5, gy + 2.6, me.z + 3.2], [me.x - 9, gy + 0.6, me.z - 2]);
+  else if (!cards.dock && atDockEnd()) wantStamp('dock', [me.x + 6.5, gy + 2.4, me.z + 4.5], [me.x - 12, gy + 1.4, me.z - 3]);
+  else if (!cards.sea && voyageSeated && voyageNow && voyageNow.phase === 'sail' && timeNow() - seenCast > 22000) { const d = Math.hypot(me.x, me.z) || 1; wantStamp('sea', [me.x + me.x / d * 12 + me.z / d * 4, gy + 3.2, me.z + me.z / d * 12 - me.x / d * 4], [me.x, gy + 1.6, me.z]); }
+}
 function pickUpFind() {
   const i = lying.near(me.x, me.z);
   if (i < 0) return;
   const kind = lying.take(i);
   if (!kind) return;
   playEmote('paw'); audio.step('sand', 1);
-  found(kind);
+  found(kind, kind === 'page');
+  if (kind === 'page') readPage(journal.page.n - 1);
 }
-function openJournal() {
+// ---------- things left from before ----------
+function readPage(n) {
+  const [title, text] = PAGES[n % PAGES.length];
+  addLog('', 'An old bottle, the glass gone cloudy. There is a page rolled up inside.', 'sys');
+  openSheet({ title, lines: [{ text }], note: n + 1 < PAGES.length ? 'The paper is years old. Nobody on this island wrote it.' : 'That is the last of them. The first will come round again.' });
+}
+function readPost() {
+  me.targetYaw = Math.atan2(POST.x - me.x, POST.z - me.z);
+  questEvent('post');
+  openSheet({ title: 'The carved post', lines: [
+    { text: 'A timber from some older jetty, grey with salt. A lantern is carved at its head.' },
+    { text: 'Seven pegs are driven into its face, one under another: one for each light that stood along this sea. Six are grey and split.' },
+    { text: 'A name was cut beside every peg. The sea has rubbed out all but one: LANTERN ROCK.' },
+    { text: 'The lowest peg is new wood. Scratched beside it, not long ago, by something with antlers: "one fire".' },
+  ], note: 'Seven lights. All seven dark.' });
+}
+function findLens() {
+  if (journal.lens) return;
+  me.targetYaw = Math.atan2(LENS.x - me.x, LENS.z - me.z);
+  playEmote('paw'); audio.step('sand', 1.2);
+  addLog('', 'You dig it out of the sand: a great disc of ringed glass in a brass frame, heavy as a stone.', 'sys');
+  found('lens'); world.setLens(true);
+}
+function tryChest() {
+  me.targetYaw = Math.atan2(CHEST.x - me.x, CHEST.z - me.z);
+  playEmote('paw'); audio.step('wood', 0.9);
+  if (quests.chest) addLog('', 'Still locked.', 'sys'); else addLog('', 'You try the lid. It does not move.', 'sys');
+  questEvent('chest');
+}
+world.setLens(!!journal.lens);
+// The journal is a traveller's album with three parts: stamps (a postcard for every sight reached), quests, finds.
+let journalTab = 'stamps';
+function openJournal(tab = journalTab) {
+  journalTab = tab;
   const lines = [];
-  let group = '';
-  for (const f of FINDS) {
-    if (f.group !== group) { group = f.group; lines.push({ text: group, kind: 'head' }); }
-    const j = journal[f.id];
-    lines.push(j ? { text: f.name, meta: `${j.n === 1 ? 'found once' : `found ${j.n} times`} · first on ${new Date(j.at).toLocaleDateString([], { day: 'numeric', month: 'short' })}` } : { text: 'Not found yet', meta: f.hint });
+  if (tab === 'quests') {
+    for (const c of MY_CHAPTERS) {
+      if (!chapterOpen(c)) { lines.push({ text: c.side ? c.title : 'A later chapter', kind: 'head' }); lines.push({ text: 'Not yet', meta: 'Finish what came before.' }); continue; }
+      lines.push({ text: `${c.title} · ${c.quests.length - chapterLeft(c)} of ${c.quests.length}`, kind: 'head' });
+      for (const q of c.quests) {
+        if (quests[q.id]) lines.push({ text: q.title, meta: `${q.tells} · ${stampDate(quests[q.id])}` });
+        else lines.push({ text: q.title, meta: q.needsBoat && !boatBuilt() ? 'When the boat is built.' : `${q.from} asks: ${lower(questAsk(q))}.` });
+      }
+    }
+  } else if (tab === 'satchel') {
+    const again = { label: 'Back to the satchel', run: () => openJournal('satchel') };
+    lines.push({ text: 'In your paws', kind: 'head' });
+    lines.push(held ? { text: ['', 'A stick for the fire', 'A fish', 'A length of driftwood'][held] || 'Something' } : { text: 'Nothing', meta: 'Sticks, fish and driftwood are carried one at a time.' });
+    if (FAR || bagCount()) {
+      lines.push({ text: `For the tower · ${bagCount()} of ${BAG_MAX} places filled`, kind: 'head' });
+      for (const l of LIGHT) if (bag[l.kind]) lines.push({ text: `${bag[l.kind]} of ${l.many}`, meta: LIGHT[lightStage()] === l ? 'The Lamplighter is asking for this now.' : 'Not wanted at the tower yet. It will keep.' });
+      if (!bagCount()) lines.push({ text: 'Empty', meta: LIGHT[lightStage()] ? `The tower wants ${LIGHT[lightStage()].many}. ${LIGHT[lightStage()].where}` : 'The tower wants nothing more that a satchel can carry.' });
+    }
+    if (lamp) lines.push({ text: 'The Hermit\'s lantern', meta: 'Lent, not given. It goes back on its hook if you carry it too far.' });
+    if (FAR || logs.length) {
+      lines.push({ text: `The keeper's logbook · ${logs.length} of ${LOGBOOK.length} pages`, kind: 'head' });
+      LOGBOOK.forEach(([title, text], i) => lines.push(logs.includes(i) ? { text: title, meta: 'Press to read', kind: 'pick', run: () => openSheet({ title, lines: [{ text }], extra: again }) } : { text: 'A page is missing here', meta: 'Torn out by the storm. It is somewhere on Lantern Rock, under a pebble.' }));
+    }
+    const read = Math.min(PAGES.length, journal.page ? journal.page.n : 0);
+    if (read) { lines.push({ text: `Pages from old bottles · ${read} of ${PAGES.length}`, kind: 'head' }); PAGES.slice(0, read).forEach(([title, text]) => lines.push({ text: title, meta: 'Press to read', kind: 'pick', run: () => openSheet({ title, lines: [{ text }], extra: again }) })); }
+    if (journal.lens) { lines.push({ text: 'Kept safe elsewhere', kind: 'head' }); lines.push({ text: 'The old lamp lens', meta: 'By the Keeper\'s woodpile on Hush Island. Too heavy for a satchel.' }); }
+  } else if (tab === 'finds') {
+    let group = '';
+    for (const f of myFinds()) {
+      if (f.group !== group) { group = f.group; lines.push({ text: group, kind: 'head' }); }
+      const j = journal[f.id];
+      lines.push(j ? { text: f.name, meta: `${j.n === 1 ? 'found once' : `found ${j.n} times`} · first on ${stampDate(j.at)}` } : { text: 'Not found yet', meta: f.hint });
+    }
   }
-  openSheet({ title: 'Your journal', lines, note: `${journalCount()} of ${FINDS.length} found. Some things only show at night, in rain, or at campfire hour.` });
+  const got = MY_SIGHTS.filter((sg) => cards[sg.id]).length;
+  openSheet({ title: 'Your journal', lines, note: tab === 'stamps' ? (MY_SIGHTS.length ? `${got} of ${MY_SIGHTS.length} sights on ${ISLE_NAME[ISLE]}. Each card is the place as it was when you stood there.` : 'No sights have been marked on this shore yet.')
+    : tab === 'quests' ? `${questsDone()} of ${MY_STORY.length} quests done on ${ISLE_NAME[ISLE]}.` : tab === 'satchel' ? 'What you carry goes with you from island to island. Press a page to read it again.' : `${journalCount()} of ${myFinds().length} found. Some things only show at night, in rain, or at campfire hour.` });
+  sheet.dataset.kind = 'journal';
+  const body = $('sheet-body');
+  // Three plain words across the top to turn between the parts.
+  const tabs = document.createElement('div'); tabs.className = 'tabs';
+  for (const [k, label] of [['stamps', 'Stamps'], ['quests', 'Quests'], ['finds', 'Finds'], ['satchel', 'Satchel']]) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (k === tab) b.className = 'here';
+    b.onclick = () => openJournal(k); tabs.appendChild(b);
+  }
+  body.insertBefore(tabs, body.firstChild);
+  if (tab !== 'stamps') return;
+  const album = document.createElement('div'); album.className = 'album';
+  MY_SIGHTS.forEach((sg, i) => {
+    const c = cards[sg.id], fig = document.createElement('figure');
+    fig.style.setProperty('--tilt', `${[-1.4, 1.1, 0.8, -1][i % 4]}deg`);
+    if (c) {
+      const frame = document.createElement('div'); frame.className = 'photo';
+      if (c.img) { const im = document.createElement('img'); im.src = c.img; im.alt = `${sg.name}, as it was on ${stampDate(c.at)}`; frame.appendChild(im); }
+      frame.insertAdjacentHTML('beforeend', postmark(c.isle || ISLE, sg.name, c.at, i));
+      const cap = document.createElement('figcaption'); cap.textContent = `${sg.name} · ${stampDate(c.at)}${c.with && c.with.length ? ` · with ${c.with.join(', ')}` : ''}`;
+      fig.append(frame, cap);
+    } else {
+      fig.className = 'blank';
+      const frame = document.createElement('div'); frame.className = 'photo'; frame.textContent = 'Not yet';
+      const cap = document.createElement('figcaption'); cap.textContent = sg.hint;
+      fig.append(frame, cap);
+    }
+    album.appendChild(fig);
+  });
+  body.appendChild(album);
 }
 $('journal-btn').addEventListener('click', () => { openJournal(); });
+window.__emberCards = () => cards;
 showJournalCount();
 let whaleCheck = 0;
 function updateFinds() {
@@ -2240,31 +2779,285 @@ function updateFinds() {
 // ---------- the far shore: saying where you are ----------
 // Walking into one of the island's areas, its name comes up once.
 let areaNow = '', areaCheck = 0;
-if (FAR) { document.body.classList.add('far'); document.title = 'Lantern Rock: the far shore of Hush Island'; const h = $('title'); if (h) h.textContent = 'The far shore'; const b = document.querySelector('.brand b'); if (b) b.textContent = 'The far shore'; }
+function showIsleName() { const nm = store('ember.named') ? 'Lantern Rock' : 'The far shore'; document.title = `${nm}, west of Hush Island`; const h = $('title'); if (h) h.textContent = nm; const b = document.querySelector('.brand b'); if (b) b.textContent = nm; }
+if (FAR) { document.body.classList.add('far'); showIsleName(); }
 function updateArea() {
   if (!FAR || !entered || t - areaCheck < 0.7) return;
-  areaCheck = t;
+  areaCheck = t; updateSights();
   const a = areaAt(me.x, me.z), id = a ? a.id : '';
-  if (id && id !== areaNow) { flash(a.name); addLog('', `${a.name}.`, 'sys'); }
+  if (id && id !== areaNow) { flash(a.name); addLog('', id === 'flats' ? `${a.name}. ${tideWords()}` : `${a.name}.`, 'sys'); }
   if (id) areaNow = id;
+  if (id && !walked.has(id)) { walked.add(id); store('ember.walked', [...walked]); showMap(); }
+  claimFirsts(); smallThings();
+}
+
+// ---------- the keeper's logbook, and the small things of Lantern Rock ----------
+for (const i of logs) world.setLogPage(i, false);
+function pickPage(i) {
+  const pg = world.logPages[i];
+  if (!pg || logs.includes(i)) return;
+  me.targetYaw = Math.atan2(pg.x - me.x, pg.z - me.z); playEmote('paw'); audio.step('sand', 0.8);
+  logs.push(i); store('ember.logs', logs); world.setLogPage(i, false);
+  addLog('', 'A page of stiff paper under a pebble, torn down one edge. The ink has held. It goes into your satchel.', 'sys');
+  found('logpage', true);
+  const [title, text] = LOGBOOK[i];
+  setTimeout(() => openSheet({ title, lines: [{ text }], note: logs.length >= LOGBOOK.length ? 'That is all six. The whole of it is in your satchel.' : `${logs.length} of ${LOGBOOK.length} pages found. They keep in your satchel.` }), 500);
+}
+let stillAt = 0, poolLooks = 0;
+function smallThings() {
+  const dark = skyNow.dark > 0.5, once = (id, line) => { if (journal[id]) return; if (line) addLog('', line, 'sys'); found(id, true); };
+  if (me.speed > 0.15 || me.mode !== 'stand') stillAt = t;
+  if (areaNow === 'woods' && dark && caveNow < 0.5 && t - stillAt > 6 && Math.hypot(me.x - WOODS_AT.x, me.z - WOODS_AT.z) < 50) once('firefly', 'You hold still. One of the fireflies drifts down, thinks about it, and settles on the end of your nose.');
+  if (dark && Math.hypot(me.x - POOL.x, me.z - POOL.z) < 15) once('glowcap', 'Round the pool the mushrooms have begun to shine, blue-green, like something lit from underneath.');
+  if (Math.hypot(me.x - SPRING.x, me.z - SPRING.z) < 2.1 && warmth >= 0.99) once('warmwater', 'The heat has gone right through you. You could carry it a long way.');
+  if (dark && rainNow < 0.25 && Math.hypot(me.x - MOONPOOL.x, me.z - MOONPOOL.z) < 4) once('moonwater', 'The stars are in the water, every one of them, and none of them moves.');
+}
+function lookInPool() {
+  addLog('', POOL_LINES[poolLine++ % POOL_LINES.length], 'sys');
+  if (!journal.starfish && (++poolLooks >= 3 || Math.random() < 0.35)) setTimeout(() => { addLog('', 'Under a ledge of weed there is a starfish, orange, the size of your paw, doing nothing at all.', 'sys'); found('starfish', true); }, 1400);
+}
+
+// ---------- together ----------
+// What one visitor does on Lantern Rock, the others nearby share in. A lantern lights whoever keeps close to its
+// carrier and leaves a trail of sparks behind for whoever does not. The bell and the standing stones are heard by
+// everybody, and a stone sounded by one visitor counts towards the tune for all who are in the ring.
+let myEvent = null;
+function tellEvent(kind, n) { myEvent = [kind, n, timeNow()]; pushPresence(true); }
+const lampPeer = (r) => [...peers.values()].find((q) => q.fade > 0.5 && q.data.lamp && Math.hypot(q.av.x - me.x, q.av.z - me.z) < r) || null;
+const litNow = () => lamp || !!lampPeer(7);
+function heardEvent(d) {
+  if (!FAR) return;
+  if (d.ev.kind === 'bell') {
+    const B = world.flats.bell, v = Math.max(0.12, hearFrom(B.x, B.z, 260)); world.ringBell(); audio.bell(v); setTimeout(() => audio.bell(v * 0.8), 620);
+    if (v < 0.9) addLog('', `From the flats, a bell: two strokes, clear over the water. ${d.name} is out on the islet.`, 'sys');
+    questEvent('heardbell');
+  } else if (d.ev.kind === 'stone' && world.stones[d.ev.n]) { stoneNote(d.ev.n, false); if (Math.hypot(me.x - HILL.x, me.z - HILL.z) < 16) questEvent('heardstone'); }
+}
+const peerLamp = new THREE.PointLight(0xffc27a, 7, 15, 1.8);      // only in the scene while somebody else's lantern is near: a light costs every surface something
+const TRAIL_N = 72, trail = [], trailPos = new Float32Array(TRAIL_N * 3), trailLast = new Map();
+const trailPts = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(trailPos, 3)), new THREE.PointsMaterial({ size: 0.6, map: makeGlowTexture('rgba(255,255,255,1)'), color: 0xffcf8a, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+trailPts.frustumCulled = false; trailPts.visible = false; if (FAR) scene.add(trailPts);
+let sharedSaid = false;
+function updateTogether() {
+  const carriers = [];
+  if (lamp) carriers.push({ id: 'me', x: me.x, y: me.y, z: me.z });
+  for (const [id, q] of peers) if (q.fade > 0.5 && q.data.lamp) carriers.push({ id, x: q.av.x, y: q.av.y, z: q.av.z, peer: true });
+  const now = performance.now();
+  for (const c of carriers) { const l = trailLast.get(c.id); if (!l || Math.hypot(c.x - l.x, c.z - l.z) > 1.7) { trailLast.set(c.id, { x: c.x, z: c.z }); trail.push({ x: c.x, y: c.y + 0.35, z: c.z, at: now }); } }
+  while (trail.length && (now - trail[0].at > 45000 || trail.length > TRAIL_N)) trail.shift();
+  trailPts.visible = trail.length > 0;
+  if (trailPts.visible) { for (let i = 0; i < TRAIL_N; i++) { const q = trail[i]; trailPos[i * 3] = q ? q.x : 0; trailPos[i * 3 + 1] = q ? q.y + Math.sin(now / 700 + i) * 0.06 : -999; trailPos[i * 3 + 2] = q ? q.z : 0; } trailPts.geometry.attributes.position.needsUpdate = true; }
+  const near = carriers.filter((c) => c.peer).sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z))[0];
+  if (near) peerLamp.position.set(near.x, near.y + 0.9, near.z);
+  const want = !!near && Math.hypot(near.x - me.x, near.z - me.z) < 40; if (want !== !!peerLamp.parent) { if (want) scene.add(peerLamp); else scene.remove(peerLamp); }
+  // Sharing a light, either way round.
+  if ((!lamp && lampPeer(7)) || (lamp && company(7))) { questEvent('sharedlight'); if (!sharedSaid) { sharedSaid = true; addLog('', lamp ? 'Your lantern is lighting the way for more than you.' : 'You are walking in somebody else\'s light. Keep close and it is as good as your own.', 'sys'); } }
+}
+
+// ---------- what pushes back ----------
+// Nothing on Lantern Rock will fight a visitor, but some of it will not be hurried or gone at alone. The dark under
+// the hill turns back anyone with no light and no company. Some nights fog comes in off the sea and the island
+// shrinks to what is in reach. The hares and the seals keep their distance from anything in a hurry.
+const shy = FAR ? buildShy(scene, world.flats.pools) : null;
+let crabSaid = 0, plopAt = 8;
+let fogForce = null, fogSaid = false, darkSecs = 0, darkSaid = false, woodsSaid = false, caveIn = null, boltSaid = 0, slipSaid = 0;
+const nightRoll = (n) => { const s = Math.sin(n * 91.7 + 13.1) * 43758.5453; return s - Math.floor(s); };
+// One night in three, the same night for everybody on the island.
+const fogNight = () => (fogForce !== null ? fogForce : nightRoll(Math.floor((timeNow() + DAY_MS / 2) / DAY_MS)) < 0.34);
+const company = (r = 8) => [...peers.values()].some((q) => q.fade > 0.5 && Math.hypot(q.av.x - me.x, q.av.z - me.z) < r);
+if (shy) {
+  shy.events.onBolt = () => { if (Date.now() - boltSaid > 60000) { boltSaid = Date.now(); addLog('', 'A hare. It is gone before you have finished seeing it. They do not care for being walked at.', 'sys'); } };
+  shy.events.onSlip = () => { audio.splash(0.9); setTimeout(() => audio.splash(0.6), 350); if (Date.now() - slipSaid > 60000) { slipSaid = Date.now(); addLog('', 'The seals look at you, and then they are in the water without seeming to have moved. That was too close.', 'sys'); } };
+  shy.events.onHare = () => { addLog('', 'One of the hares has come over, in its own time, and sat down an arm\'s length off. It looks at you sideways. Do not move.', 'sys'); if (!journal.hare) found('hare', true); };
+  shy.events.onCrab = () => { if (Date.now() - crabSaid > 90000) { crabSaid = Date.now(); addLog('', 'A crab the colour of a brick holds up both claws at you, thinks better of it, and leaves sideways at speed.', 'sys'); } };
+  shy.events.onSealBark = (sl) => { audio.bark(Math.max(0.25, hearFrom(sl.hx, sl.hz, 45))); addLog('', 'One of the seals lifts its head off the rock and barks back at you.', 'sys'); if (!journal.seal) found('seal', true); };
+}
+let pushAt = 0;
+function updatePushback() {
+  const nowMs = performance.now(), dt = Math.min(0.25, (nowMs - (pushAt || nowMs)) / 1000); pushAt = nowMs;      // by the clock on the wall, so a slow machine waits no longer than a fast one
+  updateTogether();
+  const dark = skyNow.dark, lit = litNow() || company(), fog = fogNight() ? smoothstep(0.45, 0.8, dark) : 0;
+  // Fog nights, and the dark under the trees: a lantern or company pushes both back.
+  const woods = areaNow === 'woods' && Math.hypot(me.x - WOODS_AT.x, me.z - WOODS_AT.z) < 50 ? smoothstep(0.55, 0.85, dark) * 0.55 : 0;
+  world.setMurk(caveNow > 0.5 ? 0 : Math.max(fog, woods) * (lit ? 0.45 : 1));
+  if (fog > 0.6 && !fogSaid) { fogSaid = true; flash('Fog', 'It has come in off the sea'); addLog('', 'Fog, coming in off the sea faster than you can walk. The tower is gone, and the stars. Keep to the paths, or keep together: a lantern or a friend pushes it back a little.', 'sys'); if (!journal.fog) setTimeout(() => found('fog', true), 2500); }
+  if (fog < 0.05) fogSaid = false;
+  if (woods > 0.3 && !woodsSaid && !lit) { woodsSaid = true; addLog('', 'It is very dark under the trees. The fireflies know where they are going, at least.', 'sys'); }
+  // Under the hill with no light and nobody beside you: so far and no further.
+  const deep = caveNow > 0.5 && Math.hypot(me.x - CAVE.pts[0][0], me.z - CAVE.pts[0][1]) > 20 && Math.hypot(me.x - CAVE.pts[3][0], me.z - CAVE.pts[3][1]) > 14;
+  if (deep && !lit) {
+    darkSecs += dt;
+    if (darkSecs > 14 && !darkSaid) { darkSaid = true; addLog('', 'You cannot see your own paws. The wall you were following is not where you left it. This wants a light, or somebody to go with.', 'sys'); }
+    if (darkSecs > 30) {
+      darkSecs = 0; darkSaid = false; const A = CAVE.pts[0], B = CAVE.pts[1], l = Math.hypot(A[0] - B[0], A[1] - B[1]);
+      me.x = A[0] + (A[0] - B[0]) / l * 3; me.z = A[1] + (A[1] - B[1]) / l * 3; moveTarget = null; world.hideMarker(); caveIn = null;
+      flash('The dark', 'It turned you round'); audio.pop(260);
+      addLog('', 'You go on by feel, and the passage bends, and bends again, and there is daylight ahead: the mouth you came in by. The hill has walked you out. The Hermit lends a lantern to anyone who asks.', 'sys');
+    }
+  } else { darkSecs = Math.max(0, darkSecs - dt * 2); if (darkSecs === 0) darkSaid = false; }
+  // In at one mouth and out at the other.
+  if (caveNow > 0.5 && !caveIn) caveIn = Math.hypot(me.x - CAVE.pts[0][0], me.z - CAVE.pts[0][1]) < Math.hypot(me.x - CAVE.pts[3][0], me.z - CAVE.pts[3][1]) ? 'a' : 'b';
+  if (caveNow < 0.05 && caveIn) { const out = Math.hypot(me.x - CAVE.pts[0][0], me.z - CAVE.pts[0][1]) < Math.hypot(me.x - CAVE.pts[3][0], me.z - CAVE.pts[3][1]) ? 'a' : 'b'; if (out !== caveIn) questEvent('through'); caveIn = null; }
+  if (shy) {
+    const who = [{ x: me.x, z: me.z, speed: me.speed, resting: me.mode !== 'stand' }];
+    for (const q of peers.values()) if (q.fade > 0.5) who.push({ x: q.av.x, z: q.av.z, speed: q.av.speed, resting: false });
+    if (Math.hypot(me.x - HILL.x, me.z - HILL.z) < 70 || Math.hypot(me.x - ISLET.x, me.z - ISLET.z) < 70 || Math.hypot(me.x - FLATS.x, me.z - FLATS.z) < 80) shy.update(dt, t, who, dark);
+    // In the pool at Stillwater something rises now and then.
+    plopAt -= dt; if (plopAt < 0) { plopAt = 5 + Math.random() * 11; const pd = Math.hypot(me.x - POOL.x, me.z - POOL.z); if (pd < 34 && caveNow < 0.5) { const a = Math.random() * 6.28, r = Math.random() * POOL.r * 0.6; world.ripple(POOL.x + Math.cos(a) * r, POOL.z + Math.sin(a) * r); audio.splash(0.35 * clamp(1 - pd / 34, 0, 1)); } }
+  }
+}
+
+// ---------- mending the light ----------
+// The tower is put back by everyone, in four parts, each needing something that has to be carried there: stone for
+// the wall, timber for the gallery and frame, crystal for the glass, lamp-seed for the oil. A satchel holds six
+// pieces. What has been brought is kept by the island, so the tower stands the same for every visitor.
+const LIGHT = [
+  { kind: 'stone', need: 60, one: 'a stone', many: 'stone', take: 'Take a stone from the heap', done: 'The wall stands', sub: 'The tower is whole to the gallery', says: 'Stone first. The wall has to stand before anything can sit on it.', where: 'There are heaps of it on the point, and more under the crag.' },
+  { kind: 'timber', need: 40, one: 'a timber', many: 'timber', take: 'Take a length of timber', done: 'The gallery is up', sub: 'There is a rail to lean on, and a way to the top', says: 'Timber now, for the gallery and the frame of the lamp room.', where: 'There is ship\'s timber stacked on the Far Beach. And the wreck, when the tide is off her.' },
+  { kind: 'glass', need: 30, one: 'a shard of crystal', many: 'crystal', take: 'Work a shard of crystal loose', done: 'The lamp room is glazed', sub: 'Glass all round, and a roof over it', says: 'Glass. There is none on the island but what grows in the hill.', where: 'The badger\'s round room is full of crystal. Ask him nicely.' },
+  { kind: 'oil', need: 30, one: 'a head of lamp-seed', many: 'lamp-seed', take: 'Pick a head of lamp-seed', done: 'The lamp is filled', sub: 'Everything is ready but the lens', says: 'Oil. He pressed it from lamp-seed. I never learned how, so I shall learn.', where: 'It has gone wild in the valley, by the old beds.' },
+];
+const BAG_MAX = 6;
+const bag = (() => { const b = store('ember.bag'); return b && typeof b === 'object' ? b : {}; })();
+const bagCount = () => LIGHT.reduce((n, l) => n + (bag[l.kind] || 0), 0);
+let lightTotals = { stone: 0, timber: 0, glass: 0, oil: 0 }, lightState = 'loading', lightCrew = [], myLight = Number(store('ember.myLight')) || 0, perch = false, takeAt = 0;
+const lightStage = () => { let k = 0; while (k < LIGHT.length && (lightTotals[LIGHT[k].kind] || 0) >= LIGHT[k].need) k++; return k; };
+if (FAR) saved.watchLight((totals, state, crew) => {
+  const was = lightState === 'loading' ? -1 : lightStage();
+  lightTotals = { stone: 0, timber: 0, glass: 0, oil: 0, ...totals }; lightState = state; if (crew) lightCrew = crew;
+  const now = lightStage();
+  world.setLightStage(now);
+  if (was >= 0 && now > was && entered) stageDone(now - 1);
+});
+function stageDone(k) {
+  const L = LIGHT[k], T = LIGHTHOUSE;
+  flash(L.done, L.sub); audio.pop(620); setTimeout(() => audio.pop(820), 350);
+  addLog('', `${L.done}. ${L.sub}. Everyone who carried ${L.many} to the point did this.`, 'sys');
+  if (!perch && caveNow < 0.5) cutTo([T.x + 26, T.y + 13, T.z + 20], [T.x, T.y + 13, T.z], 7);
+  if (k + 1 < LIGHT.length) setTimeout(() => addLog('Lamplighter', LIGHT[k + 1].says + ' ' + LIGHT[k + 1].where, 'sys'), 7500);
+  else setTimeout(() => addLog('Lamplighter', 'It wants only a lens now. And there is no lens on this island. I have looked.', 'sys'), 7500);
+}
+function takeFrom(sc) {
+  const L = LIGHT.find((l) => l.kind === sc.kind);
+  me.targetYaw = Math.atan2(sc.x - me.x, sc.z - me.z);
+  if (bagCount() >= BAG_MAX) { addLog('', `Your satchel is full: ${BAG_MAX} pieces is all it holds. The tower is on the western point.`, 'sys'); return; }
+  if (Date.now() - takeAt < 1400) return;
+  takeAt = Date.now(); playEmote('paw'); audio.step(sc.kind === 'stone' ? 'sand' : 'wood', 1);
+  // Two can shift what one cannot: with somebody beside you, each go fills two places in the satchel.
+  const mate = [...peers.values()].some((q) => q.fade > 0.5 && Math.hypot(q.av.x - me.x, q.av.z - me.z) < 7);
+  const n = Math.min(mate ? 2 : 1, BAG_MAX - bagCount()); if (mate) setTimeout(() => questEvent('took2'), 5000);
+  bag[sc.kind] = (bag[sc.kind] || 0) + n; store('ember.bag', bag); questEvent('took');
+  addLog('', `${n === 2 ? `With help you get two: ${L.many}` : L.one.charAt(0).toUpperCase() + L.one.slice(1)}, into the satchel. ${bagCount()} of ${BAG_MAX}.${lightStage() < LIGHT.length && LIGHT[lightStage()].kind !== sc.kind && bagCount() <= 2 ? ` The Lamplighter is not ready for ${L.many} yet, but it will keep.` : ''}`, 'sys');
+}
+function giveToTower() {
+  const k = lightStage(), L = LIGHT[k];
+  me.targetYaw = Math.atan2(LIGHTHOUSE.x - me.x, LIGHTHOUSE.z - me.z);
+  if (!L) { heronSays('It wants only a lens now. Keep what you have. I have nowhere to put it.'); return; }
+  const n = bag[L.kind] || 0;
+  if (!n) { heronSays(`${L.says} ${L.where}`); return; }
+  bag[L.kind] = 0; store('ember.bag', bag); myLight += n; store('ember.myLight', myLight);
+  playEmote('paw'); audio.step('wood', 1.3);
+  const left = Math.max(0, L.need - (lightTotals[L.kind] || 0) - n);
+  addLog('', `You set down ${n === 1 ? L.one : `${n} of ${L.many}`} at the foot of the tower. ${left ? `It wants ${left} more.` : 'That is the last of it.'}`, 'sys');
+  saved.addLight(L.kind, n, me.name, myCode).then((r) => { if (r === 'local') { lightTotals[L.kind] = (lightTotals[L.kind] || 0) + n; const st = lightStage(); world.setLightStage(st); if (st > k) stageDone(k); } });
+  questEvent('gave');
+  setTimeout(() => heronSays(left ? ['That is the way. I lift, you carry.', 'Good. She is taller than she was this morning.', 'Set it there. I know where each one goes.', 'I have waited years for somebody with legs.'][Math.floor(Math.random() * 4)] : 'That is enough. Stand back and let me work.'), 900);
+}
+// Up the tower: once the gallery is there to stand on. Turning the view walks you round it.
+function climbTower() {
+  if (lightStage() < 2) { addLog('', 'The stair inside goes up into open sky and stops. There is nothing to stand on at the top, yet.', 'sys'); return; }
+  perch = true; world.setGalleryView(true); moveTarget = null; world.hideMarker(); questEvent('climb'); audio.step('wood', 1);
+  addLog('', 'Round and round, a hundred and four steps, and out through a low door into the wind. The whole island is under you. Turn to walk the gallery.', 'sys');
+}
+function climbDown() { perch = false; world.setGalleryView(false); me.x = world.lighthouse.door.x + 1.2; me.z = world.lighthouse.door.z; audio.step('wood', 1); addLog('', 'Down again, and out at the foot of the tower.', 'sys'); }
+
+// ---------- the Mapmaker's record ----------
+// The island's map is kept by everyone who walks it. The first visitor into each part of the island, and the first
+// to each sight, has their name written beside it for good; the board at the Landing shows what anyone has found,
+// with your own ground in dark ink. The island gets its name back the first time anybody stands on its top.
+let prints = {}, roll = [], firstsState = 'loading', claimAt = 0, toldFirst = '';
+const walked = new Set((() => { const w = store('ember.walked'); return Array.isArray(w) ? w : []; })());
+walked.add('landing');
+const claimTried = new Set();
+const WHERE = { woods: 'the trees to the west of here', flats: 'the mud to the south', hollow: 'the hill in the north', valley: 'the middle of the island, behind the ridges', meadow: 'the high ground in the west', point: 'the far western point', farbeach: 'the coast in the north-west' };
+const placeName = (key) => ((key[0] === 'a' ? AREAS : MY_SIGHTS).find((q) => q.id === key.slice(2)) || { name: 'Somewhere' }).name;
+const farCards = () => new Set(MY_SIGHTS.filter((sg) => cards[sg.id]).map((sg) => sg.id));
+function showMap() { if (!FAR) return; const top = prints['s-summit']; world.setMap({ firsts: prints, walked, cards: farCards(), named, namer: top ? top.name : '' }); }
+if (FAR) saved.watchFirsts((f, r, state) => {
+  const before = prints, was = firstsState;
+  prints = f; roll = r; firstsState = state;
+  if (was !== 'loading' && entered) for (const k in f) if (!before[k] && !f[k].mine) addLog('', `${placeName(k)}: ${fullName(f[k].name, f[k].code)} is the first to stand there. It is on the Mapmaker's map now.`, 'sys');
+  const top = f['s-summit'];
+  if (top && !named) {
+    named = true; store('ember.named', true); showIsleName();
+    if (was !== 'loading' && entered && !top.mine) { flash('Lantern Rock', `${top.name} stood on the top, and the island has its name again`); addLog('', `${fullName(top.name, top.code)} has climbed to the top of the island and remembered the name cut into the old post across the water: Lantern Rock.`, 'sys'); }
+  }
+  showMap();
+});
+// One claim at a time, a few seconds apart: whatever you have walked or stamped that has no name beside it yet.
+function claimFirsts() {
+  if (firstsState === 'loading' || Date.now() - claimAt < 5000) return;
+  const keys = [...[...walked].filter((id) => id !== 'landing').map((id) => 'a-' + id), ...[...farCards()].map((id) => 's-' + id)];
+  const k = keys.find((q) => !prints[q] && !claimTried.has(q));
+  if (k) {
+    claimTried.add(k); claimAt = Date.now();
+    saved.claimFirst(k, me.name, myCode).then((r) => {
+      if (r !== 'ok' && r !== 'local') return;
+      prints = { ...prints, [k]: { name: me.name, code: /^\d{4}$/.test(String(myCode)) ? String(myCode) : '', at: Date.now(), mine: true } };
+      toldFirst = k; showMap();
+      setTimeout(() => { flash('First footprint', placeName(k)); audio.pop(700); addLog('', `${placeName(k)}: nobody had stood here before you. The Mapmaker will write your name beside it on the map.`, 'sys'); }, 2800);
+    });
+    return;
+  }
+  if (!store('ember.whole') && walked.size >= AREAS.length && farCards().size >= MY_SIGHTS.length) {
+    store('ember.whole', true); saved.signRoll(me.name, myCode);
+    flash('The whole island', 'Your name is on the Mapmaker\'s roll'); addLog('', 'You have walked every part of the island and found every sight on it. The Mapmaker keeps a roll of those who have; your name is on it now.', 'sys');
+  }
+}
+function mapmakerHello() {
+  if (toldFirst) { const k = toldFirst; toldFirst = ''; return `${placeName(k)}. You were the first there. I have put your name beside it.`; }
+  const blank = AREAS.filter((a) => a.id !== 'landing' && !prints['a-' + a.id] && !walked.has(a.id));
+  const got = farCards().size, r = Math.random();
+  if (walked.size >= AREAS.length && got >= MY_SIGHTS.length) return 'You have walked all of it. Your name is on my roll, and I am glad of it.';
+  if (blank.length && r < 0.45) return `Nobody has walked ${WHERE[blank[Math.floor(Math.random() * blank.length)].id]} yet. Whoever gets there first, I will write their name on the map.`;
+  if (r < 0.8) return `By my count you have walked ${walked.size} of the island's ${AREAS.length} parts and found ${got} of its ${MY_SIGHTS.length} sights. The map has the rest.`;
+  return KEEPER_HELLO[Math.floor(Math.random() * KEEPER_HELLO.length)];
+}
+function lookAtMap() {
+  questEvent('map');
+  me.targetYaw = Math.atan2(MAP_BOARD.x - me.x, MAP_BOARD.z - me.z);
+  const by = (f, word) => (f ? `${word} by ${f.mine ? 'you' : fullName(f.name, f.code)}${f.at ? ', ' + stampDate(f.at) : ''}` : '');
+  const lines = [{ text: 'The parts of the island', kind: 'head' }];
+  for (const a of AREAS) {
+    const f = prints['a-' + a.id], mine = walked.has(a.id);
+    if (a.id === 'landing') lines.push({ text: 'The Landing.', meta: 'drawn by the Mapmaker' });
+    else if (f || mine) lines.push({ text: `${a.name}.${mine ? '' : ' You have not been there.'}`, meta: by(f, 'first walked') });
+    else lines.push({ text: `Blank paper: ${WHERE[a.id]}.`, meta: 'nobody has walked it' });
+  }
+  const marked = MY_SIGHTS.filter((sg) => prints['s-' + sg.id] || cards[sg.id]);
+  lines.push({ text: `Sights marked with a cross: ${marked.length} of ${MY_SIGHTS.length}`, kind: 'head' });
+  for (const sg of marked) lines.push({ text: `${sg.name}.${cards[sg.id] ? '' : ' You have not found it.'}`, meta: by(prints['s-' + sg.id], 'first found') });
+  if (!marked.length) lines.push({ text: 'None yet. The Mapmaker marks a sight when somebody comes back having seen it.' });
+  if (roll.length) { lines.push({ text: 'Those who have walked all of it', kind: 'head' }); for (const w of roll.slice(0, 40)) lines.push({ text: fullName(w.name, w.code), meta: w.at ? stampDate(w.at) : '' }); }
+  openSheet({ title: named ? 'The map of Lantern Rock' : 'The map of the far shore', lines, note: `You have walked ${walked.size} of ${AREAS.length} parts of the island and found ${farCards().size} of its ${MY_SIGHTS.length} sights.${firstsState === 'off' ? ' The record cannot be reached just now; this is what you have found yourself.' : ''}` });
 }
 
 // ---------- campfire hour ----------
-// Twice a day (see campfire.js) the island has a set hour for gathering. The fire roars, the keeper has a few
+// Twice a day (see campfire.js) the island has a set hour for gathering. The fire roars, the Keeper has a few
 // things to say, and whoever sits in for a while carries a small flame by their name afterwards.
 let campShift = 0, campWas = null, campCheck = 0, campSecs = 0, campSaid = -1, campWarned = 0;
 const campNow = () => campfireAt(timeNow() + campShift);
 const KEEPER_AT_CAMPFIRE = [
   'Campfire hour. Pull in close, there is room for everyone.',
-  'Say where you have come from tonight. The fire likes to know.',
+  'I build it high at this hour so it can be seen from far off.',
+  'Say where you have come from. The fire likes to know, and so do I.',
   'Somebody start a dance. I will mind the fire.',
-  'The boat is at the water, if a few of you want to take her round.',
+  'There were lights all along this sea once. You could cross it at night.',
   'A howl goes further when it is not alone.',
   'Leave a mark on the wall before you go, so the next ones know you were here.',
-  'Good company. Stay as long as you like.',
-  'Not long now. The fire will burn down, and so will I.',
+  'Good company. I had forgotten what it was like.',
   'One more log, and then the hour is done.',
-  'Same time tomorrow. I will keep your place.',
+  'Same time tomorrow. I will keep your place, and the fire.',
 ];
 function campLine() {
   const c = campNow(), now = timeNow() + campShift;
@@ -2290,16 +3083,18 @@ function updateCampfire(dt) {
   }
   if (!c.on && c.next - now < 600000 && campWarned !== c.next) { campWarned = c.next; addLog('', `Campfire hour starts in ${inWords(c.next - now)}. Others may be on their way.`, 'sys'); }
   if (c.on) {
-    // The keeper speaks every six minutes of the hour, the same words for everyone.
+    // The Keeper speaks every six minutes of the hour, the same words for everyone.
     const n = Math.min(KEEPER_AT_CAMPFIRE.length - 1, Math.floor((now - c.id) / 360000));
     if (n !== campSaid) { const firstSight = campSaid === -1 && now - c.id > 20000; campSaid = n; if (!firstSight || n === 0) keeperSays(KEEPER_AT_CAMPFIRE[n]); else keeperSays('Campfire hour. Pull in close, there is room for everyone.'); }
     // Three quarters of a minute by the fire and you were there.
     if (campSecs >= 45 && fires.last !== c.id) {
       fires = { count: fires.count + 1, last: c.id }; store('ember.fires', fires);
-      flash('You were at the campfire', fires.count === 1 ? 'A small flame by your name says so' : `${fires.count} campfire hours`);
-      addLog('', fires.count === 1 ? 'You were at the campfire. A small flame by your name says so.' : `That is ${fires.count} campfire hours you have been at.`, 'sys');
+      flash('You kept the fire with him', fires.count === 1 ? 'A small flame by your name says so' : `${fires.count} campfire hours`);
+      addLog('', fires.count === 1 ? 'You kept the campfire hour with the Keeper. A small flame by your name says so.' : `That is ${fires.count} campfire hours you have been at.`, 'sys');
       audio.pop(880); me.setName(me.name, mySub()); pushPresence(true);
       net.note('campfire'); net.note('cf' + String(c.hour).padStart(2, '0'));
+      setTimeout(() => questEvent('campfire'), 6000);
+      setTimeout(() => wantStamp('campfire', [8.5, groundHeight(0, 0) + 3.4, 7.5], [0, groundHeight(0, 0) + 1.1, 0]), 2500);
     }
   }
 }
@@ -2314,14 +3109,15 @@ function keeperSays(line) {
 
 // Drop detail if the device cannot keep up: first the shadows, then the resolution.
 let quality = 2, qualityLocked = false, slowFor = 0, fpsAvg = 60;
+if (touch && FAR) { quality = 1; world.setShadows(false); world.setReach(0.7, 0.6); }      // Lantern Rock is a great deal bigger than Hush Island: a phone starts it with less drawn
 function watchQuality(dtRaw) {
   if (qualityLocked || !entered || t < 6 || document.hidden) return;
   fpsAvg = lerp(fpsAvg, 1 / Math.max(dtRaw, 0.001), 0.05);
   slowFor = fpsAvg < 30 ? slowFor + dtRaw : 0;
   if (slowFor > 2.5 && quality > 0) {
     quality--; slowFor = 0; fpsAvg = 45;
-    if (quality === 1) world.setShadows(false);
-    if (quality === 0) { renderer.setPixelRatio(1); resize(); }
+    if (quality === 1) { world.setShadows(false); world.setReach(0.7, 0.6); }
+    if (quality === 0) { renderer.setPixelRatio(1); world.setReach(0.55, 0.35); resize(); }
   }
 }
 
@@ -2439,6 +3235,7 @@ function frame() {
   me.y = groundHeight(me.x, me.z);
   updateParty(dt);
   if (voyage && voyageSeated) me.y = yWas;
+  if (perch) { const a = camYaw + Math.PI; me.x = LIGHTHOUSE.x + Math.sin(a) * 2.85; me.z = LIGHTHOUSE.z + Math.cos(a) * 2.85; me.y = world.lighthouse.galleryY; me.targetYaw = a; me.speed = 0; moveTarget = null; }
   updateVoyage(dt);
   if (hop) updateHop();
   updateCampfire(dt);
@@ -2457,7 +3254,7 @@ function frame() {
   }
   if (entered && fuelNow() < 0.26 && t - keeperLowAt > 100 && keeper.bubbleFade > 0.3) {
     keeperLowAt = t; keeperNext = Math.max(keeperNext, t + 30);
-    keeperSays('The fire is getting low. There\'s wood on the pile.');
+    keeperSays(FAR ? 'The fire is getting low. There\'s wood on the pile.' : 'It is burning low. Don\'t let it go out. Please.');
   }
   keeper.look = speaker && speaker.until > t && speaker.av !== keeper ? speaker.av : null;
 
@@ -2465,6 +3262,7 @@ function frame() {
   keeper.update(dt, t);
   // The Mapmaker turns, slowly, to look at whoever comes near, and bobs his head when he speaks.
   if (FAR && keeper.parts.rig.visible) { keeper.parts.rig.visible = false; keeper.shadow.visible = false; }      // his body arrives late; it stays out of sight
+  if (FAR) { updateHermit(dt); updateHeron(dt); if (entered) updatePushback(dt); }
   if (FAR && world.mapmaker.group) {
     const m = world.mapmaker, near = Math.hypot(me.x - m.x, me.z - m.z) < 7;
     const want = near ? Math.atan2(-(me.z - m.z), me.x - m.x) : m.home;
@@ -2553,8 +3351,11 @@ function frame() {
   const ck = entered ? 1 - Math.exp(-dt * 7) : 1;
   if (t < 0.1) { camPos.copy(goalPos); camLook.copy(goalLook); }
   camPos.lerp(goalPos, ck); camLook.lerp(goalLook, ck);
-  camera.position.copy(camPos);
-  camera.lookAt(camLook);
+  if (scene3) {
+    const el = performance.now() - scene3.from, k = el > scene3.ms ? 0 : Math.min(1, el / 900, (scene3.ms - el) / 900), e = k * k * (3 - 2 * k);
+    camera.position.copy(camPos).lerp(scene3.pos, e); camera.lookAt(cutLook.copy(camLook).lerp(scene3.look, e));
+    if (el > scene3.ms) scene3 = null;
+  } else { camera.position.copy(camPos); camera.lookAt(camLook); }
   world.fadeCanopies(camPos, camLook, dt);
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = lerp(camera.fov, fov, 1 - Math.exp(-dt * 3)); camera.updateProjectionMatrix(); }
 
@@ -2603,8 +3404,12 @@ function frame() {
   for (const p of peers.values()) frame.players.push(p.av);
   critters.update(dt, t, { dark: skyNow.dark, rain: rainNow, players: frame.players, me });
   audio.setScene(skyNow.dark > 0.55, !!seenParty && fireDist() < 30);
-  audio.tick(dt, { fireDist: Math.hypot(camPos.x - FIRE.x, camPos.z - FIRE.z), shore: shoreProximity(me.x, me.z), heat: world.heat });
+  audio.tick(dt, { fireDist: Math.hypot(camPos.x - FIRE.x, camPos.z - FIRE.z), shore: shoreProximity(me.x, me.z), heat: world.heat, cave: FAR ? caveNow : 0,
+    falls: FAR ? clamp(1 - Math.hypot(me.x - CRAG.x, me.z - CRAG.z) / 42, 0, 1) ** 1.6 : 0, wind: FAR ? clamp((me.y - 11) / 13, 0, 1) * (perch ? 1.3 : 1) : clamp((me.y - 4) / 5, 0, 1) * 0.5 });
   if (entered) { updateActions(); pushPresence(false); }
+  cutaway.cam.value.copy(camera.position); cutaway.me.value.set(me.x, me.y, me.z);
+  if (FAR) { caveNow = lerp(caveNow, inCave(me.x, me.z) ? 1 : 0, 1 - Math.exp(-dt * 2.2)); if (caveNow < 0.002) caveNow = 0; world.setCave(caveNow); caveGlow.intensity = 1.5 * caveNow; }
+  if (cardWanted) takeCard();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -2612,11 +3417,11 @@ requestAnimationFrame(frame);
 
 // A small handle for checking the page from a test script.
 window.__ember = {
-  me, peers, world, camera, renderer, keeper, POSE, life,
+  me, peers, world, camera, renderer, keeper, POSE, life, mapBoard: MAP_BOARD,
   yard, did, listToday,
   critters,
   leaveIsland,
-  get goal() { return goal ? { text: goal.text, x: goal.at.x, z: goal.at.z, step: goal.step } : null; },
+  get goal() { return goal ? { text: goal.text, x: goal.at ? goal.at.x : 0, z: goal.at ? goal.at.z : 0, step: goal.step } : null; },
   get starterAt() { return starterAt; },
   traces, companion, noteCall, setHeld, addToBoat, tagPeer, inviteTag, acceptTag, joinTag, leaveTag,
   get game() { return game; },
@@ -2649,6 +3454,7 @@ window.__ember = {
   audio,
   get country() { return COUNTRY; },
   get skew() { return clockSkew(); }, timeNow,
+  shiftTime(ms) { setIslandTime(timeNow() + ms); },
   setBoat(total, crew) { boatTotal = total; boatCrew = crew || boatCrew; yard.setProgress(total); },
   lookAtBoat, setOwnName,
   openVisitor, ignored,
@@ -2666,6 +3472,9 @@ window.__ember = {
   get wet() { return wet; },
   set wet(v) { wet = v; },
   teleport(x, z, yaw) { me.x = x; me.z = z; vel.x = vel.z = 0; moveTarget = null; if (yaw !== undefined) me.yaw = me.targetYaw = yaw; },
+  paths: PATHS, sightAt: SIGHT_AT,
+  scene, shy, setReach(k, c) { world.setReach(k, c); }, setFog(v) { fogForce = v; }, setLamp(v) { lamp = v; },
+  cutTo, get light() { return { totals: lightTotals, stage: lightStage(), bag, perch }; },
   cam(yaw, pitch, dist) { camYaw = yaw; if (pitch !== undefined) camPitch = pitch; if (dist !== undefined) camDist = dist; },
   turn(d) { camYaw += d; },
   setMode, standUp, sendChat, playEmote, callOut, toggleRest, comeAshore,

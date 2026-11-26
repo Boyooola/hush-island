@@ -1,11 +1,11 @@
 // Builds the island: sky, sea, land, fire, dock, trees and all small life.
-import { timeNow } from './now.js';
 import * as THREE from 'three';
 import {
   mulberry32, clamp, lerp, smoothstep, noise2, terrainHeight, groundHeight, shoreRadius,
-  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount, FAR, LANDING, MAPMAKER, MAP_BOARD, PATHS, AREAS } from './terrain.js';
+  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount, FAR, LANDING, MAPMAKER, MAP_BOARD, PATHS, AREAS, SIGHT_AT, pathDist, WOODS, FLATS, VALLEY, POINT, LIGHTHOUSE, POOL, POST, LENS, CHEST, CRAG, STONES, GARDEN, HOLLOW_TREE, CAVE, caveAt, caveRoofed, terrainRaw, SUMMIT, STANDING, COTTAGE, TIDE, tideAt, FLAT_EDGE, ISLET, WRECK, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN } from './terrain.js';
+import { timeNow } from './now.js';
 import { makeGlowTexture, makeSkyLabel, makeSignTexture, makeCarvingBoard } from './labels.js';
-import { loadProps } from './props.js';
+import { loadProps, cutInto } from './props.js';
 
 export const FOG_COLOR = 0x142a4d;
 const MOON_DIR = new THREE.Vector3(-0.32, 0.5, -1).normalize();
@@ -283,20 +283,40 @@ export function buildWorld(scene, opts = {}) {
 
   // ---------- land ----------
   // The square of ground that is drawn: all of home, or (coarser, and off-centre) all of the far shore.
-  const STEP = FAR ? 1.25 : 1, GX0 = FAR ? -125 : -66, GZ0 = FAR ? -85 : -66, NX = FAR ? 136 : 132, NZ = FAR ? 136 : 132;
+  const STEP = FAR ? 2 : 1, GX0 = FAR ? -356 : -66, GZ0 = FAR ? -176 : -66, NX = FAR ? 206 : 132, NZ = FAR ? 204 : 132;
   const sand = C(0xd9c692), sandWet = C(0xa89868), deep = C(0x1d4854);
+  const farRockA = C(0x6e6a76), farRockB = C(0x8f8894), shingle = C(0xc2baa6), shingleWet = C(0x7d7a70), farDeep = C(0x16444a), moss = C(0x5d7a5c), goldGrass = C(0xb09e54), heatherC = C(0x8a5f8c), paleTop = C(0xbdb98c), litter = C(0x96702f), mud = C(0x7c7466), pool = C(0x4f8a8a), valleyGreen = C(0x6fa06a), caveRock = C(0x4a4652);
   const grassA = C(0x4f8250), grassB = C(0x3f6f49), grassHi = C(0x67995a), rock = C(0x6f7482);
   {
     const positions = [], colors = [];
     const step = STEP;
     const h = (i, j) => terrainHeight(GX0 + i * step, GZ0 + j * step);
     const tmp = new THREE.Color();
-    const faceColor = (ax, ay, az, bx, by, bz, cx, cy, cz) => {
+    const faceColor = (ax, ay, az, bx, by, bz, cx, cy, cz, out = colors) => {
       const mx = (ax + bx + cx) / 3, my = (ay + by + cy) / 3, mz = (az + bz + cz) / 3;
       const slope = Math.max(Math.abs(ay - by), Math.abs(by - cy), Math.abs(ay - cy)) / step;
       const n = noise2(mx * 0.35 + 3, mz * 0.35 - 7);
-      if (FAR && slope > 0.75 && Math.max(ay, by, cy) > 0.4) {
-        tmp.copy(rock).multiplyScalar(0.82 + 0.25 * n);      // a cliff: bare rock from the water up
+      if (FAR) {
+        // Lantern Rock: banded cliffs, grey shingle, and moor on top (moss, dry gold grass, drifts of heather),
+        // with fallen leaves under the birches and grey mud on the flats.
+        const big = noise2(mx * 0.07 + 20, mz * 0.07 - 3), hea = noise2(mx * 0.12 - 7, mz * 0.12 + 4);
+        if (slope > 0.7 && Math.max(ay, by, cy) > 0.4) {
+          tmp.copy(Math.floor(my / 0.85 + n * 0.6) % 2 ? farRockA : farRockB).multiplyScalar(0.86 + 0.2 * n);
+        } else if (my < -0.05) {
+          tmp.copy(shingleWet).lerp(farDeep, clamp(-my / 2.2, 0, 1));
+        } else if (my < 0.5 + n * 0.12) {
+          tmp.copy(shingleWet).lerp(shingle, smoothstep(-0.05, 0.3, my));
+        } else {
+          tmp.copy(moss).lerp(goldGrass, smoothstep(-0.1, 0.55, big) * 0.85);
+          tmp.lerp(heatherC, smoothstep(0.15, 0.5, hea) * 0.8);
+          tmp.lerp(paleTop, smoothstep(6, 10, my) * 0.55);
+          tmp.lerp(litter, (1 - smoothstep(WOODS.r * 0.6, WOODS.r * 1.1, Math.hypot(mx - WOODS.x, mz - WOODS.z))) * 0.75);
+          tmp.lerp(valleyGreen, (1 - smoothstep(VALLEY.r * 0.7, VALLEY.r * 1.05, Math.hypot(mx - VALLEY.x, mz - VALLEY.z))) * 0.85);
+          const fl = 1 - smoothstep(FLATS.r * 0.6, FLATS.r, Math.hypot(mx - FLATS.x, mz - FLATS.z));
+          if (fl > 0) { tmp.lerp(mud, fl * 0.9); if (n > 0.3) tmp.lerp(pool, fl * smoothstep(0.3, 0.5, n) * 0.8); }
+          tmp.lerp(shingle, 1 - smoothstep(0.5, 0.85, my - n * 0.12));
+          if (slope > 0.48) tmp.lerp(farRockB, smoothstep(0.48, 0.7, slope));
+        }
       } else if (my < -0.05) {
         tmp.copy(sandWet).lerp(deep, clamp(-my / 2.2, 0, 1));
       } else if (my < 0.5 + n * 0.12) {
@@ -311,9 +331,10 @@ export function buildWorld(scene, opts = {}) {
       const fr = Math.hypot(mx, mz);
       if (fr < 5.2) tmp.lerp(C(0x8a7350), (1 - smoothstep(2.2, 5.2, fr)) * 0.85);
       // Worn paths between the places animals go.
-      if (my > 0.45) { const pa = pathAmount(mx, mz); if (pa > 0) tmp.lerp(C(0x94805a), pa * (FAR ? 0.8 : 0.3)); }      // at home, a faint wear under the modelled path
+      if (my > 0.45) { const pa = pathAmount(mx, mz); if (pa > 0) tmp.lerp(C(0x94805a), pa * (FAR ? 0.35 : 0.3)); }      // at home, a faint wear under the modelled path
       const v = 0.95 + 0.1 * noise2(mx * 1.7, mz * 1.7);
-      for (let k = 0; k < 3; k++) colors.push(tmp.r * v, tmp.g * v, tmp.b * v);
+      if (FAR && out === colors && caveRoofed(mx, mz, 2.2)) tmp.copy(caveRock).multiplyScalar(0.7 + 0.5 * n + (Math.floor(my / 0.8) % 2) * 0.12);      // under the hill: bare dark rock, floor and walls
+      for (let k = 0; k < 3; k++) out.push(tmp.r * v, tmp.g * v, tmp.b * v);
     };
     for (let i = 0; i < NX; i++) {
       for (let j = 0; j < NZ; j++) {
@@ -334,6 +355,26 @@ export function buildWorld(scene, opts = {}) {
     land.receiveShadow = true;
     land.userData.noShadow = true;
     scene.add(land);
+    // The lid over the caves: the outside of Hollow Hill as it would be with nothing dug under it, and beneath it
+    // the cave's roof. It is cut see-through above a visitor who is inside, so that they can be seen from above.
+    if (FAR) {
+      const lp = [], lc = [], dark = new THREE.Color();
+      const i0 = Math.floor((-220 - GX0) / step), i1 = Math.ceil((-136 - GX0) / step), j0 = Math.floor((-118 - GZ0) / step), j1 = Math.ceil((-54 - GZ0) / step);
+      for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) {
+        const x0 = GX0 + i * step, x1 = x0 + step, z0 = GZ0 + j * step, z1 = z0 + step;
+        if (!caveRoofed(x0 + step / 2, z0 + step / 2, 3.6)) continue;
+        const r00 = terrainRaw(x0, z0), r10 = terrainRaw(x1, z0), r01 = terrainRaw(x0, z1), r11 = terrainRaw(x1, z1);
+        lp.push(x0, r00, z0, x0, r01, z1, x1, r10, z0); faceColor(x0, r00, z0, x0, r01, z1, x1, r10, z0, lc);
+        lp.push(x1, r10, z0, x0, r01, z1, x1, r11, z1); faceColor(x1, r10, z0, x0, r01, z1, x1, r11, z1, lc);
+        const c00 = caveAt(x0, z0).top, c10 = caveAt(x1, z0).top, c01 = caveAt(x0, z1).top, c11 = caveAt(x1, z1).top;
+        lp.push(x0, c00, z0, x1, c10, z0, x0, c01, z1, x1, c10, z0, x1, c11, z1, x0, c01, z1);
+        for (let k = 0; k < 2; k++) { dark.setHex(0x3a3642).multiplyScalar(0.8 + 0.4 * noise2(x0 * 0.4 + k, z0 * 0.4)); for (let q = 0; q < 3; q++) lc.push(dark.r, dark.g, dark.b); }
+      }
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3)); lg.setAttribute('color', new THREE.Float32BufferAttribute(lc, 3)); lg.computeVertexNormals();
+      const lid = new THREE.Mesh(lg, cutInto(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true, side: THREE.DoubleSide }), 6.2, 7.4));
+      lid.userData.noShadow = true; scene.add(lid);
+    }
   }
 
   // ---------- sea ----------
@@ -344,8 +385,8 @@ export function buildWorld(scene, opts = {}) {
     {
       const q = g.attributes.position.array;
       for (let i = 0; i < q.length; i += 3) {
-        q[i] = Math.sign(q[i]) * Math.pow(Math.abs(q[i]), 2) * 450 + (FAR ? -45 : 0);      // packed tight around the middle of the island
-        q[i + 2] = Math.sign(q[i + 2]) * Math.pow(Math.abs(q[i + 2]), 2) * 450;
+        q[i] = Math.sign(q[i]) * Math.pow(Math.abs(q[i]), 2) * (FAR ? 700 : 450) + (FAR ? -150 : 0);      // packed tight around the middle of the island
+        q[i + 2] = Math.sign(q[i + 2]) * Math.pow(Math.abs(q[i + 2]), 2) * (FAR ? 700 : 450);
       }
     }
     const base = g.attributes.position.array.slice();
@@ -412,7 +453,7 @@ export function buildWorld(scene, opts = {}) {
     });
     const fires = [];
     // From the far shore, the one to the east with the bright fire is home.
-    for (const [x, z, s] of FAR ? [[250, 30, 1.0], [150, -250, 0.9], [-280, -210, 0.8], [-330, 120, 1.0], [40, 300, 0.9]] : [[-190, -170, 1.2], [140, -240, 0.9], [-60, -300, 0.7], [260, 40, 1.0], [-250, 110, 0.9]]) {
+    for (const [x, z, s] of FAR ? [[330, 40, 1.0], [150, -400, 0.9], [-480, -330, 0.8], [-560, 160, 1.0], [40, 420, 0.9]] : [[-190, -170, 1.2], [140, -240, 0.9], [-60, -300, 0.7], [260, 40, 1.0], [-250, 110, 0.9]]) {
       const isl = new THREE.Mesh(new THREE.SphereGeometry(20 * s, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), silhouette);
       isl.scale.y = 0.22;
       isl.scale.z = 0.7;
@@ -496,7 +537,7 @@ export function buildWorld(scene, opts = {}) {
     extraLogs.push(l);
   }
   loadProps().then((make) => {
-    const ring = make && make('fire_ring', 'fire_extra');
+    const ring = make && ((FAR && make('camp_hearth')) || make('fire_ring', 'fire_extra'));      // the camp on the far shore has its own hearth: flat stones, a tripod and a kettle
     if (!ring) return;
     for (const m of fireRough) fireGroup.remove(m);
     fireGroup.add(ring);
@@ -670,7 +711,7 @@ export function buildWorld(scene, opts = {}) {
     loadProps().then((make) => {
       if (!make || !make('seat_log_a')) return;
       seatGroups.forEach((g, i) => {
-        const m = make(i % 2 ? 'seat_log_b' : 'seat_log_a');
+        const m = (FAR && make(i % 2 ? 'camp_bench_b' : 'camp_bench_a')) || make(i % 2 ? 'seat_log_b' : 'seat_log_a');      // benches at the camp, logs at home
         while (g.children.length) g.remove(g.children[0]);
         m.position.y = -0.29; if (i % 3 === 0) m.rotation.y = Math.PI;
         g.add(m);
@@ -705,7 +746,7 @@ export function buildWorld(scene, opts = {}) {
     scene.add(g);
     colliders.push({ x: WOODPILE.x, z: WOODPILE.z, r: 0.62 });
     loadProps().then((make) => {
-      const m = make && make('woodpile');
+      const m = make && ((FAR && make('camp_stack')) || make('woodpile'));
       if (!m) return;
       while (g.children.length) g.remove(g.children[0]);
       g.add(m);
@@ -892,7 +933,7 @@ export function buildWorld(scene, opts = {}) {
     const r = Math.hypot(x, z);
     if (r < 9.5) return true;                               // fire clearing
     if (FAR && (LANDING.some((p) => Math.hypot(x - p.x, z - p.z) < p.clear) || Math.hypot(x - MAPMAKER.x, z - MAPMAKER.z) < 2)) return true;
-    if (FAR) return pathAmount(x, z) > 0.02 || (x > 8 && Math.abs(z) < 4.5) || Math.hypot(x - HILL.x, z - HILL.z) < 13 || Math.hypot(x + 32, z - 42) < 20 || Math.hypot(x - WALL.x, z - WALL.z) < 3;
+    if (FAR) return pathAmount(x, z) > 0.02 || (x > 8 && Math.abs(z) < 4.5) || Math.hypot(x - HILL.x, z - HILL.z) < 14 || Math.hypot(x - SUMMIT.x, z - SUMMIT.z) < 4 || Math.hypot(x - MOONPOOL.x, z - MOONPOOL.z) < 7 || Math.hypot(x - BONES.x, z - BONES.z) < 11 || Math.hypot(x - SEAT.x, z - SEAT.z) < 4 || Math.hypot(x - WAYCAIRN.x, z - WAYCAIRN.z) < 4 || Math.hypot(x - SPRING.x, z - SPRING.z) < 6 || Math.hypot(x - SHELTER.x, z - SHELTER.z) < 6 || Math.hypot(x - COTTAGE.x, z - COTTAGE.z) < 8 || Math.hypot(x - FLATS.x, z - FLATS.z) < FLATS.r * 0.8 || Math.hypot(x - POOL.x, z - POOL.z) < 17 || Math.hypot(x - HOLLOW_TREE.x, z - HOLLOW_TREE.z) < 8 || Math.hypot(x - CRAG.x, z - CRAG.z - 3) < 12 || Math.hypot(x - GARDEN.x + 3, z - GARDEN.z - 5) < 12 || Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z) < 12 || Math.hypot(x - WALL.x, z - WALL.z) < 3;
     if (Math.abs(x) < 4.2 && z > 6) return true;            // path from the beach
     if (x > 6 && Math.abs(z) < 3.4) return true;            // path to the dock
     if (Math.hypot(x - HILL.x, z - HILL.z) < 4.2) return true; // hilltop
@@ -904,19 +945,19 @@ export function buildWorld(scene, opts = {}) {
   const placed = [];
   const farEnough = (x, z, d) => placed.every(([px, pz]) => Math.hypot(px - x, pz - z) > d);
   let tries = 0;
-  while (placed.length < (FAR ? 150 : 34) && tries++ < (FAR ? 20000 : 4000)) {
+  while (placed.length < (FAR ? 520 : 34) && tries++ < (FAR ? 60000 : 4000)) {
     const a = rng() * Math.PI * 2;
     const d = FAR ? 0.12 + Math.sqrt(rng()) * 0.8 : 0.3 + rng() * 0.48;
     const r = d * shoreRadius(a);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    if (keepClear(x, z) || !farEnough(x, z, 3.1)) continue;
+    if (keepClear(x, z) || !farEnough(x, z, FAR ? 4.5 : 3.1)) continue;
     if (terrainHeight(x, z) < 0.75) continue;
     placed.push([x, z]);
     if (rng() < 0.7) pine(x, z, rand(0.85, 1.45)); else leafy(x, z, rand(0.9, 1.3));
   }
   tries = 0;
   let palms = 0;
-  while (palms < (FAR ? 20 : 9) && tries++ < 3000) {
+  while (palms < (FAR ? 0 : 9) && tries++ < 3000) {
     const a = rng() * Math.PI * 2;
     const d = 0.8 + rng() * 0.1;
     const r = d * shoreRadius(a);
@@ -927,23 +968,467 @@ export function buildWorld(scene, opts = {}) {
     palms++;
   }
   // Draw many copies of one modelled piece as a single batch.
+  // On the far shore, which is too big to draw all at once, each batch is cut into squares of land: a square
+  // that is behind the camera or lost in the mist is not drawn at all.
+  const cells = [];
+  let reach = 1;      // how far things are drawn, as a share of the full distance: less on a device that is struggling
   const batch = (make, name, spots, skip) => {
-    const lump = make.single(name, skip);
+    const lump = make.single(opts.low && name === 'birch_b' ? 'birch_a' : name, skip);      // on a phone every birch is the plainer of the two
     if (!lump || !spots.length) return null;
-    const inst = new THREE.InstancedMesh(lump.geometry, lump.material, spots.length), d = new THREE.Object3D();
-    spots.forEach((sp, i) => { d.position.set(sp.x, sp.y, sp.z); d.rotation.set(0, sp.ry || 0, 0); d.scale.set(sp.sx || sp.s, sp.sy || sp.s, sp.sz || sp.s); d.updateMatrix(); inst.setMatrixAt(i, d.matrix); });
-    // No shadows from the batch: a whole wood drawn again for every light is more than a phone can take.
-    inst.castShadow = false; inst.receiveShadow = true; inst.userData.noShadow = true;
-    scene.add(inst);
-    return inst;
+    const groups = new Map();
+    const small = /heather|bracken|slab|rock_/.test(name), size = small ? 35 : 70;      // ground cover is cut into smaller squares, so that less of it is drawn at once
+    for (const sp of spots) { const key = FAR ? Math.floor(sp.x / size) + ',' + Math.floor(sp.z / size) : ''; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(sp); }
+    let last = null;
+    for (const list of groups.values()) {
+      if (small) list.sort((a, b) => ((a.x * 12.9898 + a.z * 78.233) % 1) - ((b.x * 12.9898 + b.z * 78.233) % 1));      // in no order, so that drawing only some of them thins the cover evenly
+      const inst = new THREE.InstancedMesh(lump.geometry, lump.material, list.length), d = new THREE.Object3D();
+      let cx = 0, cz = 0;
+      list.forEach((sp, i) => { d.position.set(sp.x, sp.y, sp.z); d.rotation.set(0, sp.ry || 0, 0); d.scale.set(sp.sx || sp.s, sp.sy || sp.s, sp.sz || sp.s); d.updateMatrix(); inst.setMatrixAt(i, d.matrix); cx += sp.x / list.length; cz += sp.z / list.length; });
+      if (list[0].tint) { const col = new THREE.Color(); list.forEach((sp, i) => inst.setColorAt(i, col.setRGB(sp.tint[0], sp.tint[1], sp.tint[2]))); }
+      inst.computeBoundingSphere();
+      // No shadows from the batch: a whole wood drawn again for every light is more than a phone can take.
+      inst.castShadow = false; inst.receiveShadow = true; inst.userData.noShadow = true; inst.name = 'batch_' + name;
+      scene.add(inst);
+      if (FAR) cells.push({ inst, x: cx, z: cz, far: small ? 95 : 170, pad: small ? 25 : 38, full: list.length, thin: /heather|bracken/.test(name) });
+      last = inst;
+    }
+    return last;
   };
+  // Stillwater: the pool under the valley's southern wall, the crag the water falls from (with a hollow behind the
+  // fall that cannot be seen from outside), stepping stones across, and the Hermit's garden on the far side.
+  if (FAR) {
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(POOL.r, 22).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3f8f86, roughness: 0.15, metalness: 0.3, transparent: true, opacity: 0.8, flatShading: true }));
+    pool.position.set(POOL.x, POOL.y, POOL.z); pool.userData.noShadow = true; scene.add(pool);
+    // Falling water: streaks drawn once and slid downwards for ever.
+    const wc = document.createElement('canvas'); wc.width = 64; wc.height = 256;
+    { const g = wc.getContext('2d'), r0 = mulberry32(5); g.clearRect(0, 0, 64, 256); for (let i = 0; i < 46; i++) { const x = r0() * 64, y = r0() * 256, len = 40 + r0() * 120; const gr = g.createLinearGradient(0, y, 0, y + len); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, `rgba(255,255,255,${0.35 + r0() * 0.5})`); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x, y, 2 + r0() * 5, len); g.fillRect(x, y - 256, 2 + r0() * 5, len); } }
+    const wt = new THREE.CanvasTexture(wc); wt.wrapS = wt.wrapT = THREE.RepeatWrapping; wt.repeat.set(2, 1.4);
+    const top = CRAG.y + 8.2, fall = new THREE.Group();
+    const sheetMat = new THREE.MeshBasicMaterial({ map: wt, color: 0xdff6f2, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide });
+    const bodyMat = new THREE.MeshBasicMaterial({ color: 0x8fd0c8, transparent: true, opacity: 0.38, depthWrite: false, side: THREE.DoubleSide });
+    for (const [mat, dz, w] of [[bodyMat, 0, 3.0], [sheetMat, -0.08, 3.2], [sheetMat, 0.1, 2.6]]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, top - POOL.y), mat); m.position.set(CRAG.x, (top + POOL.y) / 2, CRAG.z - 1.75 + dz); fall.add(m); }
+    // The stream that feeds it, on top of the crag, and the white water where it lands.
+    const bed = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.6).rotateX(-Math.PI / 2), sheetMat); bed.position.set(CRAG.x, top + 0.42, CRAG.z + 1.1); fall.add(bed);
+    const foam = new THREE.Mesh(new THREE.CircleGeometry(2.6, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false })); foam.position.set(CRAG.x, POOL.y + 0.03, CRAG.z - 2.2); fall.add(foam);
+    const N = 26, sp = new Float32Array(N * 3), seeds = [...Array(N)].map((_, i) => [Math.random() * 6.28, 0.6 + Math.random() * 2.2, Math.random()]);
+    const spray = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(sp, 3)), new THREE.PointsMaterial({ size: 0.34, color: 0xffffff, map: glowTex, transparent: true, opacity: 0.55, depthWrite: false })); fall.add(spray);
+    fall.traverse((o) => { o.userData.noShadow = true; }); scene.add(fall);
+    updaters.push((dt, t) => {
+      wt.offset.y = (t * 0.9) % 1;
+      foam.scale.setScalar(1 + 0.08 * Math.sin(t * 3.1)); foam.material.opacity = 0.45 + 0.12 * Math.sin(t * 4.3);
+      for (let i = 0; i < N; i++) { const [a, r, ph] = seeds[i], k = (t * 0.55 + ph) % 1; sp[i * 3] = CRAG.x + Math.cos(a) * r * (0.4 + k); sp[i * 3 + 1] = POOL.y + 0.1 + Math.sin(k * Math.PI) * 1.3; sp[i * 3 + 2] = CRAG.z - 2.2 + Math.sin(a) * r * 0.6 * (0.4 + k); }
+      spray.geometry.attributes.position.needsUpdate = true;
+    });
+    // Where the rock is solid: the crag's shoulders and back. The way in is through the water.
+    for (const [bx, by, r] of [[-4.6, 0.2, 2.0], [-4.7, 2.8, 2.2], [-4.6, 5.4, 2.3], [4.7, 0.3, 2.0], [4.8, 2.9, 2.3], [4.7, 5.6, 2.3], [0, 6.4, 3.0], [-2.6, 6.2, 2.2], [2.6, 6.3, 2.2], [-6.0, -1.0, 1.4], [6.2, -0.7, 1.4]]) colliders.push({ x: CRAG.x - bx, z: CRAG.z + by, r });
+    colliders.push({ x: GARDEN.x, z: GARDEN.z, r: 2.1 });
+    loadProps().then((make) => {
+      const crag = make && make('falls_crag'); if (!crag) return;
+      crag.position.set(CRAG.x, CRAG.y - 0.35, CRAG.z); crag.rotation.y = Math.PI; crag.traverse((o) => { if (o.isMesh) { o.material.side = THREE.DoubleSide; o.castShadow = false; o.userData.noShadow = true; } }); scene.add(crag);
+      const glow = (m) => m.traverse((o) => { if (o.isMesh && o.material.name === 'g_shroom_cap') { o.material.emissive.set(0x5fe8cf); o.material.emissiveIntensity = 1.6; } });
+      for (const [bx, by, sc, ry] of [[1.7, 3.1, 1.2, 0.4], [-2.1, 3.3, 0.9, 2.1], [0.6, 3.7, 0.7, 4], [2.2, 1.6, 0.6, 1]]) { const m = make('glow_mushrooms'); glow(m); m.position.set(CRAG.x - bx, CRAG.y + 0.02, CRAG.z + by); m.scale.setScalar(sc); m.rotation.y = ry; scene.add(m); }
+      const stone = make.single('slab_0');
+      if (stone) { const inst = new THREE.InstancedMesh(stone.geometry, stone.material, STONES.length), d = new THREE.Object3D(); STONES.forEach((st, i) => { d.position.set(st.x, POOL.y + 0.02, st.z); d.rotation.set(0, i * 1.9, 0); d.scale.set(1.25, 1.4, 1.25); d.updateMatrix(); inst.setMatrixAt(i, d.matrix); }); inst.userData.noShadow = true; scene.add(inst); }
+      // The garden: a round hut with a turf roof and two beds of things coming up.
+      const hut = make('garden_hut'); hut.position.set(GARDEN.x, terrainHeight(GARDEN.x, GARDEN.z) - 0.25, GARDEN.z); hut.rotation.y = -2.2; scene.add(hut);
+      for (const [dx, dz, ry] of [[-6.5, 4.5, 0.25], [-1.5, 8.2, -0.2]]) { const bed2 = make('garden_bed'); bed2.position.set(GARDEN.x + dx, terrainHeight(GARDEN.x + dx, GARDEN.z + dz) - 0.03, GARDEN.z + dz); bed2.rotation.y = ry; scene.add(bed2); }
+    });
+  }
+  // Whisper Woods: an old hollow tree big enough to walk into, deep among the birches and off the path; fallen
+  // trunks, mushrooms that give light, and fireflies that are out by day here. A thicker line of fireflies drifts
+  // from the path to the hollow tree, for anyone who wonders where they are going.
+  if (FAR) {
+    const T = HOLLOW_TREE, face = -T.ry;
+    for (let k = 0; k < 14; k++) { const a = face + 0.52 + k * (Math.PI * 2 - 1.04) / 13; colliders.push({ x: T.x + Math.cos(a) * 2.2, z: T.z + Math.sin(a) * 2.2, r: 0.6 }); }
+    const wr = mulberry32(3131), spot = (minPath, far) => { for (let k = 0; k < 400; k++) { const a = wr() * 6.283, d = Math.sqrt(wr()) * WOODS.r * 0.95, x = WOODS.x + Math.cos(a) * d, z = WOODS.z + Math.sin(a) * d; if (pathDist(x, z) > minPath && terrainHeight(x, z) > 1 && Math.hypot(x - T.x, z - T.z) > far) return { x, z }; } return null; };
+    const logs = [], giants = [], shrooms = [];
+    for (let i = 0; i < 11; i++) { const p = spot(2.5, 9); if (!p) continue; const ry = wr() * 6.283; logs.push({ ...p, ry }); for (const s2 of [-2.4, -0.6, 1.2, 3]) colliders.push({ x: p.x + Math.cos(ry) * s2, z: p.z - Math.sin(ry) * s2, r: 0.45 }); }
+    for (let i = 0; i < 13; i++) { const p = spot(1.6, 6); if (p) { giants.push({ ...p, ry: wr() * 6, s: 0.7 + wr() * 0.8 }); colliders.push({ x: p.x, z: p.z, r: 0.22 }); } }
+    for (let i = 0; i < 34; i++) { const p = spot(0.9, 3.4); if (p) shrooms.push({ ...p, ry: wr() * 6, s: 0.7 + wr() * 0.9 }); }
+    loadProps().then((make) => {
+      const tree = make && make('hollow_tree'); if (!tree) return;
+      const lit = (m) => m.traverse((o) => { if (!o.isMesh) return; const n = o.material.name; if (n === 'g_shroom_cap') { o.material.emissive.set(0x5fe8cf); o.material.emissiveIntensity = 1.6; } if (n === 't_gills') { o.material.emissive.set(0xffc060); o.material.emissiveIntensity = 1.8; o.material.side = THREE.DoubleSide; } if (n === 't_old_bark_b') o.material.color.set(0x63524a); if (n === 't_old_dark') o.material.color.set(0x7a5433); if (/^t_old_(bark|inner|dark)/.test(n)) o.material.side = THREE.DoubleSide; });
+      lit(tree); tree.position.set(T.x, terrainHeight(T.x, T.z) - 0.1, T.z); tree.rotation.y = T.ry; tree.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(tree);
+      for (const [dx, dz, sc] of [[-0.9, 0.7, 1.1], [0.3, -1.1, 0.8], [-1.0, -0.5, 0.6]]) { const m = make('glow_mushrooms'); lit(m); m.position.set(T.x + dx, terrainHeight(T.x + dx, T.z + dz), T.z + dz); m.scale.setScalar(sc); scene.add(m); }
+      for (const p of logs) { const m = make('fallen_trunk'); m.position.set(p.x, terrainHeight(p.x, p.z) - 0.08, p.z); m.rotation.y = p.ry; m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(m); }
+      for (const p of giants) { const m = make('giant_mushroom'); lit(m); m.position.set(p.x, terrainHeight(p.x, p.z) - 0.05, p.z); m.rotation.y = p.ry; m.scale.setScalar(p.s); m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(m); }
+      for (const p of shrooms) { const m = make('glow_mushrooms'); lit(m); m.position.set(p.x, terrainHeight(p.x, p.z), p.z); m.rotation.y = p.ry; m.scale.setScalar(p.s); m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(m); }
+    });
+    // Fireflies: a scatter through the whole wood, and the line that leads to the tree.
+    const NF = 190, base = [], fp = new Float32Array(NF * 3), from = { x: WOODS.x + 2, z: WOODS.z - 1 };
+    for (let i = 0; i < NF; i++) {
+      if (i < 70) { const k = i / 70, x = from.x + (T.x - from.x) * k + (wr() - 0.5) * 3.2, z = from.z + (T.z - from.z) * k + (wr() - 0.5) * 3.2; base.push([x, terrainHeight(x, z) + 0.7 + wr() * 1.6, z, wr() * 6.28]); }
+      else { const p = spot(0, 0) || T; base.push([p.x, terrainHeight(p.x, p.z) + 0.6 + wr() * 2.4, p.z, wr() * 6.28]); }
+    }
+    const flyMat = new THREE.PointsMaterial({ size: 0.3, color: 0xffe9a0, map: glowTex, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false });
+    const flies = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(fp, 3)), flyMat); flies.frustumCulled = false; scene.add(flies);
+    updaters.push((dt, t) => {
+      const cam = opts.camera; flies.visible = !cam || Math.hypot(cam.position.x - WOODS.x, cam.position.z - WOODS.z) < WOODS.r + 70;
+      if (!flies.visible) return;
+      for (let i = 0; i < NF; i++) { const b = base[i]; fp[i * 3] = b[0] + Math.sin(t * 0.5 + b[3]) * 0.8; fp[i * 3 + 1] = b[1] + Math.sin(t * 0.8 + b[3] * 2) * 0.35; fp[i * 3 + 2] = b[2] + Math.cos(t * 0.43 + b[3]) * 0.8; }
+      flies.geometry.attributes.position.needsUpdate = true;
+      flyMat.opacity = 0.6 + 0.3 * Math.sin(t * 1.7);
+    });
+  }
+  // Lantern Point: the keeper's cottage, half its roof gone, with a carving over the door; and the Lamplighter, a
+  // heron who has been mending the tower alone, standing at the foot of her scaffold.
+  const cs = Math.cos(COTTAGE.ry), sn = Math.sin(COTTAGE.ry), fromCottage = (lx, lz) => ({ x: COTTAGE.x + lx * cs + lz * sn, z: COTTAGE.z - lx * sn + lz * cs });
+  const heron = { x: LIGHTHOUSE.x + 5.6, z: LIGHTHOUSE.z + 3.4, group: null, home: 0 }, cottage = { door: fromCottage(-0.25, 3.4), inside: (x, z) => { const dx = x - COTTAGE.x, dz = z - COTTAGE.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; return Math.abs(lx) < 2.7 && Math.abs(lz) < 1.9; } };
+  if (FAR) {
+    heron.home = Math.atan2(-(POINT.z - heron.z), POINT.x + 6 - heron.x);
+    colliders.push({ x: heron.x, z: heron.z, r: 0.6 });
+    for (let k = -3; k <= 3; k++) { colliders.push({ ...fromCottage(k * 1.05, -2.3), r: 0.6 }); if (k < -1 || k > 0) colliders.push({ ...fromCottage(k * 1.05, 2.3), r: 0.6 }); }
+    for (let k = -1; k <= 1; k++) { colliders.push({ ...fromCottage(-3.2, k * 1.2), r: 0.6 }); colliders.push({ ...fromCottage(3.2, k * 1.2), r: 0.6 }); }
+    loadProps().then((make) => {
+      const house = make && make('cottage', 'cottage_carving'); if (!house) return;
+      const g = new THREE.Group(); g.add(house, make('cottage_carving'));
+      // What is cut into the lintel: a stag, and beside him an otter no taller than his knee.
+      const c = document.createElement('canvas'); c.width = 520; c.height = 96; const k = c.getContext('2d');
+      k.strokeStyle = '#4a3320'; k.lineCap = 'round'; k.lineJoin = 'round';
+      const L = (pts, w) => { k.lineWidth = w; k.beginPath(); pts.forEach(([x, y], i) => (i ? k.lineTo(x, y) : k.moveTo(x, y))); k.stroke(); };
+      L([[170, 52], [226, 50], [236, 28]], 9); for (const x of [174, 188, 214, 226]) L([[x, 52], [x, 82]], 5); k.fillStyle = '#4a3320'; k.beginPath(); k.arc(240, 22, 7, 0, 7); k.fill();
+      for (const d of [-1, 1]) { L([[239, 16], [239 + d * 12, 2], [239 + d * 22, 0]], 4); L([[239 + d * 8, 8], [239 + d * 17, 9]], 3); }
+      L([[282, 78], [300, 66], [330, 66], [344, 60]], 8); k.beginPath(); k.arc(349, 57, 6, 0, 7); k.fill(); L([[282, 78], [262, 84], [250, 80]], 5); for (const x of [298, 328]) L([[x, 68], [x, 84]], 4);
+      const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
+      const cut = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.24), new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthWrite: false })); cut.position.set(-0.25, 2.2, 2.69); g.add(cut);
+      g.position.set(COTTAGE.x, COTTAGE.y - 0.08, COTTAGE.z); g.rotation.y = COTTAGE.ry; g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(g);
+      const bird = make('heron'); if (bird) { bird.position.set(heron.x, terrainHeight(heron.x, heron.z) - 0.02, heron.z); bird.rotation.y = heron.home; bird.scale.setScalar(1.2); bird.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(bird); heron.group = bird; }
+    });
+  }
+  // The Tide Flats: the sea comes in over the mud and goes out again every sixteen minutes, by the island's shared
+  // clock. On the mud lies the wreck; stones lead out to an islet with a bell on it; rock pools are left behind.
+  const flats = { wreck: { ...WRECK, ry: 2.2, stern: null }, bell: { x: ISLET.x + 1.2, z: ISLET.z - 0.8, group: null, swing: 0 }, pools: [] };
+  if (FAR) {
+    const W = flats.wreck, wc = Math.cos(W.ry), ws = Math.sin(W.ry), fromWreck = (lx, lz) => ({ x: W.x + lx * wc + lz * ws, z: W.z - lx * ws + lz * wc });
+    W.stern = fromWreck(-5.6, 0.6);
+    for (const lx of [-3.2, -1, 1.2, 3.2]) colliders.push({ ...fromWreck(lx, -0.6), r: 1.25 });
+    colliders.push({ x: flats.bell.x, z: flats.bell.z, r: 0.35 });
+    const pr = mulberry32(4242);
+    for (let k = 0; k < 400 && flats.pools.length < 7; k++) { const a = pr() * 6.283, d = 6 + pr() * (FLATS.r * 0.62), x = FLATS.x + Math.cos(a) * d, z = FLATS.z + Math.sin(a) * d; if (terrainHeight(x, z) > TIDE.flat + 0.12 || terrainHeight(x, z) < TIDE.flat - 0.1 || pathDist(x, z) < 3 || Math.hypot(x - W.x, z - W.z) < 9 || flats.pools.some((q) => Math.hypot(q.x - x, q.z - z) < 9)) continue; flats.pools.push({ x, z, ry: pr() * 6, s: 0.8 + pr() * 0.5 }); colliders.push({ x, z, r: 0.4 }); }
+    const tideMat = new THREE.MeshStandardMaterial({ color: 0x4f8e90, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.74, flatShading: true });
+    const tide = new THREE.Mesh(new THREE.CircleGeometry(105, 28).rotateX(-Math.PI / 2), tideMat); tide.position.set((FLATS.x + ISLET.x) / 2, TIDE.low, (FLATS.z + ISLET.z) / 2); tide.userData.noShadow = true; scene.add(tide);
+    skyHooks.push((k) => { tideMat.color.setHex(k.sea); });
+    updaters.push((dt, t) => { tide.position.y = tideAt(timeNow()).y + Math.sin(t * 0.7) * 0.02; if (flats.bell.group) { flats.bell.swing *= Math.exp(-dt * 1.1); flats.bell.group.rotation.z = Math.sin(t * 7) * flats.bell.swing; } });
+    loadProps().then((make) => {
+      const wreck = make && make('wreck', 'wreck_name'); if (!wreck) return;
+      const quiet = (m) => { m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; o.material.side = THREE.DoubleSide; } }); return m; };
+      const g = new THREE.Group(); g.add(quiet(wreck), quiet(make('wreck_name'))); g.position.set(W.x, terrainHeight(W.x, W.z) - 0.25, W.z); g.rotation.y = W.ry; scene.add(g);
+      for (const q of flats.pools) { const m = quiet(make('rock_pool')); m.position.set(q.x, terrainHeight(q.x, q.z) - 0.05, q.z); m.rotation.y = q.ry; m.scale.setScalar(q.s); const w = new THREE.Mesh(new THREE.CircleGeometry(1.15, 12).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x5fb0aa, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.6 })); w.position.y = 0.2; m.add(w); scene.add(m); }
+      const bell = make('tide_bell', 'tide_bell_bell'); if (bell) { const swing = make('tide_bell_bell'), hang = new THREE.Group(); quiet(bell); quiet(swing); hang.position.set(0.68, 2.42, 0); swing.position.set(-0.68, -2.42, 0); hang.add(swing); bell.add(hang); bell.position.set(flats.bell.x, terrainHeight(flats.bell.x, flats.bell.z) - 0.05, flats.bell.z); bell.rotation.y = 1.0; bell.scale.setScalar(1.15); scene.add(bell); flats.bell.group = hang; }
+      const cr2 = mulberry32(99), stones2 = [], bx = ISLET.x - FLAT_EDGE.x, bz = ISLET.z - FLAT_EDGE.z, L = Math.hypot(bx, bz);
+      for (let d = -4; d < L - 5; d += 1.45) { const k = d / L, x = FLAT_EDGE.x + bx * k + (cr2() - 0.5) * 1.3, z = FLAT_EDGE.z + bz * k + (cr2() - 0.5) * 1.3; stones2.push({ x, y: terrainHeight(x, z) + 0.02, z, s: 1.0 + cr2() * 0.5, ry: cr2() * 6, n: Math.floor(cr2() * 3) }); }
+      for (let n = 0; n < 3; n++) batch(make, 'slab_' + n, stones2.filter((q) => q.n === n));
+    });
+  }
+  // The Far Beach: a cove on the north-west coast that the hills hide. On it, a shelter of driftwood open to the
+  // sea and the evening; on a ledge of the cliff nearby, a hot spring.
+  if (FAR) {
+    const ry = -FARBEACH.a, c2 = Math.cos(ry), s2 = Math.sin(ry), fromShelter = (lx, lz) => ({ x: SHELTER.x + lx * c2 + lz * s2, z: SHELTER.z - lx * s2 + lz * c2 });
+    for (const lz of [-2.2, -1.1, 0, 1.1, 2.2]) colliders.push({ ...fromShelter(-1.3, lz), r: 0.6 });
+    for (const lz of [-1.2, 0, 1.2]) colliders.push({ ...fromShelter(1.6, lz), r: 0.36 });
+    colliders.push({ x: SPRING.x - 2.6, z: SPRING.z - 0.4, r: 1.0 });
+    const water = new THREE.Mesh(new THREE.CircleGeometry(2.25, 16).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x9fd8cf, emissive: 0x2f6f6a, emissiveIntensity: 0.35, roughness: 0.15, metalness: 0.2, transparent: true, opacity: 0.78, flatShading: true }));
+    water.position.set(SPRING.x, SPRING.y - 0.14, SPRING.z); water.userData.noShadow = true; scene.add(water);
+    const NS = 22, sp = new Float32Array(NS * 3), seed = [...Array(NS)].map(() => [Math.random() * 6.28, Math.random() * 1.9, Math.random()]);
+    const steam = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(sp, 3)), new THREE.PointsMaterial({ size: 1.1, color: 0xffffff, map: glowTex, transparent: true, opacity: 0.16, depthWrite: false })); steam.frustumCulled = false; scene.add(steam);
+    updaters.push((dt, t) => { for (let i = 0; i < NS; i++) { const [a, r, ph] = seed[i], k = (t * 0.16 + ph) % 1; sp[i * 3] = SPRING.x + Math.cos(a) * r + Math.sin(t * 0.4 + a) * 0.3 + k * 0.8; sp[i * 3 + 1] = SPRING.y + 0.1 + k * 3.2; sp[i * 3 + 2] = SPRING.z + Math.sin(a) * r; } steam.geometry.attributes.position.needsUpdate = true; });
+    loadProps().then((make) => {
+      const spring = make && make('hot_spring'); if (!spring) return;
+      const quiet = (m) => { m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); return m; };
+      quiet(spring).position.set(SPRING.x, SPRING.y - 0.02, SPRING.z); scene.add(spring);
+      const sh = quiet(make('drift_shelter')); sh.position.set(SHELTER.x, terrainHeight(SHELTER.x, SHELTER.z) - 0.05, SHELTER.z); sh.rotation.y = ry; scene.add(sh);
+      // a few stones up the bank, from the beach to the ledge
+      const st = [], n = 14; for (let i = 1; i < n; i++) { const k = i / n, x = lerp(FARBEACH.x + 6, SPRING.x - 4, k) + Math.sin(i * 2.3) * 1.2, z = lerp(FARBEACH.z - 2, SPRING.z + 3, k) + Math.cos(i * 1.7) * 1.2; st.push({ x, y: terrainHeight(x, z) + 0.02, z, s: 0.9 + (i % 3) * 0.15, ry: i * 1.3, n: i % 3 }); }
+      for (let k = 0; k < 3; k++) batch(make, 'slab_' + k, st.filter((q) => q.n === k));
+    });
+  }
+  // Hidden places in the open country: the moon pool, the whale, the seat that faces home, the wayfarers' cairn.
+  const hidden = { cairnStones: null, moon: null };
+  // Where what the tower needs can be had: fallen stone on the point and under the crag, ship's timber on the Far
+  // Beach and in the wreck (when the tide is off her), crystal in the round room under the hill, lamp-seed in the valley.
+  const sources = FAR ? [
+    { kind: 'stone', x: LIGHTHOUSE.x + 9, z: LIGHTHOUSE.z - 9, ry: 0.4 }, { kind: 'stone', x: LIGHTHOUSE.x + 15, z: LIGHTHOUSE.z - 5, ry: 2.1 }, { kind: 'stone', x: SUMMIT.x + 9, z: SUMMIT.z + 9, ry: 1.2 },
+    { kind: 'timber', x: SHELTER.x + 5.5, z: SHELTER.z - 3.5, ry: 0.5 }, { kind: 'timber', x: SHELTER.x - 2, z: SHELTER.z + 6, ry: 1.9 }, { kind: 'timber', x: WRECK.x, z: WRECK.z, tide: true, bare: true },
+    { kind: 'glass', x: CAVE.pts[2][0] - 3.4, z: CAVE.pts[2][1] + 3.0, cave: true, bare: true }, { kind: 'glass', x: CAVE.pts[2][0] + 3.6, z: CAVE.pts[2][1] + 2.6, cave: true, bare: true },
+    { kind: 'oil', x: GARDEN.x - 6.5, z: GARDEN.z + 4.5 }, { kind: 'oil', x: GARDEN.x - 1.5, z: GARDEN.z + 8.2 }, { kind: 'oil', x: GARDEN.x + 4.5, z: GARDEN.z + 5.5 },
+  ] : [];
+  if (FAR) loadProps().then((make) => {
+    if (!make || !make('rubble_pile')) return;
+    for (const sc of sources) {
+      if (sc.bare) continue;
+      if (sc.kind === 'oil') { for (let i = 0; i < 5; i++) { const m = make('lampseed'), a = i * 1.26, r = i ? 0.9 : 0; m.position.set(sc.x + Math.cos(a) * r, terrainHeight(sc.x + Math.cos(a) * r, sc.z + Math.sin(a) * r) - 0.03, sc.z + Math.sin(a) * r); m.rotation.y = i * 2.3; m.scale.setScalar(0.9 + (i % 3) * 0.12); m.traverse((o) => { if (o.isMesh) o.castShadow = false; }); scene.add(m); } continue; }
+      const m = make(sc.kind === 'stone' ? 'rubble_pile' : 'timber_stack'); m.position.set(sc.x, terrainHeight(sc.x, sc.z) - 0.05, sc.z); m.rotation.y = sc.ry || 0; if (sc.kind === 'stone') m.scale.setScalar(1.25);
+      m.traverse((o) => { if (o.isMesh) o.castShadow = false; }); scene.add(m); colliders.push({ x: sc.x, z: sc.z, r: sc.kind === 'stone' ? 1.2 : 1.3 });
+    }
+  });
+  // The keeper's logbook: six torn pages, each under a pebble where the storm left it (the order is the order of the book).
+  const logPages = FAR ? [
+    fromCottage(1.3, -0.4), { x: HOLLOW_TREE.x + 0.3, z: HOLLOW_TREE.z - 0.2 }, { x: GARDEN.x + 2.5, z: GARDEN.z + 1.6 },
+    { x: CAVE.pts[2][0] + 3.2, z: CAVE.pts[2][1] - 2.6, cave: true }, { x: ISLET.x - 2.6, z: ISLET.z + 1.8 }, { x: SHELTER.x + 1.5, z: SHELTER.z + 1.7 },
+  ].map((pg) => ({ ...pg, group: null, there: true })) : [];
+  if (FAR) loadProps().then((make) => {
+    if (!make || !make('log_page')) return;
+    logPages.forEach((pg, i) => {
+      const g = new THREE.Group(), m = make('log_page');
+      m.traverse((o) => { if (o.isMesh) { o.castShadow = false; if (o.material.name === 'lp_paper') { o.material = o.material.clone(); o.material.emissive.set(0xf3e2b4); o.material.emissiveIntensity = pg.cave ? 0.5 : 0.22; o.material.side = THREE.DoubleSide; } } });
+      m.scale.setScalar(1.5); g.add(m);
+      const glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff1c9, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending }));
+      glint.scale.setScalar(1.1); glint.position.y = 0.3; g.add(glint);
+      g.position.set(pg.x, terrainHeight(pg.x, pg.z) + 0.02, pg.z); g.rotation.y = i * 1.9; g.visible = pg.there; scene.add(g); pg.group = g;
+      updaters.push((dt, t) => { glint.material.opacity = 0.28 + 0.14 * Math.sin(t * 2.1 + i); });
+    });
+  });
+  if (FAR) {
+    colliders.push({ x: SEAT.x - 0.8, z: SEAT.z, r: 1.1 }, { x: WAYCAIRN.x, z: WAYCAIRN.z, r: 0.9 });
+    for (const lx of [-5, -2.5, 0, 2.5, 5]) colliders.push({ x: BONES.x + lx * Math.cos(0.5), z: BONES.z - lx * Math.sin(0.5), r: 0.5 });
+    const moon = new THREE.Mesh(new THREE.CircleGeometry(3.0, 20).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x24365a, emissive: 0xbfd6ff, emissiveIntensity: 0, roughness: 0.08, metalness: 0.5, transparent: true, opacity: 0.9, flatShading: true }));
+    moon.position.set(MOONPOOL.x, MOONPOOL.y - 0.16, MOONPOOL.z); moon.userData.noShadow = true; scene.add(moon); hidden.moon = moon;
+    const NM = 40, mp = new Float32Array(NM * 3), ms = [...Array(NM)].map(() => [Math.random() * 6.28, Math.sqrt(Math.random()) * 2.8, Math.random() * 6.28]);
+    const motes = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(mp, 3)), new THREE.PointsMaterial({ size: 0.16, color: 0xdfeaff, map: glowTex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false })); motes.frustumCulled = false; scene.add(motes);
+    let dark = 0; skyHooks.push((k) => { dark = k.dark; });
+    updaters.push((dt, t) => {
+      // By day it is only a dark pool. After dark it holds the sky, and gives a little of it back.
+      moon.material.emissiveIntensity = dark * (0.75 + 0.2 * Math.sin(t * 0.8)); motes.material.opacity = dark * 0.9; motes.visible = dark > 0.05;
+      if (!motes.visible) return;
+      for (let i = 0; i < NM; i++) { const [a, r, ph] = ms[i], k = (t * 0.07 + ph) % 1; mp[i * 3] = MOONPOOL.x + Math.cos(a + t * 0.05) * r; mp[i * 3 + 1] = MOONPOOL.y - 0.1 + k * 2.6; mp[i * 3 + 2] = MOONPOOL.z + Math.sin(a + t * 0.05) * r; }
+      motes.geometry.attributes.position.needsUpdate = true;
+    });
+    loadProps().then((make) => {
+      if (!make || !make('moon_pool')) return;
+      const quiet = (m) => { m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); return m; };
+      const pool = quiet(make('moon_pool')); pool.position.set(MOONPOOL.x, MOONPOOL.y, MOONPOOL.z); scene.add(pool);
+      const bones = quiet(make('whale_bones')); bones.position.set(BONES.x, terrainHeight(BONES.x, BONES.z) - 0.1, BONES.z); bones.rotation.y = 0.5; bones.scale.setScalar(1.25); scene.add(bones);
+      const seat = quiet(make('stone_seat')); seat.position.set(SEAT.x, terrainHeight(SEAT.x, SEAT.z) - 0.1, SEAT.z); seat.rotation.y = -0.12; scene.add(seat);      // it faces east, a little south: towards Hush Island
+      const cairn = quiet(make('cairn')); cairn.position.set(WAYCAIRN.x, terrainHeight(WAYCAIRN.x, WAYCAIRN.z) - 0.1, WAYCAIRN.z); cairn.scale.setScalar(0.8); cairn.traverse((o) => { if (o.isMesh) o.material.side = THREE.DoubleSide; }); scene.add(cairn);
+      // The stones visitors have left round its foot: as many as this visitor has laid.
+      const peb = make.single('pebble'); if (peb) { const inst = new THREE.InstancedMesh(peb.geometry, peb.material, 60), d = new THREE.Object3D(), r0 = mulberry32(12); for (let i = 0; i < 60; i++) { const a = r0() * 6.283, r = 1.1 + r0() * 1.3; d.position.set(WAYCAIRN.x + Math.cos(a) * r, terrainHeight(WAYCAIRN.x + Math.cos(a) * r, WAYCAIRN.z + Math.sin(a) * r) + 0.04, WAYCAIRN.z + Math.sin(a) * r); d.rotation.set(0, r0() * 6, 0); d.scale.setScalar(1.6 + r0() * 1.6); d.updateMatrix(); inst.setMatrixAt(i, d.matrix); } inst.count = hidden.laid || 0; inst.userData.noShadow = true; scene.add(inst); hidden.cairnStones = inst; }
+    });
+  }
+  // The High Meadow: seven standing stones in a ring, each with a small light carved on the face that looks inward,
+  // and on the crag above it the cairn that marks the top of the island.
+  const stones = STANDING.map((st, i) => ({ ...st, i, group: null, mark: null, glow: 0, until: 0 }));
+  if (FAR) {
+    for (const st of stones) colliders.push({ x: st.x, z: st.z, r: 0.75 });
+    colliders.push({ x: SUMMIT.x, z: SUMMIT.z, r: 0.9 });
+    loadProps().then((make) => {
+      if (!make || !make('standing_stone_0')) return;
+      for (const st of stones) {
+        const name = 'standing_stone_' + (st.i % 3), g = new THREE.Group(), body = make(name, name + '_mark'), mark = make(name + '_mark');
+        mark.traverse((o) => { if (o.isMesh) { o.material = new THREE.MeshStandardMaterial({ color: 0xcfe6e2, emissive: 0x9ff0e0, emissiveIntensity: 0.15, roughness: 0.6 }); st.mark = o.material; } });
+        g.add(body, mark); g.position.set(st.x, terrainHeight(st.x, st.z) - 0.1, st.z); g.rotation.y = Math.atan2(HILL.x - st.x, HILL.z - st.z) + Math.PI;      // the marked face looks into the ring
+        g.scale.setScalar(0.95 + (st.i % 3) * 0.08); g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(g); st.group = g;
+      }
+      const cairn = make('cairn'); cairn.position.set(SUMMIT.x, terrainHeight(SUMMIT.x, SUMMIT.z) - 0.1, SUMMIT.z); cairn.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; o.material.side = THREE.DoubleSide; } }); scene.add(cairn);
+    });
+    updaters.push((dt, t) => { const now = Date.now(); for (const st of stones) { st.glow = lerp(st.glow, st.until > now ? 1 : 0, 1 - Math.exp(-dt * 6)); if (st.mark) st.mark.emissiveIntensity = 0.15 + st.glow * 3.2; } });
+  }
+  // Under Hollow Hill: the way in and the way out, stone growing from floor and roof, crystals in the round chamber,
+  // and glow-worms on the roof all the way through.
+  let caveK = 0, lastSky = null;
+  let murkK = 0;
+  const hermit = { x: 0, z: 0, group: null, home: 0 }, paintings = [];
+  const echo = { crystals: [], door: { x: CAVE.door.x, z: CAVE.door.z, group: null, rings: [], open: false, drop: 0, solid: null }, mark: { x: CAVE.pool.x + 0.8, z: CAVE.pool.z + 4.6 } };
+  if (FAR) {
+    const cr = mulberry32(7117), at = (u) => { let acc = u * CAVE.pts.slice(1).reduce((a, p, i) => a + Math.hypot(p[0] - CAVE.pts[i][0], p[1] - CAVE.pts[i][1]), 0); for (let i = 0; i < CAVE.pts.length - 1; i++) { const L = Math.hypot(CAVE.pts[i + 1][0] - CAVE.pts[i][0], CAVE.pts[i + 1][1] - CAVE.pts[i][1]); if (acc <= L || i === CAVE.pts.length - 2) { const k = Math.min(1, acc / L); return { x: CAVE.pts[i][0] + (CAVE.pts[i + 1][0] - CAVE.pts[i][0]) * k, z: CAVE.pts[i][1] + (CAVE.pts[i + 1][1] - CAVE.pts[i][1]) * k, dx: (CAVE.pts[i + 1][0] - CAVE.pts[i][0]) / L, dz: (CAVE.pts[i + 1][1] - CAVE.pts[i][1]) / L }; } acc -= L; } };
+    let uIn = 0, uOut = 1;
+    for (let u = 0; u < 0.5; u += 0.01) { const p = at(u); if (caveRoofed(p.x, p.z, 0.5)) { uIn = u; break; } }
+    for (let u = 1; u > 0.5; u -= 0.01) { const p = at(u); if (caveRoofed(p.x, p.z, 0.5)) { uOut = u; break; } }
+    const inside = (lo, hi) => { for (let k = 0; k < 300; k++) { const x = -218 + cr() * 80, z = -116 + cr() * 60, c = caveAt(x, z); if (c.e > lo && c.e < hi && c.u > uIn + 0.04 && c.u < uOut - 0.04 && caveRoofed(x, z, 0.5)) return { x, z, c }; } return null; };
+    // The Hermit sits outside the eastern mouth, to one side of the way in, looking down the path.
+    { const p = at(uIn); hermit.x = p.x - p.dx * 4.2 - p.dz * 4.4; hermit.z = p.z - p.dz * 4.2 + p.dx * 4.4; hermit.home = Math.atan2(p.dz, -p.dx) + 0.5; colliders.push({ x: hermit.x, z: hermit.z, r: 0.8 }); }
+    // The painted stones: three slabs leaned against the wall of the dark gallery. What is on them is drawn here,
+    // in ochre, charcoal and chalk, and can only be seen by lantern light (main.js turns each one up or down).
+    const INK = '#231d1b', OCHRE = '#b5562a', CHALK = '#efe6d0';
+    const paint = (draw) => {
+      const c = document.createElement('canvas'); c.width = 1024; c.height = 720; const g = c.getContext('2d'), r = mulberry32(draw.length * 31 + 5);
+      g.lineCap = 'round'; g.lineJoin = 'round';
+      const line = (pts, col, w) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); pts.forEach(([x, y], i) => { const jx = x + (r() - 0.5) * 5, jy = y + (r() - 0.5) * 5; if (i) g.lineTo(jx, jy); else g.moveTo(jx, jy); }); g.stroke(); };
+      const dot = (x, y, rad, col) => { g.fillStyle = col; g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill(); };
+      const sea = (y, x0, x1, col = INK) => { const pts = []; for (let x = x0; x <= x1; x += 26) pts.push([x, y + Math.sin(x * 0.05) * 9]); line(pts, col, 6); };
+      const tower = (x, y, h, lit, broken) => { line([[x - 18, y], [x - 11, y - h], [x + 11, y - h], [x + 18, y], [x - 18, y]], INK, 7); line([[x - 34, y + 4], [x - 16, y - 10], [x + 16, y - 10], [x + 34, y + 4]], INK, 7); if (broken) { line([[x - 11, y - h], [x - 2, y - h + 16], [x + 5, y - h - 4], [x + 11, y - h + 10]], INK, 6); line([[x + 40, y - 6], [x + 62, y - 14], [x + 70, y]], INK, 6); } else { dot(x, y - h - 14, 12, lit ? OCHRE : INK); if (lit) for (let k = 0; k < 7; k++) { const a = -Math.PI + k * Math.PI / 6; line([[x + Math.cos(a) * 22, y - h - 14 + Math.sin(a) * 22], [x + Math.cos(a) * 44, y - h - 14 + Math.sin(a) * 44]], CHALK, 5); } } };
+      const boat = (x, y, s, tilt = 0) => { g.save(); g.translate(x, y); g.rotate(tilt); line([[-40 * s, 0], [-26 * s, 18 * s], [26 * s, 18 * s], [42 * s, -2 * s], [-40 * s, 0]], INK, 6); line([[0, 0], [0, -52 * s]], INK, 5); line([[0, -50 * s], [30 * s, -14 * s], [0, -10 * s]], OCHRE, 6); g.restore(); };
+      const stag = (x, y, s) => { line([[x - 26 * s, y - 30 * s], [x + 22 * s, y - 32 * s], [x + 30 * s, y - 52 * s]], INK, 12 * s); for (const lx of [-22, -10, 12, 22]) line([[x + lx * s, y - 30 * s], [x + lx * s, y]], INK, 6 * s); dot(x + 34 * s, y - 58 * s, 9 * s, INK); for (const d of [-1, 1]) { line([[x + 32 * s, y - 64 * s], [x + (32 + d * 16) * s, y - 92 * s], [x + (32 + d * 30) * s, y - 100 * s]], INK, 5 * s); line([[x + (32 + d * 10) * s, y - 80 * s], [x + (32 + d * 22) * s, y - 82 * s]], INK, 4 * s); } };
+      draw({ g, line, dot, sea, tower, boat, stag, r });
+      const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx;
+    };
+    const PAINTED = [
+      { id: 'lights', title: 'The first stone', text: 'Seven towers along a sea, each with a light at its head and lines of chalk coming from it. Small boats go between them. Whoever painted it took care over every one.',
+        draw: ({ sea, tower, boat }) => { sea(560, 40, 990); sea(620, 80, 950); [[110, 470, 80], [250, 400, 90], [390, 360, 100], [520, 345, 110], [650, 360, 100], [790, 400, 90], [920, 470, 80]].forEach(([x, y, h]) => tower(x, y, h, true)); boat(320, 600, 0.8); boat(700, 610, 0.8); } },
+      { id: 'storm', title: 'The second stone', text: 'Rain in hard slanting strokes. The sea stands up in coils. On the right a tower with its top gone and no chalk round it. On the left a boat lying over on its side, and in it something small and long with a tail.',
+        draw: ({ line, sea, tower, boat, dot, r }) => { for (let i = 0; i < 46; i++) { const x = 30 + r() * 960, y = 30 + r() * 300; line([[x, y], [x - 26, y + 60]], INK, 4); } for (let i = 0; i < 6; i++) { const x = 90 + i * 150, y = 520 + (i % 2) * 50; line([[x - 60, y + 40], [x - 20, y - 30], [x + 30, y - 46], [x + 60, y - 10], [x + 40, y + 16], [x + 14, y + 4]], INK, 8); } sea(660, 40, 990); tower(840, 430, 130, false, true); boat(260, 470, 1.1, -0.5); line([[236, 430], [262, 442], [290, 436], [312, 452]], OCHRE, 9); dot(232, 428, 9, OCHRE); } },
+      { id: 'leaving', title: 'The third stone', text: 'A small boat with one sail, and standing in it an animal with antlers, facing away. Behind it the broken tower. Ahead of it, far to the east, a low island with nothing on it but a fire, and chalk round the fire as there was once round the lights.',
+        draw: ({ line, sea, tower, boat, stag, dot }) => { sea(590, 40, 990); sea(650, 60, 960); tower(120, 470, 120, false, true); boat(470, 520, 1.5); stag(452, 512, 1.0); line([[780, 560], [820, 520], [900, 512], [960, 556]], INK, 8); line([[858, 512], [866, 478], [876, 496], [884, 470], [892, 512]], OCHRE, 9); for (let k = 0; k < 6; k++) { const a = -Math.PI + 0.3 + k * 0.5; line([[874 + Math.cos(a) * 46, 490 + Math.sin(a) * 46], [874 + Math.cos(a) * 70, 490 + Math.sin(a) * 70]], CHALK, 5); } } },
+    ];
+    { const A = CAVE.pts[1];
+      PAINTED.forEach((pn, i) => { const a = 3.55 + i * 0.78, x = A[0] + Math.cos(a) * 5.3, z = A[1] + Math.sin(a) * 5.3; paintings.push({ ...pn, x, z, ry: Math.atan2(A[0] - x, A[1] - z), mat: null, seen: false }); colliders.push({ x: x - Math.cos(a) * -0.6, z: z - Math.sin(a) * -0.6, r: 1.1 }); }); }
+    // The echo chamber's three singing crystals, the stone door they open, and the pool room behind it.
+    { const B = CAVE.pts[2]; [1.25, 2.9, 5.0].forEach((a, i) => { const x = B[0] + Math.cos(a) * 5.5, z = B[1] + Math.sin(a) * 5.5; echo.crystals.push({ x, z, group: null, until: 0, glow: 0, i }); colliders.push({ x, z, r: 0.7 }); });
+      echo.door.solid = { x: CAVE.door.x, z: CAVE.door.z, r: 2.6 }; colliders.push(echo.door.solid);
+      const pw = new THREE.Mesh(new THREE.CircleGeometry(CAVE.pool.r - 1.6, 18).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x2f7f86, emissive: 0x1f5f6a, emissiveIntensity: 0.9, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.85, flatShading: true }));
+      pw.position.set(CAVE.pool.x, caveAt(CAVE.pool.x, CAVE.pool.z).floor + 0.34, CAVE.pool.z); pw.userData.noShadow = true; scene.add(pw);
+      colliders.push({ x: echo.mark.x, z: echo.mark.z + 0.7, r: 1.0 }); }
+    const ups = [], downs = [], gems = [];
+    for (let i = 0; i < 26; i++) { const p = inside(-1.5, -0.3); if (p) { ups.push({ ...p, s: 0.6 + cr() * 0.8, ry: cr() * 6 }); colliders.push({ x: p.x, z: p.z, r: 0.42 }); } }
+    for (let i = 0; i < 34; i++) { const p = inside(-9, -0.2); if (p) downs.push({ ...p, s: 0.6 + cr() * 0.9, ry: cr() * 6 }); }
+    for (let i = 0; i < 9; i++) { const B = CAVE.pts[2], a = cr() * 6.283, x = B[0] + Math.cos(a) * 6.4, z = B[1] + Math.sin(a) * 6.4; if (caveAt(x, z).e < -0.3) gems.push({ x, z, s: 0.8 + cr() * 0.9, ry: cr() * 6 }); }
+    loadProps().then((make) => {
+      if (!make || !make('cave_mouth')) return;
+      const quiet = (m) => { m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; if (/^k_crystal/.test(o.material.name)) { o.material.emissive.copy(o.material.color); o.material.emissiveIntensity = 1.3; } if (o.material.name === 'c_lantern_glow') { o.material.emissive.set(0xffb45a); o.material.emissiveIntensity = 2.2; } } }); return m; };
+      for (const [u, dir] of [[uIn, 1], [uOut, -1]]) { const p = at(u), m = quiet(make('cave_mouth')); m.position.set(p.x - p.dx * dir * 1.2, caveAt(p.x, p.z).floor - 0.3, p.z - p.dz * dir * 1.2); m.rotation.y = Math.atan2(-p.dx * dir, -p.dz * dir); scene.add(m); for (const sx of [-4.6, 4.6]) colliders.push({ x: m.position.x - p.dz * sx, z: m.position.z + p.dx * sx, r: 2.0 }); }
+      for (const p of ups) { const m = quiet(make('stalagmites')); m.position.set(p.x, p.c.floor + 0.3, p.z); m.scale.setScalar(p.s); m.rotation.y = p.ry; scene.add(m); }
+      for (const p of downs) { const m = quiet(make('stalactites')); m.position.set(p.x, caveAt(p.x, p.z).top + 0.1, p.z); m.scale.setScalar(p.s); m.rotation.y = p.ry; scene.add(m); }
+      for (const p of gems) { const m = quiet(make('crystals')); m.position.set(p.x, groundHeight(p.x, p.z) + 0.05, p.z); m.scale.setScalar(p.s); m.rotation.y = p.ry; scene.add(m); }
+      for (const c of echo.crystals) { const m = quiet(make('crystals')); m.position.set(c.x, groundHeight(c.x, c.z), c.z); m.scale.setScalar(2.3); m.rotation.y = c.i * 2.1; m.traverse((o) => { if (o.isMesh) o.material = o.material.clone(); }); scene.add(m); c.group = m; }
+      { const D = echo.door, B = CAVE.pts[2], g = new THREE.Group(), wheel = quiet(make('echo_door', 'door_ring'));
+        g.add(wheel); for (let i = 0; i < 3; i++) { const r = make('door_ring_' + i); if (!r) continue; r.traverse((o) => { if (o.isMesh) { o.material = new THREE.MeshStandardMaterial({ color: 0x4a4652, emissive: 0x8fe6f0, emissiveIntensity: 0, roughness: 0.6 }); D.rings[i] = o.material; } }); g.add(r); }
+        g.position.set(D.x, caveAt(D.x, D.z).floor - 0.4, D.z); g.rotation.y = Math.atan2(B[0] - D.x, B[1] - D.z); scene.add(g); D.group = g; D.y0 = g.position.y; if (D.open) { D.drop = 1; g.position.y = D.y0 - 6; } }
+      { // the mark by the pool: scratched and pressed into the rock, not painted
+        const slab = quiet(make('painted_stone')); slab.position.set(echo.mark.x, caveAt(echo.mark.x, echo.mark.z).floor - 0.1, echo.mark.z + 0.7); slab.rotation.y = Math.PI; slab.scale.setScalar(0.8);
+        const tx = paint(({ line, dot, sea }) => { sea(560, 250, 780); line([[400, 470], [430, 510], [600, 510], [640, 462], [400, 470]], INK, 8); line([[515, 468], [515, 360]], INK, 6); line([[515, 362], [580, 440], [515, 448]], INK, 7); for (const [x, y] of [[470, 250], [500, 226], [534, 226], [564, 250]]) dot(x, y, 13, OCHRE); dot(517, 292, 30, OCHRE); line([[640, 300], [730, 300], [706, 280]], CHALK, 6); line([[730, 300], [706, 320]], CHALK, 6); });
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 2.1), new THREE.MeshBasicMaterial({ map: tx, transparent: true, opacity: 0.7, depthWrite: false, fog: false, toneMapped: false })); art.position.set(0, 1.3, -0.36); art.rotation.x = -0.3; slab.add(art); scene.add(slab); }
+      const hm = make('hermit'); if (hm) { hm.position.set(hermit.x, terrainHeight(hermit.x, hermit.z) - 0.04, hermit.z); hm.rotation.y = hermit.home; hm.scale.setScalar(1.15); quiet(hm); scene.add(hm); hermit.group = hm; }
+      for (const pn of paintings) {
+        const slab = quiet(make('painted_stone')); if (!slab) break;
+        slab.position.set(pn.x, caveAt(pn.x, pn.z).floor - 0.1, pn.z); slab.rotation.y = pn.ry;
+        pn.mat = new THREE.MeshBasicMaterial({ map: paint(pn.draw), transparent: true, opacity: 0.04, depthWrite: false, fog: false, toneMapped: false });
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 2.1), pn.mat); art.position.set(0, 1.29 + 0.012, -0.4 + 0.04); art.rotation.x = -0.3; slab.add(art);
+        scene.add(slab);
+      }
+      const glow = (m) => m.traverse((o) => { if (o.isMesh && o.material.name === 'g_shroom_cap') { o.material.emissive.set(0x5fe8cf); o.material.emissiveIntensity = 1.6; } });
+      for (let i = 0; i < 12; i++) { const p = inside(-1.2, 0.2); if (!p) continue; const m = make('glow_mushrooms'); glow(m); m.position.set(p.x, groundHeight(p.x, p.z), p.z); m.scale.setScalar(0.6 + cr() * 0.6); scene.add(m); }
+    });
+    const NG = 240, gp = new Float32Array(NG * 3); let n = 0;
+    for (let k = 0; k < 4000 && n < NG; k++) { const x = -218 + cr() * 80, z = -116 + cr() * 60, c = caveAt(x, z); if (c.e > -0.2 || !caveRoofed(x, z, 0.3)) continue; gp[n * 3] = x; gp[n * 3 + 1] = c.top - 0.12 - cr() * 0.25; gp[n * 3 + 2] = z; n++; }
+    const worms = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(gp.subarray(0, n * 3), 3)), new THREE.PointsMaterial({ size: 0.2, color: 0x8ff5e0, map: glowTex, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false }));
+    scene.add(worms);
+    updaters.push((dt, t) => {
+      const now = Date.now(), D = echo.door;
+      for (const c of echo.crystals) { const on = c.until > now ? 1 : 0; c.glow = lerp(c.glow, on, 1 - Math.exp(-dt * 4)); if (c.group) { c.group.traverse((o) => { if (o.isMesh && /^k_crystal/.test(o.material.name)) o.material.emissiveIntensity = 1.0 + c.glow * (3.2 + Math.sin(t * 9 + c.i) * 0.8); }); c.group.scale.setScalar(2.3 * (1 + c.glow * 0.05 * Math.sin(t * 11))); } if (D.rings[c.i]) D.rings[c.i].emissiveIntensity = (D.open ? 1 : c.glow) * 2.4; }
+      if (D.group) { D.drop = lerp(D.drop, D.open ? 1 : 0, 1 - Math.exp(-dt * 0.9)); D.group.position.y = D.y0 - D.drop * 6; D.group.rotation.z = D.drop * 1.4; }
+    });
+    updaters.push((dt, t) => { worms.visible = caveK > 0.02; worms.material.opacity = (0.7 + 0.25 * Math.sin(t * 1.3)) * Math.min(1, caveK * 2); });
+    // In the cave the day does not reach: the light is turned almost out and the distance is black.
+    const black = new THREE.Color(0x05060a);
+    skyHooks.push((k) => {
+      lastSky = k; if (murkK > 0.001) scene.fog.density = lerp(scene.fog.density, Math.max(scene.fog.density, 0.036), murkK);
+      if (caveK <= 0.001) { sky.visible = true; return; }
+      hemi.intensity *= lerp(1, 0.13, caveK); moonLight.intensity *= lerp(1, 0.04, caveK); fill.intensity *= lerp(1, 0.1, caveK);
+      scene.fog.color.lerp(black, caveK); scene.background.lerp(black, caveK); scene.fog.density = lerp(scene.fog.density, 0.055, caveK);
+      sky.visible = caveK < 0.5;
+    });
+  }
+  // The lighthouse on Lantern Point: a broken tower when the first visitors arrive. Its top (the gallery, the lamp
+  // room and the roof) is a separate piece, kept out of sight until it has been rebuilt. The tower is the one thing
+  // on the island that shows through the mist from far away, so that there is always something to walk towards.
+  const lighthouse = { group: null, parts: [], stage: 0, door: { x: LIGHTHOUSE.x + 4.6, z: LIGHTHOUSE.z }, galleryY: LIGHTHOUSE.y - 0.1 + 17.5 };
+  if (FAR) {
+    colliders.push({ x: LIGHTHOUSE.x, z: LIGHTHOUSE.z, r: 3.5 });
+    loadProps().then((make) => {
+      const m = make && make('lighthouse', 'lighthouse_s'); if (!m) return;
+      // The four things that were lost, each put back when enough has been carried up: the wall and gallery, the
+      // rail and frame, the glass and roof, and the lamp.
+      for (let k = 1; k <= 4; k++) { const part = make('lighthouse_s' + k, 'lighthouse_s2_frame'); if (!part) continue; part.userData.stage = k; part.visible = k <= lighthouse.stage; m.add(part); lighthouse.parts[k] = part; }
+      const frame = make('lighthouse_s2_frame'); if (frame) { frame.userData.stage = 2; frame.visible = lighthouse.stage >= 2; m.add(frame); lighthouse.frame = frame; }
+      m.traverse((o) => { if (o.isMesh && o.material.name === 'lh_glass') { o.material.transparent = true; o.material.opacity = 0.45; o.material.depthWrite = false; } });
+      m.position.set(LIGHTHOUSE.x, LIGHTHOUSE.y - 0.1, LIGHTHOUSE.z);
+      const mats = [];
+      m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; o.material.fog = false; mats.push({ m: o.material, base: o.material.color.clone() }); } });
+      scene.add(m); lighthouse.group = m;
+      updaters.push(() => {
+        const cam = opts.camera; if (!cam) return;
+        const d = Math.hypot(cam.position.x - LIGHTHOUSE.x, cam.position.z - LIGHTHOUSE.z), dens = scene.fog.density * 0.5, f = (1 - Math.exp(-dens * dens * d * d)) * 0.88;
+        for (const k of mats) k.m.color.copy(k.base).lerp(scene.fog.color, f);
+      });
+    });
+  }
+  // Left on Hush Island from before: the carved post by the dock, the lamp lens in the sand (and, once a visitor has
+  // found it, by the woodpile), and the Keeper's sea chest.
+  const relics = { lensSand: null, lensHome: null, found: false };
+  if (!FAR) {
+    colliders.push({ x: POST.x, z: POST.z, r: 0.3 }, { x: CHEST.x, z: CHEST.z, r: 0.55 });
+    loadProps().then((make) => {
+      if (!make || !make('carved_post')) return;
+      const post = make('carved_post'); post.position.set(POST.x, terrainHeight(POST.x, POST.z) - 0.05, POST.z); post.rotation.y = Math.PI - 0.5; scene.add(post);
+      const chest = make('sea_chest'); chest.position.set(CHEST.x, terrainHeight(CHEST.x, CHEST.z), CHEST.z); chest.rotation.y = 2.5; scene.add(chest);
+      const glassy = (m) => m.traverse((o) => { if (o.isMesh && /^l_glass/.test(o.material.name)) { o.material.transparent = true; o.material.opacity = 0.8; o.material.roughness = 0.15; o.material.emissive.set(0x3f8f88); o.material.emissiveIntensity = 0.25; } });
+      const a = make('lamp_lens'); glassy(a); a.position.set(LENS.x, terrainHeight(LENS.x, LENS.z) - 0.06, LENS.z); a.rotation.y = 1.1; scene.add(a); relics.lensSand = a;
+      const b = make('lamp_lens', 'lens_sand'); glassy(b); b.position.set(WOODPILE.x + 1.25, terrainHeight(WOODPILE.x + 1.25, WOODPILE.z - 0.9) + 0.22, WOODPILE.z - 0.9); b.rotation.set(0.5, 2.2, 0); scene.add(b); relics.lensHome = b;
+      a.visible = !relics.found; b.visible = relics.found;
+    });
+  }
+  let cellAt = 0;
+  let propAt = 0; const propBox = new THREE.Box3(), propSphere = new THREE.Sphere();
+  if (FAR) updaters.push(() => {
+    const cam = opts.camera; if (!cam) return;
+    for (let k = 0; k < 40 && cells.length; k++) { const c = cells[cellAt++ % cells.length]; c.inst.visible = Math.hypot(c.x - cam.position.x, c.z - cam.position.z) < c.far * reach + c.pad; }
+    // Everything else that stands still and is small (rocks, mushrooms, lanterns, heaps): out of the picture when it
+    // is too far off to matter. Done with layers, so that nothing else's say over what is visible is disturbed.
+    const kids = scene.children;
+    for (let k = 0; k < 220 && kids.length; k++) {
+      const o = kids[propAt++ % kids.length]; let u = o.userData.cull;
+      if (u === 0) continue;
+      if (u === undefined) {
+        if (!(o.isGroup || (o.isMesh && !o.isInstancedMesh)) || (o.position.x === 0 && o.position.z === 0)) { o.userData.cull = 0; continue; }
+        const r = propBox.setFromObject(o).getBoundingSphere(propSphere).radius;
+        if (!(r > 0) || r > 9) { o.userData.cull = 0; continue; }
+        u = o.userData.cull = { x: o.position.x, z: o.position.z, far: r < 2.5 ? 100 : 170, off: false };
+      }
+      if (o.position.x !== u.x || o.position.z !== u.z) { if (u.off) o.traverse((c) => c.layers.set(0)); o.userData.cull = 0; continue; }      // it moves: not ours to hide
+      const off = Math.hypot(u.x - cam.position.x, u.z - cam.position.z) > u.far * reach;
+      if (off !== u.off) { u.off = off; o.traverse((c) => c.layers.set(off ? 1 : 0)); }
+    }
+  });
   loadProps().then((make) => {
     if (!make || !FAR) return;
     const at = (kind) => farTrees.map((tr, i) => ({ ...tr, i })).filter((tr) => tr.kind === kind);
     const place = (list, drop) => list.map((tr) => ({ x: tr.x, y: terrainHeight(tr.x, tr.z) - drop, z: tr.z, s: tr.s, ry: tr.ry }));
-    batch(make, 'pine_a', place(at('pine').filter((tr) => tr.i % 2 === 0), 0.1)); batch(make, 'pine_b', place(at('pine').filter((tr) => tr.i % 2 === 1), 0.1));
-    batch(make, 'leafy_a', place(at('leafy').filter((tr) => tr.i % 2 === 0), 0.1)); batch(make, 'leafy_b', place(at('leafy').filter((tr) => tr.i % 2 === 1), 0.1));
-    batch(make, 'palm', place(at('palm'), 0.15));
+    // Birches, gold all year, wherever there is shelter; on high or open ground, trees the sea wind has bent, all
+    // leaning the same way.
+    const all = farTrees.map((tr, i) => ({ ...tr, i }));
+    const inValley = (tr) => Math.hypot(tr.x - VALLEY.x, tr.z - VALLEY.z) < VALLEY.r;
+    const open = (tr) => !inValley(tr) && (terrainHeight(tr.x, tr.z) > 9 || Math.hypot(tr.x - WOODS.x, tr.z - WOODS.z) > WOODS.r * 1.9);
+    const birches = all.filter((tr) => !open(tr)), bent = all.filter(open);
+    batch(make, 'birch_a', place(birches.filter((tr) => tr.i % 2 === 0), 0.1)); batch(make, 'birch_b', place(birches.filter((tr) => tr.i % 2 === 1), 0.1));
+    batch(make, 'bent_tree', bent.map((tr) => ({ x: tr.x, y: terrainHeight(tr.x, tr.z) - 0.1, z: tr.z, s: tr.s * 1.25, ry: Math.sin(tr.i * 7.3) * 0.35 })));
+    // More birches, close together, in Whisper Woods itself.
+    const wr = mulberry32(606), wood = [];
+    for (let k = 0; k < 20000 && wood.length < 330; k++) {
+      const a = wr() * 6.283, d = Math.sqrt(wr()) * WOODS.r, x = WOODS.x + Math.cos(a) * d, z = WOODS.z + Math.sin(a) * d;
+      if (pathDist(x, z) < 2.2 || terrainHeight(x, z) < 1 || Math.hypot(x - HOLLOW_TREE.x, z - HOLLOW_TREE.z) < 8 || wood.some((w) => Math.hypot(w.x - x, w.z - z) < 2.6) || farTrees.some((w) => Math.hypot(w.x - x, w.z - z) < 2.2)) continue;
+      wood.push({ x, y: terrainHeight(x, z) - 0.1, z, s: 0.8 + wr() * 0.6, ry: wr() * 6 }); colliders.push({ x, z, r: 0.22 });
+    }
+    batch(make, 'birch_a', wood.filter((_, i) => i % 2 === 0)); batch(make, 'birch_b', wood.filter((_, i) => i % 2 === 1));
+    // The old way: paving somebody laid long ago, slab after slab, from the jetty to every part of the island.
+    const sr = mulberry32(88), slabs = [];
+    for (const path of PATHS) for (let i = 0; i < path.length - 1; i++) {
+      const [ax, az] = path[i], [bx, bz] = path[i + 1], len = Math.hypot(bx - ax, bz - az), ang = Math.atan2(-(bz - az), bx - ax);
+      for (let d = 0; d < len; d += 1.12) {
+        if (sr() < 0.12) continue;      // some are missing
+        const k = d / len, off = (sr() - 0.5) * 0.5, x = ax + (bx - ax) * k - Math.sin(-ang) * off * 0, z = az + (bz - az) * k + off;
+        if (Math.hypot(x, z) < 5.6 || terrainHeight(x, z) < 0.4) continue;
+        slabs.push({ x, y: terrainHeight(x, z) + 0.01, z, s: 0.95 + sr() * 0.35, ry: ang + (sr() - 0.5) * 0.5, n: Math.floor(sr() * 3) });
+      }
+    }
+    for (let n = 0; n < 3; n++) batch(make, 'slab_' + n, slabs.filter((sl) => sl.n === n));
+    // Bracken and heather instead of grass and flowers.
+    const fr = mulberry32(909), ferns = [], heath = [];
+    for (let k = 0; k < 160000 && (ferns.length < 2600 || heath.length < 4200); k++) {
+      const a = fr() * 6.283, r = Math.sqrt(fr()) * shoreRadius(a) * 0.98, x = Math.cos(a) * r, z = Math.sin(a) * r, h = terrainHeight(x, z);
+      if (h < 0.8 || Math.hypot(x, z) < 11.5 || pathDist(x, z) < 1.7 || (x > 8 && Math.abs(z) < 5)) continue;
+      const hea = noise2(x * 0.12 - 7, z * 0.12 + 4);
+      if (hea > 0.2 && heath.length < 4200) heath.push({ x, y: h - 0.04, z, s: 0.8 + fr() * 0.9, ry: fr() * 6 });
+      else if (hea < 0.12 && ferns.length < 2600 && fr() < 0.6) { const g = fr(); ferns.push({ x, y: h - 0.03, z, s: 0.4 + fr() * 0.45, ry: fr() * 6, tint: [0.62 + g * 0.4, 0.95 + g * 0.1, 0.7 + g * 0.3] }); }
+    }
+    const fb = batch(make, 'bracken', ferns); if (fb) fb.receiveShadow = false;
+    batch(make, 'heather', heath);
+    // Rock standing in the sea round the island.
+    const sea = [['sea_stack_0', -0.75, 12, 1], ['sea_stack_1', 0.95, 14, 1.1], ['sea_arch', 1.75, 26, 1.2], ['sea_stack_0', 3.05, 24, 1.6], ['sea_stack_1', -3.0, 18, 1.5], ['sea_arch', -2.45, 30, 1.4], ['sea_stack_1', -1.9, 16, 1.3], ['sea_stack_0', -1.45, 22, 1.4], ['sea_stack_0', 2.7, 20, 1.2], ['sea_stack_1', 1.35, 18, 1.0], ['sea_stack_0', -2.2, 40, 1.8], ['sea_stack_1', 2.3, 34, 1.3]];
+    for (const [name, a, off, sc] of sea) {
+      const r0 = shoreRadius(a) + off, x = Math.cos(a) * r0, z = Math.sin(a) * r0, ry = a * 3.1;
+      const m = make(name); if (!m) continue;
+      m.position.set(x, -0.3, z); m.rotation.y = ry; m.scale.setScalar(sc); m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } });
+      scene.add(m);
+    }
   });
   loadProps().then((make) => {
     if (!make || !make('pine_a') || FAR) return;
@@ -980,7 +1465,7 @@ export function buildWorld(scene, opts = {}) {
     const mats = [std(0x7a7f8e), std(0x666b7a), std(0x8a8d98)];
     const rockList = [];
     let n = 0; tries = 0;
-    while (n < (FAR ? 80 : 26) && tries++ < (FAR ? 8000 : 2000)) {
+    while (n < (FAR ? 260 : 26) && tries++ < (FAR ? 30000 : 2000)) {
       const a = rng() * Math.PI * 2;
       const d = rng() < 0.55 ? 0.9 + rng() * 0.2 : 0.35 + rng() * 0.5;
       const r = d * shoreRadius(a);
@@ -1014,7 +1499,7 @@ export function buildWorld(scene, opts = {}) {
     const blade = new THREE.ConeGeometry(0.09, 0.3, 4);
     blade.scale(1, 1, 0.35);
     blade.translate(0, 0.15, 0);
-    const COUNT = FAR ? 3600 : 1100;
+    const COUNT = FAR ? 0 : 1100;
     const inst = new THREE.InstancedMesh(blade, std(0x5f9a5a, { emissive: 0x1c3a22, flatShading: false }), COUNT);
     const dummy = new THREE.Object3D();
     let n = 0; tries = 0;
@@ -1072,13 +1557,13 @@ export function buildWorld(scene, opts = {}) {
     };
     const flowers = [];
     let tries2 = 0;
-    while (flowers.length < (FAR ? 900 : 300) && tries2++ < (FAR ? 24000 : 6000)) {
+    while (flowers.length < (FAR ? 0 : 300) && tries2++ < (FAR ? 24000 : 6000)) {
       const a = r2() * Math.PI * 2, r = 6 + Math.sqrt(r2()) * (FAR ? shoreRadius(a) * 0.9 : 24), x = Math.cos(a) * r, z = Math.sin(a) * r;
       if (terrainHeight(x, z) < 0.95 || pathAmount(x, z) > 0.2 || noise2(x * 0.16 + 40, z * 0.16 - 12) < 0.12) continue;      // in drifts, not everywhere
       const c = Math.floor(r2() * 4), n = 2 + Math.floor(r2() * 4);
       for (let k = 0; k < n; k++) { const fx = x + (r2() - 0.5) * 1.3, fz = z + (r2() - 0.5) * 1.3; flowers.push({ x: fx, y: terrainHeight(fx, fz) - 0.02, z: fz, ry: r2() * 6, tx: (r2() - 0.5) * 0.3, tz: (r2() - 0.5) * 0.3, s: 0.8 + r2() * 0.7, c }); }
     }
-    scatter('flower', flowers, 'flower_petal', [0xffffff, 0xffd54a, 0xf59ac0, 0xb9a2f2]);
+    if (flowers.length) scatter('flower', flowers, 'flower_petal', [0xffffff, 0xffd54a, 0xf59ac0, 0xb9a2f2]);
     const pebbles = [], stars = [];
     tries2 = 0;
     while (pebbles.length < (FAR ? 620 : 260) && tries2++ < (FAR ? 14000 : 5000)) {
@@ -1372,13 +1857,20 @@ export function buildWorld(scene, opts = {}) {
   // Tents round the fire, supplies, lanterns along the way to the jetty, the board where the map is kept, and the
   // Mapmaker who keeps it. All modelled in Blender; nothing stands here until the models arrive.
   const mapmaker = { x: MAPMAKER.x, z: MAPMAKER.z, group: null, home: 0 };
+  let redrawMap = () => {};
   if (FAR) {
     for (const p of LANDING) if (p.r) colliders.push({ x: p.x, z: p.z, r: p.r });
     for (const sx of [-1.25, 1.25]) colliders.push({ x: MAP_BOARD.x + Math.cos(MAP_BOARD.ry) * sx, z: MAP_BOARD.z - Math.sin(MAP_BOARD.ry) * sx, r: 0.3 });
     colliders.push({ x: MAPMAKER.x, z: MAPMAKER.z, r: 0.95 });
     // The map: the coast as far as anyone has drawn it. Only the Landing is filled in so far.
-    const drawMap = () => {
-      const c = document.createElement('canvas'); c.width = 1024; c.height = 666;
+    redrawMap = (st) => drawMap(st); mapmaker.canvas = () => mapCanvas;
+    const mapCanvas = document.createElement('canvas'); mapCanvas.width = 1024; mapCanvas.height = 666;
+    let mapTex = null;
+    // st: { firsts, walked, cards, named, namer }. What anyone has found is on the map; what you have walked yourself is in dark ink.
+    let mapState = {};
+    const drawMap = (st = mapState) => {
+      mapState = st;
+      const c = mapCanvas, firsts = st.firsts || {}, walked = st.walked || new Set(), seen = st.cards || new Set();
       const g = c.getContext('2d');
       g.fillStyle = '#f1e3c2'; g.fillRect(0, 0, c.width, c.height);
       const r0 = mulberry32(77);
@@ -1401,14 +1893,28 @@ export function buildWorld(scene, opts = {}) {
         if (a.id === 'landing') {
           g.fillStyle = '#c9502f'; g.beginPath(); g.arc(X(0), Z(0), 9, 0, 7); g.fill();
           g.fillStyle = '#3d2e1f'; g.font = 'italic 600 30px Georgia, serif'; g.fillText('The Landing', X(0) - 6, Z(0) + 34);
+        } else if (firsts['a-' + a.id] || walked.has(a.id)) {
+          const f = firsts['a-' + a.id], mine = walked.has(a.id);
+          const [lx, lz] = { meadow: [24, -34], point: [-34, 36], woods: [-6, -26], farbeach: [10, -6] }[a.id] || [0, 0], ax = X(a.x) + lx, az = Z(a.z) + lz;      // nudged so close neighbours do not write over each other
+          g.fillStyle = mine ? '#3d2e1f' : 'rgba(61,46,31,0.5)'; g.font = 'italic 600 27px Georgia, serif'; g.fillText(a.name, ax, az - 8);
+          if (f) { g.fillStyle = mine ? 'rgba(138,74,44,0.95)' : 'rgba(138,74,44,0.6)'; g.font = 'italic 18px Georgia, serif'; g.fillText('first walked by ' + f.name, ax, az + 17); }
         } else { g.fillStyle = 'rgba(91,70,48,0.6)'; g.font = 'italic 44px Georgia, serif'; g.fillText('?', X(a.x), Z(a.z)); }
       }
-      g.fillStyle = '#3d2e1f'; g.font = 'italic 600 40px Georgia, serif'; g.textAlign = 'left'; g.fillText('The far shore', 38, 50);
-      g.font = 'italic 22px Georgia, serif'; g.fillStyle = 'rgba(61,46,31,0.75)'; g.fillText('as far as anyone has walked it', 40, 86);
+      // A small cross for every sight somebody has found.
+      g.lineWidth = 3; g.lineCap = 'round';
+      for (const id in SIGHT_AT) {
+        if (!firsts['s-' + id] && !seen.has(id)) continue;
+        const sx = X(SIGHT_AT[id][0]), sz = Z(SIGHT_AT[id][1]);
+        g.strokeStyle = seen.has(id) ? '#b23a1c' : 'rgba(178,58,28,0.5)'; g.beginPath(); g.moveTo(sx - 6, sz - 6); g.lineTo(sx + 6, sz + 6); g.moveTo(sx + 6, sz - 6); g.lineTo(sx - 6, sz + 6); g.stroke();
+      }
+      g.fillStyle = '#3d2e1f'; g.font = 'italic 600 40px Georgia, serif'; g.textAlign = 'left'; g.fillText(st.named ? 'Lantern Rock' : 'The far shore', 38, 50);
+      g.font = 'italic 22px Georgia, serif'; g.fillStyle = 'rgba(61,46,31,0.75)'; g.fillText(st.named && st.namer ? 'named again from the summit by ' + st.namer : 'as far as anyone has walked it', 40, 86);
+      g.font = 'italic 18px Georgia, serif'; g.fillText('Dark ink: where you have walked.   \u00d7  a sight somebody has found.', 40, 644);
       // north is up the page (the island's -z)
       g.strokeStyle = '#3d2e1f'; g.lineWidth = 3; g.beginPath(); g.moveTo(950, 110); g.lineTo(950, 44); g.moveTo(938, 62); g.lineTo(950, 44); g.lineTo(962, 62); g.stroke();
       g.textAlign = 'center'; g.font = 'italic 600 24px Georgia, serif'; g.fillStyle = '#3d2e1f'; g.fillText('N', 950, 128);
-      const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return tx;
+      if (!mapTex) { mapTex = new THREE.CanvasTexture(c); mapTex.colorSpace = THREE.SRGBColorSpace; mapTex.anisotropy = 4; }
+      mapTex.needsUpdate = true; return mapTex;
     };
     loadProps().then((make) => {
       if (!make || !make('tent')) return;
@@ -1429,7 +1935,19 @@ export function buildWorld(scene, opts = {}) {
   }
 
   const api = {
-    mapmaker,
+    setMap: (st) => redrawMap(st),
+    mapmaker, lighthouse, hermit, paintings, echo, stones, heron, cottage, flats,
+    ringBell() { flats.bell.swing = 0.5; },
+    sources, setLightStage(n) { lighthouse.stage = n; lighthouse.parts.forEach((part, k) => { if (part) part.visible = k <= n; }); if (lighthouse.frame) lighthouse.frame.visible = n >= 2; },
+    logPages, setLogPage(i, there) { const pg = logPages[i]; if (pg) { pg.there = there; if (pg.group) pg.group.visible = there; } },
+    setCairn(n) { hidden.laid = Math.min(60, n); if (hidden.cairnStones) hidden.cairnStones.count = hidden.laid; },
+    ringStone(i, ms = 900) { if (stones[i]) stones[i].until = Date.now() + ms; },
+    ringCrystal(i, ms) { echo.crystals[i].until = Date.now() + ms; },
+    setEchoOpen(open) { echo.door.open = open; if (echo.door.solid) echo.door.solid.r = open ? 0 : 2.6; },
+    setMurk(k) { if (Math.abs(k - murkK) < 0.004) return; murkK = k; if (lastSky) for (const f of skyHooks) f(lastSky); },
+    setGalleryView(on) { for (const part of [lighthouse.frame, lighthouse.parts[3], lighthouse.parts[4]]) if (part) part.visible = !on && part.userData.stage <= lighthouse.stage; },
+    setCave(k) { if (Math.abs(k - caveK) < 0.004) return; caveK = k; if (lastSky) for (const f of skyHooks) f(lastSky); },
+    setLens(found) { relics.found = found; if (relics.lensSand) { relics.lensSand.visible = !found; relics.lensHome.visible = found; } },
     fireY,
     update(dt, t) { for (const u of updaters) u(dt, t); },
     setFuel(v) { fuel = v; },
@@ -1439,6 +1957,7 @@ export function buildWorld(scene, opts = {}) {
     flareUp() { flare = 1; for (let i = 0; i < EMBERS; i++) if (rng() < 0.5) emberData[i].life = 99; },
     tossLog(x, y, z, done) { toss = { x, y, z, k: 0, done }; tossMesh.position.set(x, y, z); tossMesh.visible = true; },
     setShadows(on) { fireLight.castShadow = on; },
+    setReach(k, cover = 1) { reach = k; for (const c of cells) if (c.thin) c.inst.count = Math.max(1, Math.round(c.full * cover)); },
     get trees() { return canopies.map((c) => ({ x: c.x, z: c.z, r: c.r, fade: c.fade })); },
     // What is underfoot at a point: 'water', 'sand', 'wood' or 'grass'.
     surface(x, z) {

@@ -555,7 +555,8 @@ export class Island extends DurableObject {
       this.send(next.ws, { t: 'in', now: Date.now(), id: next.a.id, cap: this.cap, today: this.today('visitors'), tracks: this.tracks(), mu: next.a.mu > now ? next.a.mu : 0, cc: next.a.cc || '', pid: next.a.pid || '', code: next.a.code || '', who: next.a.who || '', kept: next.a.kept ? 1 : 0 });
       this.later(this.greet(next.ws, next.a));
       // Ask everyone ashore to say where they are, so the newcomer sees them at once. They have company now.
-      for (const { ws, a } of all) if (a.role === 'in' && ws !== next.ws) {
+      // Only those on the same island (home, or the far shore) see each other.
+      for (const { ws, a } of all) if (a.role === 'in' && ws !== next.ws && (a.isle || 'home') === (next.a.isle || 'home')) {
         if (!a.met) { a.met = true; ws.serializeAttachment(a); }
         this.send(ws, { t: 'hello', id: next.a.id });
       }
@@ -570,7 +571,7 @@ export class Island extends DurableObject {
     a.role = 'new'; a.zz = 0; a.q = 0;
     ws.serializeAttachment(a);
     if (was === 'in') this.later(this.tellFriendsOf(a.pid));
-    if (was === 'in') for (const { ws: o, a: b } of all || this.everyone()) if (b.role === 'in' && o !== ws) this.send(o, { t: 'bye', id: a.id });
+    if (was === 'in') for (const { ws: o, a: b } of all || this.everyone()) if (b.role === 'in' && o !== ws && (b.isle || 'home') === (a.isle || 'home')) this.send(o, { t: 'bye', id: a.id });
   }
 
   async webSocketMessage(ws, raw) {
@@ -592,6 +593,7 @@ export class Island extends DurableObject {
       if (a.role === 'new') {
         a.role = 'wait'; a.at = now; a.seen = now;
         a.j = { again: m.again ? 1 : 0, first: m.first ? 1 : 0, fresh: m.fresh ? 1 : 0, step: m.step | 0 };
+        a.isle = m.isle === 'far' ? 'far' : 'home';
         if (!a.pid) await this.identify(a, m.key, m.tok);
         ws.serializeAttachment(a);
       }
@@ -631,7 +633,7 @@ export class Island extends DurableObject {
       for (const o of this.ctx.getWebSockets()) {
         if (o === ws) continue;
         const b = o.deserializeAttachment();
-        if (b && b.role === 'in') { try { o.send(out); } catch (e) { /* gone */ } }
+        if (b && b.role === 'in' && (b.isle || 'home') === (a.isle || 'home')) { try { o.send(out); } catch (e) { /* gone */ } }
       }
     } else if (m.t === 'friend') {
       if (a.role === 'in') await this.befriend(ws, a, m);
@@ -662,7 +664,7 @@ export class Island extends DurableObject {
       a.role = 'gone';
       try { ws.serializeAttachment(a); } catch (e) { /* closed */ }
       if (was === 'in') this.later(this.tellFriendsOf(a.pid));
-      if (was === 'in') for (const { ws: o, a: b } of this.everyone()) if (b.role === 'in' && o !== ws) this.send(o, { t: 'bye', id: a.id });
+      if (was === 'in') for (const { ws: o, a: b } of this.everyone()) if (b.role === 'in' && o !== ws && (b.isle || 'home') === (a.isle || 'home')) this.send(o, { t: 'bye', id: a.id });
     }
     this.settle();
   }
@@ -1020,6 +1022,8 @@ export default {
     const url = new URL(request.url);
     const room = () => env.ISLAND.get(env.ISLAND.idFromName('main')).fetch(request);
     if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback' || url.pathname === '/room/db') return room();
+    // The far shore is the same game on another island: the same page, which reads the address to know where it is.
+    if (url.pathname === '/far' || url.pathname === '/far/') return env.ASSETS.fetch(new Request(new URL('/', url), request));
     if (url.pathname === '/room/reports' || url.pathname === '/room/reports/') return new Response(REPORTS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room/stats' || url.pathname === '/room/stats/') return new Response(STATS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room' || url.pathname === '/room/' || url.pathname === '/room/status' || url.pathname === '/room/status/') {

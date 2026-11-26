@@ -3,7 +3,7 @@ import { timeNow } from './now.js';
 import * as THREE from 'three';
 import {
   mulberry32, clamp, lerp, smoothstep, noise2, terrainHeight, groundHeight, shoreRadius,
-  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount } from './terrain.js';
+  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount, FAR, LANDING, MAPMAKER, MAP_BOARD, PATHS, AREAS } from './terrain.js';
 import { makeGlowTexture, makeSkyLabel, makeSignTexture, makeCarvingBoard } from './labels.js';
 import { loadProps } from './props.js';
 
@@ -282,19 +282,22 @@ export function buildWorld(scene, opts = {}) {
   }
 
   // ---------- land ----------
-  const SIZE = 132, N = 132;
+  // The square of ground that is drawn: all of home, or (coarser, and off-centre) all of the far shore.
+  const STEP = FAR ? 1.25 : 1, GX0 = FAR ? -125 : -66, GZ0 = FAR ? -85 : -66, NX = FAR ? 136 : 132, NZ = FAR ? 136 : 132;
   const sand = C(0xd9c692), sandWet = C(0xa89868), deep = C(0x1d4854);
   const grassA = C(0x4f8250), grassB = C(0x3f6f49), grassHi = C(0x67995a), rock = C(0x6f7482);
   {
     const positions = [], colors = [];
-    const step = SIZE / N;
-    const h = (i, j) => terrainHeight(-SIZE / 2 + i * step, -SIZE / 2 + j * step);
+    const step = STEP;
+    const h = (i, j) => terrainHeight(GX0 + i * step, GZ0 + j * step);
     const tmp = new THREE.Color();
     const faceColor = (ax, ay, az, bx, by, bz, cx, cy, cz) => {
       const mx = (ax + bx + cx) / 3, my = (ay + by + cy) / 3, mz = (az + bz + cz) / 3;
       const slope = Math.max(Math.abs(ay - by), Math.abs(by - cy), Math.abs(ay - cy)) / step;
       const n = noise2(mx * 0.35 + 3, mz * 0.35 - 7);
-      if (my < -0.05) {
+      if (FAR && slope > 0.75 && Math.max(ay, by, cy) > 0.4) {
+        tmp.copy(rock).multiplyScalar(0.82 + 0.25 * n);      // a cliff: bare rock from the water up
+      } else if (my < -0.05) {
         tmp.copy(sandWet).lerp(deep, clamp(-my / 2.2, 0, 1));
       } else if (my < 0.5 + n * 0.12) {
         tmp.copy(sandWet).lerp(sand, smoothstep(-0.05, 0.3, my));
@@ -308,13 +311,13 @@ export function buildWorld(scene, opts = {}) {
       const fr = Math.hypot(mx, mz);
       if (fr < 5.2) tmp.lerp(C(0x8a7350), (1 - smoothstep(2.2, 5.2, fr)) * 0.85);
       // Worn paths between the places animals go.
-      if (my > 0.45) { const pa = pathAmount(mx, mz); if (pa > 0) tmp.lerp(C(0x94805a), pa * 0.3); }      // a faint wear under the modelled path
+      if (my > 0.45) { const pa = pathAmount(mx, mz); if (pa > 0) tmp.lerp(C(0x94805a), pa * (FAR ? 0.8 : 0.3)); }      // at home, a faint wear under the modelled path
       const v = 0.95 + 0.1 * noise2(mx * 1.7, mz * 1.7);
       for (let k = 0; k < 3; k++) colors.push(tmp.r * v, tmp.g * v, tmp.b * v);
     };
-    for (let i = 0; i < N; i++) {
-      for (let j = 0; j < N; j++) {
-        const x0 = -SIZE / 2 + i * step, x1 = x0 + step, z0 = -SIZE / 2 + j * step, z1 = z0 + step;
+    for (let i = 0; i < NX; i++) {
+      for (let j = 0; j < NZ; j++) {
+        const x0 = GX0 + i * step, x1 = x0 + step, z0 = GZ0 + j * step, z1 = z0 + step;
         const h00 = h(i, j), h10 = h(i + 1, j), h01 = h(i, j + 1), h11 = h(i + 1, j + 1);
         if (Math.max(h00, h10, h01, h11) < -4.9) continue;
         positions.push(x0, h00, z0, x0, h01, z1, x1, h10, z0);
@@ -341,7 +344,7 @@ export function buildWorld(scene, opts = {}) {
     {
       const q = g.attributes.position.array;
       for (let i = 0; i < q.length; i += 3) {
-        q[i] = Math.sign(q[i]) * Math.pow(Math.abs(q[i]), 2) * 450;
+        q[i] = Math.sign(q[i]) * Math.pow(Math.abs(q[i]), 2) * 450 + (FAR ? -45 : 0);      // packed tight around the middle of the island
         q[i + 2] = Math.sign(q[i + 2]) * Math.pow(Math.abs(q[i + 2]), 2) * 450;
       }
     }
@@ -408,7 +411,8 @@ export function buildWorld(scene, opts = {}) {
       });
     });
     const fires = [];
-    for (const [x, z, s] of [[-190, -170, 1.2], [140, -240, 0.9], [-60, -300, 0.7], [260, 40, 1.0], [-250, 110, 0.9]]) {
+    // From the far shore, the one to the east with the bright fire is home.
+    for (const [x, z, s] of FAR ? [[250, 30, 1.0], [150, -250, 0.9], [-280, -210, 0.8], [-330, 120, 1.0], [40, 300, 0.9]] : [[-190, -170, 1.2], [140, -240, 0.9], [-60, -300, 0.7], [260, 40, 1.0], [-250, 110, 0.9]]) {
       const isl = new THREE.Mesh(new THREE.SphereGeometry(20 * s, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), silhouette);
       isl.scale.y = 0.22;
       isl.scale.z = 0.7;
@@ -784,8 +788,10 @@ export function buildWorld(scene, opts = {}) {
   const palmLeaf = std(0x3f8a55, { side: THREE.DoubleSide });
   const palmTrunk = std(0x8a6c4a);
 
+  const farTrees = [];      // on the far shore the woods are too many to build one by one: places only, drawn in batches later
   const treeList = [], palmList = [];      // what was planted where, so the modelled trees can take their places
   function pine(x, z, s) {
+    if (FAR) { farTrees.push({ x, z, s, kind: 'pine', ry: rng() * 6 }); colliders.push({ x, z, r: 0.32 * s }); return null; }
     const g = new THREE.Group();
     const y = terrainHeight(x, z);
     g.position.set(x, y - 0.1, z);
@@ -809,6 +815,7 @@ export function buildWorld(scene, opts = {}) {
     return g;
   }
   function leafy(x, z, s) {
+    if (FAR) { farTrees.push({ x, z, s, kind: 'leafy', ry: rng() * 6 }); colliders.push({ x, z, r: 0.3 * s }); return null; }
     const g = new THREE.Group();
     const y = terrainHeight(x, z);
     g.position.set(x, y - 0.1, z);
@@ -832,6 +839,7 @@ export function buildWorld(scene, opts = {}) {
   }
   const palmTops = [];
   function palm(x, z, s, lean) {
+    if (FAR) { farTrees.push({ x, z, s, kind: 'palm', ry: lean }); colliders.push({ x, z, r: 0.28 * s }); return; }
     const g = new THREE.Group();
     g.position.set(x, terrainHeight(x, z) - 0.15, z);
     g.rotation.y = lean;
@@ -883,6 +891,8 @@ export function buildWorld(scene, opts = {}) {
   const keepClear = (x, z) => {
     const r = Math.hypot(x, z);
     if (r < 9.5) return true;                               // fire clearing
+    if (FAR && (LANDING.some((p) => Math.hypot(x - p.x, z - p.z) < p.clear) || Math.hypot(x - MAPMAKER.x, z - MAPMAKER.z) < 2)) return true;
+    if (FAR) return pathAmount(x, z) > 0.02 || (x > 8 && Math.abs(z) < 4.5) || Math.hypot(x - HILL.x, z - HILL.z) < 13 || Math.hypot(x + 32, z - 42) < 20 || Math.hypot(x - WALL.x, z - WALL.z) < 3;
     if (Math.abs(x) < 4.2 && z > 6) return true;            // path from the beach
     if (x > 6 && Math.abs(z) < 3.4) return true;            // path to the dock
     if (Math.hypot(x - HILL.x, z - HILL.z) < 4.2) return true; // hilltop
@@ -894,9 +904,9 @@ export function buildWorld(scene, opts = {}) {
   const placed = [];
   const farEnough = (x, z, d) => placed.every(([px, pz]) => Math.hypot(px - x, pz - z) > d);
   let tries = 0;
-  while (placed.length < 34 && tries++ < 4000) {
+  while (placed.length < (FAR ? 150 : 34) && tries++ < (FAR ? 20000 : 4000)) {
     const a = rng() * Math.PI * 2;
-    const d = 0.3 + rng() * 0.48;
+    const d = FAR ? 0.12 + Math.sqrt(rng()) * 0.8 : 0.3 + rng() * 0.48;
     const r = d * shoreRadius(a);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (keepClear(x, z) || !farEnough(x, z, 3.1)) continue;
@@ -906,18 +916,37 @@ export function buildWorld(scene, opts = {}) {
   }
   tries = 0;
   let palms = 0;
-  while (palms < 9 && tries++ < 3000) {
+  while (palms < (FAR ? 20 : 9) && tries++ < 3000) {
     const a = rng() * Math.PI * 2;
     const d = 0.8 + rng() * 0.1;
     const r = d * shoreRadius(a);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    if (keepClear(x, z) || !farEnough(x, z, 4) || (x > 20 && Math.abs(z) < 5)) continue;
+    if (keepClear(x, z) || !farEnough(x, z, 4) || (x > 20 && Math.abs(z) < 5) || (FAR && terrainHeight(x, z) > 2.2)) continue;
     placed.push([x, z]);
     palm(x, z, rand(0.9, 1.25), a + Math.PI / 2 + rand(-0.5, 0.5));
     palms++;
   }
+  // Draw many copies of one modelled piece as a single batch.
+  const batch = (make, name, spots, skip) => {
+    const lump = make.single(name, skip);
+    if (!lump || !spots.length) return null;
+    const inst = new THREE.InstancedMesh(lump.geometry, lump.material, spots.length), d = new THREE.Object3D();
+    spots.forEach((sp, i) => { d.position.set(sp.x, sp.y, sp.z); d.rotation.set(0, sp.ry || 0, 0); d.scale.set(sp.sx || sp.s, sp.sy || sp.s, sp.sz || sp.s); d.updateMatrix(); inst.setMatrixAt(i, d.matrix); });
+    // No shadows from the batch: a whole wood drawn again for every light is more than a phone can take.
+    inst.castShadow = false; inst.receiveShadow = true; inst.userData.noShadow = true;
+    scene.add(inst);
+    return inst;
+  };
   loadProps().then((make) => {
-    if (!make || !make('pine_a')) return;
+    if (!make || !FAR) return;
+    const at = (kind) => farTrees.map((tr, i) => ({ ...tr, i })).filter((tr) => tr.kind === kind);
+    const place = (list, drop) => list.map((tr) => ({ x: tr.x, y: terrainHeight(tr.x, tr.z) - drop, z: tr.z, s: tr.s, ry: tr.ry }));
+    batch(make, 'pine_a', place(at('pine').filter((tr) => tr.i % 2 === 0), 0.1)); batch(make, 'pine_b', place(at('pine').filter((tr) => tr.i % 2 === 1), 0.1));
+    batch(make, 'leafy_a', place(at('leafy').filter((tr) => tr.i % 2 === 0), 0.1)); batch(make, 'leafy_b', place(at('leafy').filter((tr) => tr.i % 2 === 1), 0.1));
+    batch(make, 'palm', place(at('palm'), 0.15));
+  });
+  loadProps().then((make) => {
+    if (!make || !make('pine_a') || FAR) return;
     treeList.forEach((tr, i) => {
       const m = make((tr.kind === 'pine' ? 'pine_' : 'leafy_') + (i % 2 ? 'b' : 'a'));
       // Each tree has its own materials, because each fades by itself when it comes between you and the camera.
@@ -951,7 +980,7 @@ export function buildWorld(scene, opts = {}) {
     const mats = [std(0x7a7f8e), std(0x666b7a), std(0x8a8d98)];
     const rockList = [];
     let n = 0; tries = 0;
-    while (n < 26 && tries++ < 2000) {
+    while (n < (FAR ? 80 : 26) && tries++ < (FAR ? 8000 : 2000)) {
       const a = rng() * Math.PI * 2;
       const d = rng() < 0.55 ? 0.9 + rng() * 0.2 : 0.35 + rng() * 0.5;
       const r = d * shoreRadius(a);
@@ -962,13 +991,14 @@ export function buildWorld(scene, opts = {}) {
       m.position.set(x, terrainHeight(x, z) + s * 0.25, z);
       m.scale.set(1, rand(0.55, 0.8), rand(0.8, 1.2));
       m.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-      scene.add(m);
+      if (!FAR) scene.add(m);
       rockList.push({ m, x, z, s, n, sy: m.scale.y, sz: m.scale.z, ry: m.rotation.y });
       if (s > 0.45) colliders.push({ x, z, r: s * 0.85 });
       n++;
     }
     loadProps().then((make) => {
       if (!make || !make('rock_0')) return;
+      if (FAR) { for (let k = 0; k < 4; k++) batch(make, 'rock_' + k, rockList.filter((r) => r.n % 4 === k).map((r) => ({ x: r.x, y: terrainHeight(r.x, r.z) - r.s * 0.12, z: r.z, ry: r.ry * 2.1, sx: r.s, sy: r.s * (0.75 + r.sy * 0.5), sz: r.s * r.sz }))); return; }
       for (const r of rockList) {
         const k = make('rock_' + (r.n % 4));
         k.position.set(r.x, terrainHeight(r.x, r.z) - r.s * 0.12, r.z);
@@ -984,12 +1014,12 @@ export function buildWorld(scene, opts = {}) {
     const blade = new THREE.ConeGeometry(0.09, 0.3, 4);
     blade.scale(1, 1, 0.35);
     blade.translate(0, 0.15, 0);
-    const COUNT = 1100;
+    const COUNT = FAR ? 3600 : 1100;
     const inst = new THREE.InstancedMesh(blade, std(0x5f9a5a, { emissive: 0x1c3a22, flatShading: false }), COUNT);
     const dummy = new THREE.Object3D();
     let n = 0; tries = 0;
     while (n < COUNT && tries++ < 20000) {
-      const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * 30;
+      const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * (FAR ? shoreRadius(a) * 0.97 : 30);
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
       const h = terrainHeight(x, z);
       if (h < 0.75 || Math.hypot(x, z) < 4.6 || pathAmount(x, z) > 0.35) continue;
@@ -1015,7 +1045,7 @@ export function buildWorld(scene, opts = {}) {
 
   // The paths themselves: modelled in Blender to lie on this ground (dirt with ragged edges, stepping stones).
   loadProps().then((make) => {
-    const m = make && make('paths');
+    const m = make && !FAR && make('paths');      // the far shore's paths are painted on, for now
     if (!m) return;
     m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; o.userData.noShadow = true; if (/^path_(dirt|edge)/.test(o.material.name)) { o.material.polygonOffset = true; o.material.polygonOffsetFactor = -2; o.material.polygonOffsetUnits = -2; } } });
     scene.add(m);
@@ -1042,8 +1072,8 @@ export function buildWorld(scene, opts = {}) {
     };
     const flowers = [];
     let tries2 = 0;
-    while (flowers.length < 300 && tries2++ < 6000) {
-      const a = r2() * Math.PI * 2, r = 6 + Math.sqrt(r2()) * 24, x = Math.cos(a) * r, z = Math.sin(a) * r;
+    while (flowers.length < (FAR ? 900 : 300) && tries2++ < (FAR ? 24000 : 6000)) {
+      const a = r2() * Math.PI * 2, r = 6 + Math.sqrt(r2()) * (FAR ? shoreRadius(a) * 0.9 : 24), x = Math.cos(a) * r, z = Math.sin(a) * r;
       if (terrainHeight(x, z) < 0.95 || pathAmount(x, z) > 0.2 || noise2(x * 0.16 + 40, z * 0.16 - 12) < 0.12) continue;      // in drifts, not everywhere
       const c = Math.floor(r2() * 4), n = 2 + Math.floor(r2() * 4);
       for (let k = 0; k < n; k++) { const fx = x + (r2() - 0.5) * 1.3, fz = z + (r2() - 0.5) * 1.3; flowers.push({ x: fx, y: terrainHeight(fx, fz) - 0.02, z: fz, ry: r2() * 6, tx: (r2() - 0.5) * 0.3, tz: (r2() - 0.5) * 0.3, s: 0.8 + r2() * 0.7, c }); }
@@ -1051,7 +1081,7 @@ export function buildWorld(scene, opts = {}) {
     scatter('flower', flowers, 'flower_petal', [0xffffff, 0xffd54a, 0xf59ac0, 0xb9a2f2]);
     const pebbles = [], stars = [];
     tries2 = 0;
-    while (pebbles.length < 260 && tries2++ < 5000) {
+    while (pebbles.length < (FAR ? 620 : 260) && tries2++ < (FAR ? 14000 : 5000)) {
       const a = r2() * Math.PI * 2, r = shoreRadius(a) * (0.9 + r2() * 0.12), x = Math.cos(a) * r, z = Math.sin(a) * r, h = terrainHeight(x, z);
       if (h < -0.12 || h > 0.42 || (x > 28 && Math.abs(z) < 2)) continue;
       pebbles.push({ x, y: h, z, ry: r2() * 6, s: 0.5 + r2() * r2() * 1.6, c: Math.floor(r2() * 5) });
@@ -1093,7 +1123,7 @@ export function buildWorld(scene, opts = {}) {
     const capMat = new THREE.MeshBasicMaterial({ color: 0x8ff0e0, toneMapped: false });
     const stemMat = std(0xdfe9e6);
     const shroomList = [];
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < (FAR ? 70 : 26); i++) {
       const [px, pz] = placed[Math.floor(rng() * placed.length)];
       const x = px + rand(-1.2, 1.2), z = pz + rand(-1.2, 1.2);
       const h = terrainHeight(x, z);
@@ -1182,7 +1212,7 @@ export function buildWorld(scene, opts = {}) {
     const board = new THREE.Mesh(
       new THREE.BoxGeometry(1.7, 0.64, 0.07),
       [std(0x6a4c32), std(0x6a4c32), std(0x6a4c32), std(0x6a4c32),
-        new THREE.MeshStandardMaterial({ map: makeSignTexture('Hush Island', 'the fire is this way'), roughness: 1 }), std(0x6a4c32)],
+        new THREE.MeshStandardMaterial({ map: FAR ? makeSignTexture('The Landing', 'the camp is this way') : makeSignTexture('Hush Island', 'the fire is this way'), roughness: 1 }), std(0x6a4c32)],
     );
     board.position.y = 1.5;
     board.position.z = 0.11;
@@ -1338,7 +1368,68 @@ export function buildWorld(scene, opts = {}) {
     if (o.isMesh && !o.userData.noShadow && o.material && !Array.isArray(o.material) && o.material.isMeshStandardMaterial) o.castShadow = true;
   });
 
+  // ---------- the Landing: the camp on the far shore ----------
+  // Tents round the fire, supplies, lanterns along the way to the jetty, the board where the map is kept, and the
+  // Mapmaker who keeps it. All modelled in Blender; nothing stands here until the models arrive.
+  const mapmaker = { x: MAPMAKER.x, z: MAPMAKER.z, group: null, home: 0 };
+  if (FAR) {
+    for (const p of LANDING) if (p.r) colliders.push({ x: p.x, z: p.z, r: p.r });
+    for (const sx of [-1.25, 1.25]) colliders.push({ x: MAP_BOARD.x + Math.cos(MAP_BOARD.ry) * sx, z: MAP_BOARD.z - Math.sin(MAP_BOARD.ry) * sx, r: 0.3 });
+    colliders.push({ x: MAPMAKER.x, z: MAPMAKER.z, r: 0.95 });
+    // The map: the coast as far as anyone has drawn it. Only the Landing is filled in so far.
+    const drawMap = () => {
+      const c = document.createElement('canvas'); c.width = 1024; c.height = 666;
+      const g = c.getContext('2d');
+      g.fillStyle = '#f1e3c2'; g.fillRect(0, 0, c.width, c.height);
+      const r0 = mulberry32(77);
+      for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(150,120,70,${0.02 + r0() * 0.05})`; g.beginPath(); g.arc(r0() * c.width, r0() * c.height, 4 + r0() * 30, 0, 7); g.fill(); }
+      const pts = []; let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      for (let i = 0; i < 180; i++) { const a = i / 180 * Math.PI * 2, r = shoreRadius(a), x = Math.cos(a) * r, z = Math.sin(a) * r; pts.push([x, z]); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      const k = Math.min((c.width - 150) / (x1 - x0), (c.height - 150) / (z1 - z0)), ox = (c.width - (x1 - x0) * k) / 2 - x0 * k, oz = (c.height - (z1 - z0) * k) / 2 - z0 * k + 14;
+      const X = (x) => x * k + ox, Z = (z) => z * k + oz;
+      g.beginPath(); pts.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.closePath();
+      g.fillStyle = 'rgba(196,170,118,0.45)'; g.fill();
+      g.strokeStyle = '#5b4630'; g.lineWidth = 4; g.lineJoin = 'round'; g.stroke();
+      g.strokeStyle = 'rgba(91,70,48,0.35)'; g.lineWidth = 1.5;
+      for (const grow of [9, 18]) { g.beginPath(); pts.forEach(([x, z], i) => { const m = 1 + grow / (Math.hypot(x, z) * k + 1); (i ? g.lineTo(X(x * m), Z(z * m)) : g.moveTo(X(x * m), Z(z * m))); }); g.closePath(); g.stroke(); }
+      // The one way that is known: from the jetty to the camp. The rest is guessed at, in dots.
+      g.setLineDash([3, 9]); g.lineCap = 'round'; g.strokeStyle = 'rgba(91,70,48,0.55)'; g.lineWidth = 3;
+      for (const path of PATHS.slice(1)) { g.beginPath(); path.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.stroke(); }
+      g.setLineDash([]); g.strokeStyle = '#8a4a2c'; g.lineWidth = 4; g.beginPath(); PATHS[0].forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.stroke();
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (const a of AREAS) {
+        if (a.id === 'landing') {
+          g.fillStyle = '#c9502f'; g.beginPath(); g.arc(X(0), Z(0), 9, 0, 7); g.fill();
+          g.fillStyle = '#3d2e1f'; g.font = 'italic 600 30px Georgia, serif'; g.fillText('The Landing', X(0) - 6, Z(0) + 34);
+        } else { g.fillStyle = 'rgba(91,70,48,0.6)'; g.font = 'italic 44px Georgia, serif'; g.fillText('?', X(a.x), Z(a.z)); }
+      }
+      g.fillStyle = '#3d2e1f'; g.font = 'italic 600 40px Georgia, serif'; g.textAlign = 'left'; g.fillText('The far shore', 38, 50);
+      g.font = 'italic 22px Georgia, serif'; g.fillStyle = 'rgba(61,46,31,0.75)'; g.fillText('as far as anyone has walked it', 40, 86);
+      // north is up the page (the island's -z)
+      g.strokeStyle = '#3d2e1f'; g.lineWidth = 3; g.beginPath(); g.moveTo(950, 110); g.lineTo(950, 44); g.moveTo(938, 62); g.lineTo(950, 44); g.lineTo(962, 62); g.stroke();
+      g.textAlign = 'center'; g.font = 'italic 600 24px Georgia, serif'; g.fillStyle = '#3d2e1f'; g.fillText('N', 950, 128);
+      const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return tx;
+    };
+    loadProps().then((make) => {
+      if (!make || !make('tent')) return;
+      for (const p of LANDING) {
+        const m = make(p.kind); if (!m) continue;
+        m.position.set(p.x, terrainHeight(p.x, p.z) - 0.02, p.z); m.rotation.y = p.ry;
+        if (p.tilt) m.rotation.z = p.tilt;
+        if (p.kind === 'map_board') {
+          const sheet = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.3), new THREE.MeshStandardMaterial({ map: drawMap(), roughness: 1, emissive: 0xffffff, emissiveMap: null, emissiveIntensity: 0 }));
+          sheet.position.set(0, 1.5, 0.047); m.add(sheet);
+        }
+        if (p.kind === 'lantern_pole') m.traverse((o) => { if (o.isMesh && o.material.name === 'c_lantern_glow') { o.material.emissive.set(0xffb45a); o.material.emissiveIntensity = 2.2; o.material.color.set(0xffd9a0); o.castShadow = false; } });
+        scene.add(m);
+      }
+      const t = make('mapmaker');
+      if (t) { mapmaker.home = Math.atan2(-(2 - MAPMAKER.z), 16 - MAPMAKER.x); t.position.set(MAPMAKER.x, terrainHeight(MAPMAKER.x, MAPMAKER.z), MAPMAKER.z); t.rotation.y = mapmaker.home; t.scale.setScalar(1.25); scene.add(t); mapmaker.group = t; }
+    });
+  }
+
   const api = {
+    mapmaker,
     fireY,
     update(dt, t) { for (const u of updaters) u(dt, t); },
     setFuel(v) { fuel = v; },

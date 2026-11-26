@@ -1,0 +1,24 @@
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox'] });
+const errs = [];
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
+const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error' && !/ERR_FAILED/.test(m.text())) errs.push(m.text()); });
+await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(1500);
+await p.evaluate(() => localStorage.setItem('ember.starter', '4'));
+await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(2500);
+await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; });
+await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);
+const S = '/home/claude/ember-isle/shots/';
+const go = async (name, x, z, yaw, cam, hour = 11) => { await p.evaluate(([x, z, yaw, cam, hour]) => { const e = window.__ember; e.setHour(hour); e.setRain(0); e.teleport(x, z, yaw); e.cam(...cam); }, [x, z, yaw, cam, hour]); await p.waitForTimeout(3500); await p.screenshot({ path: S + name }); };
+await go('l1.png', 8.4, -1.6, 3.3, [0.15, 0.25, 4.2]);
+await go('l2.png', -2.5, -5.5, 3.6, [0.5, 0.35, 8]);
+await go('l6.png', 15, 0.5, -1.57, [-1.57, 0.3, 9], 21.5);
+await p.evaluate(() => { const b = [...document.querySelectorAll('button')].find((b) => /Greet the Mapmaker/.test(b.textContent)); console.log('greet button', !!b); });
+await go('l7.png', 12.6, -1.4, 2.4, [-0.9, 0.3, 4.5]);
+const acts = await p.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.offsetParent).map((b) => b.textContent.trim()).filter(Boolean).join(' | '));
+console.log(acts);
+const b = await p.$('button:has-text("Greet the Mapmaker")'); if (b) { await b.click(); await p.waitForTimeout(2600); await p.screenshot({ path: S + 'l8.png' }); }
+console.log(await p.evaluate(() => document.getElementById('count') && document.getElementById('count').textContent));
+console.log(errs.length ? [...new Set(errs)].slice(0, 5).join('\n') : 'no page errors');
+await browser.close();

@@ -1,13 +1,13 @@
 // The keeper's boat: something being built on the west beach, plank by plank, by everyone who visits.
 // Driftwood washes up around the island; carried here, each piece becomes part of the hull.
 import * as THREE from 'three';
-import { shoreRadius, terrainHeight, colliders, smoothstep, SLIP, slipPoint } from './terrain.js';
+import { shoreRadius, terrainHeight, colliders, smoothstep, SLIP, slipPoint, SITE_A, FAR } from './terrain.js';
 import { makeSignTexture, makeGlowTexture } from './labels.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { loadProps } from './props.js';
 
 export const BOAT_GOAL = 120;
-export const SITE_A = 2.62;
+export { SITE_A };
 export const siteR = shoreRadius(SITE_A) * 0.9;
 export const SITE = { x: Math.cos(SITE_A) * siteR, z: Math.sin(SITE_A) * siteR };
 // Once she is built the boat leaves the stocks and lies afloat just off the beach, side on to the shore.
@@ -24,6 +24,7 @@ export function buildSite(scene) {
   g.position.set(SITE.x, y0, SITE.z);
   g.rotation.y = -SITE_A + Math.PI / 2;        // lying along the shore, bow toward the open beach
   scene.add(g);
+  g.visible = !FAR;      // on the far shore there is no yard: the boat simply lies at the landing
 
   // The hull is its own piece, so that it can leave the stocks and sail. At rest it lies exactly where the yard is.
   const hull = new THREE.Group();
@@ -166,7 +167,7 @@ export function buildSite(scene) {
   }
   const pieces = [];
   const glowTex = makeGlowTexture('rgba(255,255,255,1)');
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < (FAR ? 0 : 3); i++) {
     const m = box(0.78, 0.07, 0.17, paleMat);
     const glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffe2b0, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
     glint.scale.setScalar(0.7); glint.position.y = 0.25; m.add(glint);

@@ -3,7 +3,7 @@
 import { loadProps } from './props.js';
 import { timeNow } from './now.js';
 import * as THREE from 'three';
-import { DOCK, clamp, lerp, shoreRadius, terrainHeight } from './terrain.js';
+import { DOCK, HILL, clamp, lerp, shoreRadius, terrainHeight } from './terrain.js';
 import { DAY_MS } from './clock.js';
 import { makeGlowTexture } from './labels.js';
 
@@ -145,7 +145,7 @@ export function buildLife(scene, world) {
       g.scale.setScalar(1.1);
       scene.add(g);
       const rank = Math.ceil(i / 2), side = i % 2 ? 1 : -1;
-      gulls.push({ g, l, r, a: 0, rad: 30 + rank * side * 1.6, lag: rank * 0.06, h: 36 - rank * 0.4, sp: 0.085, ph: i * 0.9, cx: -15, cz: -12, flock: true });
+      gulls.push({ g, l, r, a: 0, rad: 30 + rank * side * 1.6, lag: rank * 0.06, h: 36 - rank * 0.4, sp: 0.085, ph: i * 0.9, cx: HILL.x, cz: HILL.z, flock: true });
     }
     gulls.mat = white;
     // The modelled gull (props.glb): a body with a head, beak and tail, and two wings that beat.
@@ -392,7 +392,7 @@ export function buildLife(scene, world) {
       const n = Math.floor(now / DOLPHIN_EVERY), k = now - n * DOLPHIN_EVERY, leap = Math.floor(k / 1.9), u = k / 1.9 - leap;
       d.visible = leap < 3;
       if (d.visible) {
-        const a0 = hash(n * 7 + 3) * 6.28, dir = hash(n * 11) > 0.5 ? 1 : -1, r = 44 + hash(n * 5) * 10;
+        const a0 = hash(n * 7 + 3) * 6.28, dir = hash(n * 11) > 0.5 ? 1 : -1, r = shoreRadius(a0) + 12 + hash(n * 5) * 10;      // out past the shallows, whatever the island's shape
         const a = a0 + dir * (leap + u) * 0.075;
         const x = Math.cos(a) * r, z = Math.sin(a) * r, y = world.seaY(x, z) - 0.5 + Math.sin(u * Math.PI) * 1.9;
         d.position.set(x, y, z);
@@ -422,7 +422,7 @@ export function buildLife(scene, world) {
       const n = Math.floor(now / WHALE_EVERY), k = now - n * WHALE_EVERY, u = k / 16;
       w.visible = u < 1;
       if (w.visible) {
-        const a = hash(n * 13 + 1) * 6.28, r = 105 + hash(n * 3) * 25, x = Math.cos(a) * r + u * 9 * Math.sin(a), z = Math.sin(a) * r - u * 9 * Math.cos(a);
+        const a = hash(n * 13 + 1) * 6.28, r = shoreRadius(a) + 73 + hash(n * 3) * 25, x = Math.cos(a) * r + u * 9 * Math.sin(a), z = Math.sin(a) * r - u * 9 * Math.cos(a);
         w.position.set(x, world.seaY(x, z) - 4.6 + Math.sin(u * Math.PI) * 3.3, z);
         w.rotation.set(0, Math.atan2(Math.cos(a), Math.sin(a)), (0.5 - u) * 0.5, 'YZX');
       }

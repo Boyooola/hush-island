@@ -35,13 +35,34 @@ export function loadProps() {
         baked.set(key, parts);
         return parts;
       };
-      res((name, skip) => {
+      // One piece as a single lump of geometry, its colours painted onto the corners: for things that are
+      // scattered in their hundreds (a wood of trees) and must cost one draw between them, not one each.
+      const lumps = new Map();
+      const paint = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+      const single = (name, skip) => {
+        const key = name + '|' + (skip || '');
+        if (lumps.has(key)) return lumps.get(key);
+        const parts = bake(name, skip);
+        if (!parts || !parts.length) { lumps.set(key, null); return null; }
+        const gs = parts.map(([geo, m]) => {
+          const g = geo.clone(), n = g.attributes.position.count, col = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) { col[i * 3] = m.color.r; col[i * 3 + 1] = m.color.g; col[i * 3 + 2] = m.color.b; }
+          g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+          return g.index ? g.toNonIndexed() : g;
+        });
+        const out = { geometry: mergeGeometries(gs, false), material: paint };
+        lumps.set(key, out);
+        return out;
+      };
+      const make = (name, skip) => {
         const parts = bake(name, skip);
         if (!parts || !parts.length) return null;
         const g = new THREE.Group();
         for (const [geo, m] of parts) { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh); }
         return g;
-      });
+      };
+      make.single = single;
+      res(make);
     }, undefined, () => res(null));
   });
   return loading;

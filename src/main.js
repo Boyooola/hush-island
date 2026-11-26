@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   clamp, lerp, smoothstep, groundHeight, moveWithCollision, shoreProximity,
-  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip } from './terrain.js';
+  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip, FAR, ISLE, areaAt, MAPMAKER } from './terrain.js';
 import { buildWorld } from './world.js';
 import { Avatar, SPECIES, PLAYABLE, NAME_WORDS, POSE } from './avatar.js';
 import { buildCritters } from './critters.js';
@@ -150,21 +150,31 @@ me.onStep = (left) => {
 
 // The keeper: part of the island, clearly not a player.
 const KEEPER_SEAT = 3;
-const keeper = new Avatar({ species: 5, palette: 0, name: 'Keeper', sub: 'island keeper' });
+// On the far shore his place is taken by the Mapmaker, an old tortoise who stands by the map board. The Mapmaker is
+// a model of his own (see world.js): the keeper's body is hidden there, and only his name and his words are used.
+const KNAME = FAR ? 'Mapmaker' : 'Keeper', KSUB = FAR ? 'keeps the map' : 'island keeper', KWHO = FAR ? 'the Mapmaker' : 'the keeper';
+const keeper = new Avatar({ species: 5, palette: 0, name: KNAME, sub: KSUB });
+if (FAR) { keeper.parts.rig.visible = false; keeper.shadow.visible = false; }
 const bodyLen = (av) => (av.parts && av.parts.bodyLength) || SPECIES[av.species].height * 1.2;
 function placeKeeper() {
+  if (FAR) { keeper.x = MAPMAKER.x; keeper.z = MAPMAKER.z; keeper.y = groundHeight(MAPMAKER.x, MAPMAKER.z) + 0.05; keeper.mode = 'stand'; return; }
   const s = spotAt(KEEPER_SEAT, bodyLen(keeper));
   keeper.x = s.x; keeper.z = s.z; keeper.y = groundHeight(s.x, s.z); keeper.targetYaw = s.yaw;
 }
 placeKeeper();
-keeper.yaw = keeper.targetYaw; keeper.mode = 'lie';
+keeper.yaw = keeper.targetYaw; keeper.mode = FAR ? 'stand' : 'lie';
 scene.add(keeper.group);
-const KEEPER_LINES = [
+const KEEPER_LINES = FAR ? [
+  'Nobody has drawn the west of this island yet.', 'I walk slowly. The map waits for faster feet.', 'Mind the ink.',
+  'The woods begin where the lanterns stop.', 'I heard something singing on the high ground. Stones, I think.',
+  'There is a hill to the north with a hole in it.', 'The far point had a light once.', 'Take your time. The island is not going anywhere.',
+  'The tents are for anyone who is tired.', 'When the tide is out, the flats to the south are worth a look.',
+] : [
   'Drop a stick on if it burns low.', 'The stars are clearer from the hill.', 'Mind the dock. It creaks.',
   'No hurry here.', 'Good weather for it.', 'Lie as long as you like.', 'The sand stays warm near the fire.',
   'The sea is calm.', 'Sticks are on the pile.', 'The boat needs driftwood. The beaches are full of it.',
 ];
-const KEEPER_HELLO = ['Evening.', 'Good to see you.', 'Find a warm spot.', 'Welcome back to the fire.'];
+const KEEPER_HELLO = FAR ? ['Ah. Fresh legs.', 'Welcome to the Landing.', 'Have a look at the map. There is not much on it yet.', 'You came a long way. Sit by the fire if you like.'] : ['Evening.', 'Good to see you.', 'Find a warm spot.', 'Welcome back to the fire.'];
 let keeperNext = 14, keeperLowAt = -999;
 
 // ---------- state ----------
@@ -282,6 +292,7 @@ critters.events.onMoo = () => { if (entered) audio.call('moo', hearFrom(critters
 
 // The keeper knows when the stars will fall.
 function keeperHello() {
+  if (FAR) return KEEPER_HELLO[Math.floor(Math.random() * KEEPER_HELLO.length)];
   if (bottle && bottle.kind === 'reply') return 'A bottle came back for you. It is on the beach.';
   const st = showerState();
   const todo = listToday().find((id) => !listState().done.includes(id));
@@ -329,6 +340,7 @@ const firsts = (() => { const f = store('ember.firsts'), old = store('ember.star
 function first(k) { if (firsts[k]) return; firsts[k] = true; store('ember.firsts', firsts); net.note(k); }
 let starterAt = store('ember.starter');
 if (!Number.isInteger(starterAt)) starterAt = 0;
+if (FAR) starterAt = Math.max(starterAt, STARTER.length);      // nobody reaches the far shore without having found the fire at home
 const TASK_WHERE = {
   wood: () => (held === 3 ? yard.site : yard.pieces[0] || yard.site), dock: () => ({ x: DOCK.x1 - 0.6, z: 0 }), fire: () => (held === 1 ? FIRE : WOODPILE),
   warm: () => FIRE, hill: () => HILL, mark: () => WALL, bottle: () => CRATE, shake: () => ({ x: SPAWN.x, z: SPAWN.z + 4.6 }),
@@ -338,6 +350,7 @@ let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
   if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
+  if (FAR) return null;      // the far shore has no list from the keeper: it is there to be explored
   if (starterAt < STARTER.length) return { text: typeof STARTER[starterAt].text === 'function' ? STARTER[starterAt].text() : STARTER[starterAt].text, at: STARTER[starterAt].where(), step: '' };
   const st = listState(), id = listToday().find((k) => !st.done.includes(k));
   return id ? { text: TASKS[id], at: TASK_WHERE[id](), step: '' } : null;
@@ -425,6 +438,7 @@ function showList() {
   head.addEventListener('click', () => { closed = !closed; store('ember.tasksClosed', closed); apply(); canvas.focus(); });
 }
 function did(id) {
+  if (FAR) return;
   const today = listToday(), st = listState();
   if (!entered || !today.includes(id) || st.done.includes(id)) return;
   st.done.push(id);
@@ -612,6 +626,7 @@ function keeperStep(dt, tx, tz, speed, away) {
 }
 // Called every frame before the keeper is drawn. Returns true while he is up and about, false when he is by the fire.
 function updateKeeperGame(dt) {
+  if (FAR) return false;      // the Mapmaker is too old for tag
   const d = K.data, now = nowSec();
   const host = keeperHost(), mine = host !== null ? host === myWireId() : wasHost && (d.game || keeperHoming);
   if (!mine) {
@@ -1351,7 +1366,7 @@ function updateCalls() {
   if (answerTo && t > answerTo.until) answerTo = null;
   if (lonely && t - lonely.at > 2.6) {
     const mine = lonely.mine; lonely = null;
-    if (!entered) return;
+    if (!entered || FAR) return;
     keeper.play('call');
     audio.call('bellow', Math.max(0.1, hearFrom(keeper.x, keeper.z, 55)) * 0.75);
     ripple(keeper.x, keeper.z, 5, 0xffc978);
@@ -1604,13 +1619,13 @@ const net = createNet({
 function pushPresence(force) { if (entered) net.send(presenceState(), force); }
 function updateCount() {
   const n = peers.size + 1;
-  $('count').textContent = n === 1 ? 'Just you and the keeper' : `${n} visitors on the island`;
+  $('count').textContent = n === 1 ? `Just you and ${KWHO}` : `${n} visitors on the island`;
 }
 updateCount();
 
 // ---------- what the island remembers ----------
 const saved = createStore();
-saved.watchBoat((total, state, crew) => { boatTotal = total; if (crew) boatCrew = crew; else if (total && !boatCrew.length) boatCrew = [{ name: fullName(me.name, myCode), n: total }]; yard.setProgress(total); });
+saved.watchBoat((total, state, crew) => { if (FAR) total = Math.max(total, BOAT_GOAL); boatTotal = total; if (crew) boatCrew = crew; else if (total && !boatCrew.length) boatCrew = [{ name: fullName(me.name, myCode), n: total }]; yard.setProgress(total); });
 const sheet = $('sheet');
 let sheetSubmit = null, stopCarvings = null, sheetFree = false;
 function closeSheet() {
@@ -1999,7 +2014,7 @@ $('enter').addEventListener('click', () => {
   $('queue-text').textContent = 'Finding you a place by the fire…';
   // What kind of visit this is, for the island's daily totals: first today, first ever, and how far along the guide.
   const utcDay = new Date().toISOString().slice(0, 10);
-  const info = { first: store('ember.day') !== utcDay ? 1 : 0, fresh: store('ember.been') ? 0 : 1, step: starterAt, key: myKey };
+  const info = { first: store('ember.day') !== utcDay ? 1 : 0, fresh: store('ember.been') ? 0 : 1, step: starterAt, key: myKey, isle: ISLE };
   // The guest account, if there is one, is how the island knows you from visit to visit. A moment is allowed for it.
   net.guest().then((g) => g, () => null).then((g) => { if (g && g.token) info.tok = g.token; startJoin(); });
   const startJoin = () => net.join((q) => {
@@ -2062,7 +2077,7 @@ function comeAshore(q = {}) {
   $('queue').hidden = true;
   store('ember.identity', identity);
   document.body.classList.add('playing');
-  me.targetYaw = Math.PI;      // turn to face the fire
+  me.targetYaw = Math.atan2(FIRE.x - SPAWN.x, FIRE.z - SPAWN.z);      // turn to face the fire
   addLog('', 'You came ashore. The fire is straight ahead.', 'sys');
   // When to find company: said to everyone on arrival, since the beach is often empty.
   setTimeout(() => { if (entered) addLog('', campLine(), 'sys'); }, 3500);
@@ -2086,7 +2101,7 @@ function comeAshore(q = {}) {
   setTimeout(() => { if (!fireRec.stamp) { fireRec.stamp = fireRec.at; pushPresence(true); } }, 3000);
   if (!comeAshore.before) { comeAshore.before = true; welcomeBack(); } else setTimeout(lookForBottle, 4000);
   showList();
-  setTimeout(() => { if (starterAt >= STARTER.length && listState().done.length < 3) addLog('', 'The keeper has three small jobs today. They are listed on the left, and the next one is at the top of the screen.', 'sys'); }, 9000);
+  setTimeout(() => { if (!FAR && starterAt >= STARTER.length && listState().done.length < 3) addLog('', 'The keeper has three small jobs today. They are listed on the left, and the next one is at the top of the screen.', 'sys'); }, 9000);
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { me.tag.userData.draw(me.name, me.sub); keeper.tag.userData.draw(keeper.name, keeper.sub); });
 setInterval(() => { me.setName(me.name, mySub()); pushPresence(false); }, 20000);
@@ -2103,7 +2118,7 @@ function updateActions() {
     if (Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) main = { label: 'Add the driftwood to the boat', run: addToBoat };
     alt = { label: 'Leave the driftwood here', run: () => { setHeld(0); pushPresence(true); } };
   } else if (held === 2) {
-    main = Math.hypot(keeper.x - me.x, keeper.z - me.z) < 3.2 ? { label: 'Leave the fish for the keeper', run: giveFish } : { label: 'Eat the fish', run: eatFish };
+    main = !FAR && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 3.2 ? { label: 'Leave the fish for the keeper', run: giveFish } : { label: 'Eat the fish', run: eatFish };
     alt = main.run === giveFish ? { label: 'Eat the fish', run: eatFish } : null;
   } else if (me.mode !== 'stand') {
     if (me.mode === 'sit') main = { label: 'Lie down', run: () => { setMode('lie', mySeat); pushPresence(true); } };
@@ -2116,14 +2131,14 @@ function updateActions() {
     // Someone close enough to greet: the nearest visitor, or the keeper.
     let who = null, wd = 2.0;
     for (const p of peers.values()) { const d = Math.hypot(p.av.x - me.x, p.av.z - me.z); if (d < wd && p.fade > 0.5) { wd = d; who = { av: p.av, name: p.data.name }; } }
-    if (!who && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 2.6) who = { av: keeper, name: 'the keeper' };
+    if (!who && Math.hypot(keeper.x - me.x, keeper.z - me.z) < (FAR ? 3.2 : 2.6)) who = { av: keeper, name: KWHO };
     if (!who && Math.hypot(critters.cow.x - me.x, critters.cow.z - me.z) < 2.8) who = { av: critters.cow, name: 'Clover' };
     if (who) opts.push({ label: `Greet ${who.name}`, run: () => greet(who.av, who.name), side: true });
     const drift = yard.near(me.x, me.z);
     if (drift >= 0) opts.push({ label: 'Pick up the driftwood', run: () => pickUpDriftwood(drift) });
     // Something small on the ground: it goes straight into the journal, not the mouth.
     if (lying.near(me.x, me.z) >= 0) opts.push({ label: 'See what that is', run: pickUpFind });
-    if (Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) opts.push({ label: 'Look over the boat', run: lookAtBoat });
+    if (!FAR && Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) opts.push({ label: 'Look over the boat', run: lookAtBoat });
     const tr = traces.near(me.x, me.z);
     if (tr && !who && drift < 0) opts.push({ label: 'Sniff at the tracks', run: () => sniffTracks(tr) });
     const mn = life.meadowNear(me.x, me.z);
@@ -2144,7 +2159,7 @@ function updateActions() {
     const boarding = voyageNow && voyageNow.phase === 'board';
     main = boarding && voyageNow.left > 4 ? { label: 'Cast off now', run: castOff } : null;
     alt = boarding ? { label: 'Step back ashore', run: () => leaveBoat() } : null;
-  } else if (boatBuilt() && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2 && (!seenVoyage || (voyageNow && voyageNow.phase === 'board' && voyageCrew.length < yard.crewMax))) {
+  } else if (boatBuilt() && !FAR && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2 && (!seenVoyage || (voyageNow && voyageNow.phase === 'board' && voyageCrew.length < yard.crewMax))) {
     if (!alt) alt = main; main = { label: seenVoyage ? 'Climb into the boat' : 'Take the boat out', run: boardBoat };
   }
   // A dance at the fire: start one when resting there in company, join one that is going, step out of yours.
@@ -2161,7 +2176,7 @@ function updateActions() {
       const play = seenGame ? (near.p.data.game === seenGame ? { label: 'Join the game of tag', run: joinTag } : null) : { label: `Ask ${near.p.data.name} to play tag`, run: () => inviteTag(near.id) };
       if (play) { if (!main) main = play; else if (!alt) alt = play; }
     }
-    else if (!game && !seenGame && !held && !myInvite && !near && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 2.8) {
+    else if (!FAR && !game && !seenGame && !held && !myInvite && !near && Math.hypot(keeper.x - me.x, keeper.z - me.z) < 2.8) {
       const play = { label: 'Ask the keeper to play tag', run: askKeeper };
       if (!main) main = play; else if (!alt) alt = play;
     }
@@ -2220,6 +2235,18 @@ function updateFinds() {
   if (t - whaleCheck < 1) return;
   whaleCheck = t;
   if (entered && !journal.whale && life.whaleUp && (voyageSeated || atDockEnd() || Math.hypot(me.x - HILL.x, me.z - HILL.z) < 6)) { addLog('', 'Far out, a great back rolls up out of the sea and under again.', 'sys'); found('whale'); }
+}
+
+// ---------- the far shore: saying where you are ----------
+// Walking into one of the island's areas, its name comes up once.
+let areaNow = '', areaCheck = 0;
+if (FAR) { document.body.classList.add('far'); document.title = 'Lantern Rock: the far shore of Hush Island'; const h = $('title'); if (h) h.textContent = 'The far shore'; const b = document.querySelector('.brand b'); if (b) b.textContent = 'The far shore'; }
+function updateArea() {
+  if (!FAR || !entered || t - areaCheck < 0.7) return;
+  areaCheck = t;
+  const a = areaAt(me.x, me.z), id = a ? a.id : '';
+  if (id && id !== areaNow) { flash(a.name); addLog('', `${a.name}.`, 'sys'); }
+  if (id) areaNow = id;
 }
 
 // ---------- campfire hour ----------
@@ -2282,7 +2309,7 @@ setTimeout(() => { $('campfire-note').textContent = campLine(); }, 0);
 function keeperSays(line) {
   keeper.say(line);
   speaker = { av: keeper, until: t + 5 };
-  addLog('Keeper', line, 'sys');
+  addLog(KNAME, line, 'sys');
 }
 
 // Drop detail if the device cannot keep up: first the shadows, then the resolution.
@@ -2416,6 +2443,7 @@ function frame() {
   if (hop) updateHop();
   updateCampfire(dt);
   updateFinds();
+  updateArea();
   updateWith();
   me.update(dt, t);
 
@@ -2435,6 +2463,16 @@ function frame() {
 
   if (!updateKeeperGame(dt)) placeKeeper();
   keeper.update(dt, t);
+  // The Mapmaker turns, slowly, to look at whoever comes near, and bobs his head when he speaks.
+  if (FAR && keeper.parts.rig.visible) { keeper.parts.rig.visible = false; keeper.shadow.visible = false; }      // his body arrives late; it stays out of sight
+  if (FAR && world.mapmaker.group) {
+    const m = world.mapmaker, near = Math.hypot(me.x - m.x, me.z - m.z) < 7;
+    const want = near ? Math.atan2(-(me.z - m.z), me.x - m.x) : m.home;
+    let d = want - m.group.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
+    m.group.rotation.y += d * (1 - Math.exp(-dt * 1.4));
+    const talk = keeper.bubbleLife > 0 ? Math.sin(t * 7) * 0.012 : 0;
+    m.group.scale.set(1.25, 1.25 * (1 + Math.sin(t * 1.3) * 0.012 + talk), 1.25);
+  }
 
   viewFrustum.setFromProjectionMatrix(viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   // Other visitors glide toward where they last said they were.

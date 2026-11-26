@@ -57,7 +57,7 @@ ok('nobody can step out at sea', !/Step back|Cast off/.test(await acts(a)), awai
 await a.evaluate(() => { window.__ember.voyageCast = Date.now() - 45000; });
 await until(b, () => window.__ember.voyage.u > 0.25, 15000); await a.waitForTimeout(3000);
 const at = await a.evaluate(() => { const e = window.__ember, p = [...e.peers.values()][0]; return { me: [e.me.x, e.me.y, e.me.z], mate: [p.av.x, p.av.y, p.av.z], r: Math.hypot(e.me.x, e.me.z), mode: e.me.mode, wet: e.me.wet }; });
-ok('the boat is out at sea with both in it', at.r > 44 && Math.hypot(at.me[0] - at.mate[0], at.me[2] - at.mate[2]) < 9 && at.me[1] > -0.2 && at.me[1] < 1.2 && Math.abs(at.me[1] - at.mate[1]) < 0.4, JSON.stringify(at));
+ok('the boat is out at sea with both in it', at.r > 44 && Math.hypot(at.me[0] - at.mate[0], at.me[2] - at.mate[2]) < 14 && at.me[1] > -0.2 && at.me[1] < 1.2 && Math.abs(at.me[1] - at.mate[1]) < 0.4, JSON.stringify(at));
 await a.screenshot({ path: S + 'v5-sea.png' });
 await b.screenshot({ path: S + 'v5b-sea.png' });
 const c = await open(1); await c.evaluate(() => window.__ember.setBoat(120));

@@ -3,7 +3,7 @@ const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome'
 const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
 const errs = [];
 const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } }); await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/index.html', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(1500);
 await p.evaluate(() => localStorage.setItem('ember.starter', '4')); await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(2500);
 await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; }); await p.click('#enter'); await p.waitForTimeout(5000);

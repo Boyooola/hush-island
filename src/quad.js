@@ -77,7 +77,7 @@ function measure(rec, gltf) {
     if (Math.abs(along) < slab) radial.push(rel.addScaledVector(dir, -along).length());
   }
   radial.sort((a, b) => a - b);
-  const neckR = radial.length ? radial[Math.floor(radial.length * 0.85)] : (box.max.y - box.min.y) * 0.1;
+  const neckR = radial.length ? radial[Math.floor(radial.length * 0.3)] * 1.12 : (box.max.y - box.min.y) * 0.1;
 
   rec.scene = scene;
   rec.clips = gltf.animations;
@@ -85,6 +85,18 @@ function measure(rec, gltf) {
   rec.unitsTall = box.max.y - box.min.y;
   rec.mouth = { pos: mouth, bone: 'Head' };
   rec.neck = { pos: neckPos, dir, r: neckR, bone: neck.name };
+  // Where a hat sits: on the skull between the ears. Ears and antlers stand higher, so the height taken is one
+  // that most of the head's skin lies under, and the width is the head's own.
+  const headLen = box.max.z - headPos.z;
+  const skull = pts.filter((p) => p.z > headPos.z - headLen * 0.2 && p.z < headPos.z + headLen * 0.5 && p.y > headPos.y && Math.abs(p.x) < (box.max.x - box.min.x) * 0.2);
+  const ys = skull.map((p) => p.y).sort((a, b) => a - b), xs = pts.filter((p) => p.z > headPos.z && p.y > headPos.y - headLen * 0.3).map((p) => Math.abs(p.x)).sort((a, b) => a - b);
+  const crownY = ys.length ? ys[Math.floor(ys.length * 0.82)] : headPos.y + headLen * 0.4;
+  rec.crown = { pos: new THREE.Vector3(0, crownY, headPos.z + headLen * 0.12), r: xs.length ? xs[Math.floor(xs.length * 0.6)] : headLen * 0.3, bone: 'Head' };
+  // Where something rides on the back: the top of the spine, midway between shoulder and hip.
+  const m0 = hip.z + (sh.z - hip.z) * 0.35, m1 = hip.z + (sh.z - hip.z) * 0.7;
+  const mid = pts.filter((p) => p.z > m0 && p.z < m1);
+  const topY = Math.min(mid.length ? Math.max(...mid.map((p) => p.y)) : hip.y, Math.max(hip.y, sh.y) + (box.max.y - box.min.y) * 0.1), ws = mid.map((p) => Math.abs(p.x)).sort((a, b) => a - b);
+  rec.back = { pos: new THREE.Vector3(0, topY, (m0 + m1) / 2), w: ws.length ? ws[Math.floor(ws.length * 0.9)] : neckR, bone: (bone(scene, 'Torso') || body).name };
   rec.hipY = hip.y - box.min.y;
   rec.spine = Math.max(0.2, sh.z - hip.z);
   rec.length = box.max.z - box.min.z;
@@ -148,6 +160,7 @@ export function buildQuad(spec, tint) {
   const mouth = anchorOn(src.mouth.bone, src.mouth.pos);
   const neckQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), src.neck.dir);
   const neck = anchorOn(src.neck.bone, src.neck.pos, neckQ);
+  const crown = anchorOn(src.crown.bone, src.crown.pos), back = anchorOn(src.back.bone, src.back.pos);
 
   const bones = {};
   for (const n of ['Body', 'Back', 'Torso', 'Neck1', 'Neck2', 'Neck3', 'Head', 'Tail1', 'Tail2',
@@ -183,7 +196,7 @@ export function buildQuad(spec, tint) {
   for (const b of Object.values(bones)) rest.set(b, { p: b.position.clone(), q: b.quaternion.clone() });
 
   return {
-    quad: true, rig, holder, root, mixer, actions, bones, rest, feet, legs, unit, mouth, neck, scale,
+    quad: true, rig, holder, root, mixer, actions, bones, rest, feet, legs, unit, mouth, neck, crown, back, crownR: src.crown.r * scale, backW: src.back.w * scale, scale,
     bellyY: src.bellyY * scale,
     height: spec.height, bodyLength: src.length * scale, neckR: src.neck.r * scale,
     hipY: src.hipY, spine: src.spine,       // in model units

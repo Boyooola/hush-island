@@ -4,7 +4,7 @@ const errs = []; let fails = 0;
 const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(1500);
 // someone who has finished the first three chapters, so that the west is open
 await p.evaluate(() => { const d = Date.now(), q = {}; for (const k of ['cold', 'burn', 'keeper', 'warm', 'stone', 'still', 'fishgift', 'shore', 'mark', 'bottle', 'boatwood', 'look', 'planks']) q[k] = d; localStorage.setItem('ember.quests', JSON.stringify(q)); localStorage.setItem('ember.starter', '1'); });

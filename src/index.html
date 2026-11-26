@@ -201,7 +201,19 @@
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.8), 0 0 22px rgba(0, 0, 0, 0.5); }
   #tasks-head { background: none; border: 0; padding: 2px 0; text-align: left; font-family: var(--display); font-weight: 800; font-size: 16px; color: var(--amber); text-shadow: inherit; }
   #tasks-head:hover { color: var(--ink); }
-  #journal-btn { color: var(--amber); cursor: pointer; }
+  .books { display: flex; gap: 6px 18px; flex-wrap: wrap; }
+  .books .word { color: var(--amber); cursor: pointer; }
+  #sheet .album.finds { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px 18px; }
+  #sheet .album h4, #sheet .bag h4 { grid-column: 1 / -1; margin: 10px 0 0; font: 800 14px var(--body); color: var(--paper-quiet); }
+  #sheet .album .photo.plain { display: grid; place-items: center; font: 800 15px var(--display); color: var(--paper-quiet); text-align: center; }
+  #sheet .album.finds .blank .photo { font-size: 30px; }
+  #sheet .bag { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px 12px; padding: 4px 2px 12px; border-bottom: 1px solid var(--paper-line); margin-bottom: 8px; }
+  #sheet .bag p { grid-column: 1 / -1; margin: 0; font-size: 14px; color: var(--paper-quiet); }
+  #sheet .bag .tile { display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: 0; padding: 4px 2px; font: 600 13px var(--body); color: inherit; text-align: center; }
+  #sheet .bag button.tile { cursor: pointer; }
+  #sheet .bag .tile img { width: 76px; height: 76px; object-fit: contain; }
+  #sheet .bag .tile.on span { color: var(--paper-accent); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+  #sheet .mapimg { display: block; width: 100%; border: 6px solid #fbf6ea; box-shadow: 0 2px 9px rgba(50, 30, 10, 0.3); margin: 4px 0 10px; }
   #journal-btn:hover { color: var(--ink); }
   #tide-note { font-size: 13.5px; color: var(--ink); opacity: 0.9; }
   #tide-note:empty { display: none; }
@@ -518,6 +530,7 @@
   <div class="acts">
     <button id="action" class="act" type="button" hidden><kbd>E</kbd><span class="label">Sit by the fire</span></button>
     <button id="action2" class="act alt" type="button" hidden><kbd>R</kbd><span class="label">Get up</span></button>
+    <button id="action3" class="act alt" type="button" hidden><kbd>F</kbd><span class="label"></span></button>
   </div>
   <div id="with" hidden></div>
   <div class="bar">
@@ -529,7 +542,12 @@
       <button class="word" id="emote-sit" type="button" data-key="5">Sit</button>
       <button class="word" id="emote-lie" type="button" data-key="6">Lie down</button>
     </div>
-    <button class="word" id="journal-btn" type="button" data-key="J">Journal <span id="journal-count"></span></button>
+    <div class="books">
+      <button class="word" id="quests-btn" type="button" data-key="Q">Quests</button>
+      <button class="word" id="journal-btn" type="button" data-key="J">Journal <span id="journal-count"></span></button>
+      <button class="word" id="satchel-btn" type="button" data-key="B">Satchel</button>
+      <button class="word" id="map-btn" type="button" data-key="M">Map</button>
+    </div>
     <form id="chat" autocomplete="off">
       <input id="say" name="say" type="text" maxlength="200" placeholder="Press Enter to speak" aria-label="Message">
       <button class="send" type="submit">Say</button>

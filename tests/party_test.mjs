@@ -6,7 +6,7 @@ const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + 
 const open = async (animal, w = 640, h = 360) => {
   const ctx = await browser.newContext({ viewport: { width: w, height: h } });
   await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+  const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
   await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(1500);
   await p.evaluate(() => localStorage.setItem('ember.starter', '4'));
   await p.reload(); await p.waitForTimeout(2500);

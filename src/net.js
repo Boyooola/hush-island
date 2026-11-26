@@ -44,6 +44,7 @@ export function parsePeer(p) {
     gesture: Array.isArray(s.gs) ? { kind: clean(s.gs[0], 8), to: clean(s.gs[1], 16), at: num(s.gs[2], 0, 1e15), held: s.gs[3] === 1 || s.gs[3] === 2 ? s.gs[3] : 0 } : null,
     muted: num(s.mu, 0, 1e15),
     lamp: s.lp === 1,
+    wear: Array.isArray(s.wr) ? s.wr.slice(0, 3).map((n) => Math.floor(num(n, 0, 40))) : [0, 0, 0],
     ev: Array.isArray(s.ev) ? { kind: clean(s.ev[0], 8), n: Math.floor(num(s.ev[1], 0, 20)), at: num(s.ev[2], 0, 1e15) } : null,
     it: num(s.it, 0, 1e15),
     tagTo: Array.isArray(s.tg) ? clean(s.tg[0], 16) : '',

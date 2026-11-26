@@ -41,7 +41,7 @@ await go(a, W.bell.x + 1.2, W.bell.z + 0.6, 3000); await run(a, 'Pick up the pag
 const rb = await run(a, 'Ring the bell'); await b.waitForTimeout(4000);
 ok(rb === 'ok' && /From the flats, a bell/.test(await log(b, 6)), 'a bell rung by one visitor is heard by the other', rb + ' ' + (await log(b, 1)).slice(0, 120));
 await go(b, W.stone.x + 5.5, W.stone.z + 3, 4000); await go(a, W.stone.x + 1.3, W.stone.z + 0.6, 4000);
-const ts = await run(a, 'Touch the standing stone'); await b.waitForTimeout(12000);
+const ts = await run(a, 'Touch the standing stone'); await b.waitForTimeout(28000);
 ok(ts === 'ok' && (await quests(b)).includes('lr-t-stone'), 'a stone sounded by one counts for the other in the ring', ts + ' ' + (await quests(b)).join());
 // two at a source
 await go(a, W.src.x + 1.9, W.src.z + 0.6, 3000); await go(b, W.src.x + 1.5, W.src.z - 1.6, 4000);

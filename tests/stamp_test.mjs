@@ -4,7 +4,7 @@ const errs = []; let fails = 0;
 const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(1500);
 await p.evaluate(() => { localStorage.setItem('ember.quests', JSON.stringify({ cold: Date.now() })); localStorage.setItem('ember.starter', '1'); });
 await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3000);
@@ -21,7 +21,7 @@ c = await cards(); ok(c.dock && c.dock.len > 5000, 'so does the end of the dock'
 await p.click('#journal-btn'); await p.waitForTimeout(900); await p.screenshot({ path: S + 's2.png' });
 ok(await p.evaluate(() => document.querySelectorAll('#sheet .album figure').length === 4 && document.querySelectorAll('#sheet .album img').length === 2 && document.querySelectorAll('#sheet .postmark').length === 2), 'the journal opens on four sights, two of them stamped');
 await p.click('#sheet .tabs button:nth-child(2)'); await p.waitForTimeout(500); await p.screenshot({ path: S + 's3.png' });
-await p.click('#sheet .tabs button:nth-child(3)'); await p.waitForTimeout(500);
+await p.waitForTimeout(300);
 ok(await p.evaluate(() => /From the dock/.test(document.getElementById('sheet').innerText)), 'the finds are a turn away');
 await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(2500);
 ok(await p.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('ember.cards') || '{}')).length === 2), 'cards are kept between visits');

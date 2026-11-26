@@ -4,7 +4,7 @@ import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 const errs = [];
-const open = async () => { const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(2500); await p.evaluate(() => window.__ember.lockQuality()); return p; };
+const open = async () => { const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message)); await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(2500); await p.evaluate(() => window.__ember.lockQuality()); return p; };
 const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
 const status = async () => (await fetch('http://localhost:8787/room/status.json')).json();
 const a = await open();

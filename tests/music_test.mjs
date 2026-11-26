@@ -5,7 +5,7 @@ const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + 
 const run = async (hour) => {
   const ctx = await browser.newContext({ viewport: { width: 640, height: 360 } });
   await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+  const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
   await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(2500);
   await p.evaluate((h) => { window.__ember.lockQuality(); window.__ember.setHour(h); }, hour);
   await p.click('#enter');

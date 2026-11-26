@@ -5,6 +5,8 @@ import {
   FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount, FAR, LANDING, MAPMAKER, MAP_BOARD, PATHS, AREAS, SIGHT_AT, pathDist, WOODS, FLATS, VALLEY, POINT, LIGHTHOUSE, POOL, POST, LENS, CHEST, CRAG, STONES, GARDEN, HOLLOW_TREE, CAVE, caveAt, caveRoofed, terrainRaw, SUMMIT, STANDING, COTTAGE, TIDE, tideAt, FLAT_EDGE, ISLET, WRECK, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN } from './terrain.js';
 import { timeNow } from './now.js';
 import { makeGlowTexture, makeSkyLabel, makeSignTexture, makeCarvingBoard } from './labels.js';
+import { CHESTS, ITEMS } from './items.js';
+import { areaAt, caveRoofed as roofedAt, shoreRadius as shoreR } from './terrain.js';
 import { loadProps, cutInto } from './props.js';
 
 export const FOG_COLOR = 0x142a4d;
@@ -336,30 +338,37 @@ export function buildWorld(scene, opts = {}) {
       if (FAR && out === colors && caveRoofed(mx, mz, 2.2)) tmp.copy(caveRock).multiplyScalar(0.7 + 0.5 * n + (Math.floor(my / 0.8) % 2) * 0.12);      // under the hill: bare dark rock, floor and walls
       for (let k = 0; k < 3; k++) out.push(tmp.r * v, tmp.g * v, tmp.b * v);
     };
-    for (let i = 0; i < NX; i++) {
-      for (let j = 0; j < NZ; j++) {
-        const x0 = GX0 + i * step, x1 = x0 + step, z0 = GZ0 + j * step, z1 = z0 + step;
-        const h00 = h(i, j), h10 = h(i + 1, j), h01 = h(i, j + 1), h11 = h(i + 1, j + 1);
-        if (Math.max(h00, h10, h01, h11) < -4.9) continue;
-        positions.push(x0, h00, z0, x0, h01, z1, x1, h10, z0);
-        faceColor(x0, h00, z0, x0, h01, z1, x1, h10, z0);
-        positions.push(x1, h10, z0, x0, h01, z1, x1, h11, z1);
-        faceColor(x1, h10, z0, x0, h01, z1, x1, h11, z1);
+    // The ground is laid in tiles, so that the parts of a big island that are behind the visitor or out of sight
+    // are not drawn. (Hush Island is small enough to be one.)
+    const landMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true });
+    const TILE = FAR ? 22 : 9999;
+    for (let ti = 0; ti < NX; ti += TILE) for (let tj = 0; tj < NZ; tj += TILE) {
+      positions.length = 0; colors.length = 0;
+      for (let i = ti; i < Math.min(NX, ti + TILE); i++) {
+        for (let j = tj; j < Math.min(NZ, tj + TILE); j++) {
+          const x0 = GX0 + i * step, x1 = x0 + step, z0 = GZ0 + j * step, z1 = z0 + step;
+          const h00 = h(i, j), h10 = h(i + 1, j), h01 = h(i, j + 1), h11 = h(i + 1, j + 1);
+          if (Math.max(h00, h10, h01, h11) < -4.9) continue;
+          positions.push(x0, h00, z0, x0, h01, z1, x1, h10, z0);
+          faceColor(x0, h00, z0, x0, h01, z1, x1, h10, z0);
+          positions.push(x1, h10, z0, x0, h01, z1, x1, h11, z1);
+          faceColor(x1, h10, z0, x0, h01, z1, x1, h11, z1);
+        }
       }
+      if (!positions.length) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      g.computeVertexNormals(); g.computeBoundingSphere();
+      const land = new THREE.Mesh(g, landMat);
+      land.receiveShadow = true; land.userData.noShadow = true; land.userData.cull = 0;
+      scene.add(land);
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    g.computeVertexNormals();
-    const land = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true }));
-    land.receiveShadow = true;
-    land.userData.noShadow = true;
-    scene.add(land);
     // The lid over the caves: the outside of Hollow Hill as it would be with nothing dug under it, and beneath it
     // the cave's roof. It is cut see-through above a visitor who is inside, so that they can be seen from above.
     if (FAR) {
       const lp = [], lc = [], dark = new THREE.Color();
-      const i0 = Math.floor((-220 - GX0) / step), i1 = Math.ceil((-136 - GX0) / step), j0 = Math.floor((-118 - GZ0) / step), j1 = Math.ceil((-54 - GZ0) / step);
+      const i0 = Math.floor((-234 - GX0) / step), i1 = Math.ceil((-134 - GX0) / step), j0 = Math.floor((-130 - GZ0) / step), j1 = Math.ceil((-44 - GZ0) / step);
       for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) {
         const x0 = GX0 + i * step, x1 = x0 + step, z0 = GZ0 + j * step, z1 = z0 + step;
         if (!caveRoofed(x0 + step / 2, z0 + step / 2, 3.6)) continue;
@@ -976,7 +985,9 @@ export function buildWorld(scene, opts = {}) {
     const lump = make.single(opts.low && name === 'birch_b' ? 'birch_a' : name, skip);      // on a phone every birch is the plainer of the two
     if (!lump || !spots.length) return null;
     const groups = new Map();
-    const small = /heather|bracken|slab|rock_/.test(name), size = small ? 35 : 70;      // ground cover is cut into smaller squares, so that less of it is drawn at once
+    const small = /heather|bracken|slab|rock_/.test(name), size = small ? 35 : 42;
+    // Trees have a plain far-away version (a trunk and a lump or two of leaves): past a little way off, that is what is drawn.
+    const farLump = FAR && !small ? make.single(name + '_far') : null;      // ground cover is cut into smaller squares, so that less of it is drawn at once
     for (const sp of spots) { const key = FAR ? Math.floor(sp.x / size) + ',' + Math.floor(sp.z / size) : ''; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(sp); }
     let last = null;
     for (const list of groups.values()) {
@@ -989,7 +1000,9 @@ export function buildWorld(scene, opts = {}) {
       // No shadows from the batch: a whole wood drawn again for every light is more than a phone can take.
       inst.castShadow = false; inst.receiveShadow = true; inst.userData.noShadow = true; inst.name = 'batch_' + name;
       scene.add(inst);
-      if (FAR) cells.push({ inst, x: cx, z: cz, far: small ? 95 : 170, pad: small ? 25 : 38, full: list.length, thin: /heather|bracken/.test(name) });
+      let lod = null;
+      if (farLump) { lod = new THREE.InstancedMesh(farLump.geometry, farLump.material, list.length); for (let i = 0; i < list.length; i++) { inst.getMatrixAt(i, d.matrix); lod.setMatrixAt(i, d.matrix); } lod.computeBoundingSphere(); lod.castShadow = false; lod.receiveShadow = false; lod.userData.noShadow = true; lod.name = 'far_' + name; lod.visible = false; scene.add(lod); }
+      if (FAR) cells.push({ inst, lod, x: cx, z: cz, far: small ? 95 : 170, near: 62, pad: small ? 25 : 24, full: list.length, thin: /heather|bracken/.test(name) });
       last = inst;
     }
     return last;
@@ -1144,6 +1157,61 @@ export function buildWorld(scene, opts = {}) {
   }
   // Hidden places in the open country: the moon pool, the whale, the seat that faces home, the wayfarers' cairn.
   const hidden = { cairnStones: null, moon: null };
+  // ---------- chests, and small things to pick up ----------
+  // Chests stand in fixed places; each visitor may open each one once. The lid is its own piece, hinged at the back.
+  const CHEST_AT = FAR ? {
+    landing: [MAPMAKER.x - 10, MAPMAKER.z - 13, 0.6], woods: [WOODS.x + 14, WOODS.z - 19, 2.1], meadow: [HILL.x + 19, HILL.z + 15, 4.2], farbeach: [SHELTER.x - 6, SHELTER.z - 7, 1.0],
+    garden: [GARDEN.x - 9.5, GARDEN.z - 3.5, 2.6], cliff: [WAYCAIRN.x + 12, WAYCAIRN.z - 4, 5.5], grotto: [CRAG.x + 1.6, CRAG.z + 2.6, 3.4], cave1: [CAVE.deadend.x + 1.6, CAVE.deadend.z + 1.9, 3.9], cave2: [CAVE.gallery.x - 2.4, CAVE.gallery.z - 2.8, 0.9],
+    bones: [BONES.x + 2.5, BONES.z + 1.5, 2.2], cottage: [cottage.door.x * 0 + fromCottage(-1.3, -1.0).x, fromCottage(-1.3, -1.0).z, COTTAGE.ry], islet: [ISLET.x - 3.4, ISLET.z - 1.6, 1.2], summit: [SUMMIT.x + 1.7, SUMMIT.z + 1.3, 3.8],
+    lake: [CAVE.lake.x + 5.6, CAVE.lake.z - 5.4, 5.2], moon: [MOONPOOL.x + 5.4, MOONPOOL.z - 2.6, 4.4], wreck: [WRECK.x - 8.5, WRECK.z + 6.5, 0.5],
+  } : { h1: [16.7, -14.0, 2.4], h2: [-20.5, -17.5, 0.7], h3: [-22.5, 13.2, 5.0] };
+  const chests = (CHESTS[FAR ? 'far' : 'home'] || []).map((c) => { const [x, z, ry] = CHEST_AT[c.at]; return { ...c, x, z, ry, group: null, lid: null, open: false, swing: 0, cave: FAR && roofedAt(x, z, 1.5) }; });
+  for (const c of chests) colliders.push({ x: c.x, z: c.z, r: 0.45 });
+  // Things lying about: what kind depends on the sort of ground. They come back a while after being taken.
+  const pickups = [];
+  if (FAR) {
+    const pr = mulberry32(4242), far2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
+    const want = { sprig: 26, mushroom: 22, shell: 12, whelk: 8, seaglass: 8, feather: 12, crystal: 16 };
+    for (let k = 0; k < 60000 && Object.values(want).some((n) => n > 0); k++) {
+      const x = -350 + pr() * 400, z = -170 + pr() * 390, a = Math.atan2(z, x), r = Math.hypot(x, z);
+      const inCave = x < -140 && x > -228 && z < -50 && z > -124 && roofedAt(x, z, -0.7);
+      if (!inCave && r > shoreR(a) - 4) continue;
+      const h = terrainHeight(x, z), area = areaAt(x, z), id = area ? area.id : '';
+      const slope = Math.abs(terrainHeight(x + 1.2, z) - h) + Math.abs(terrainHeight(x, z + 1.2) - h);
+      if (slope > 0.9) continue;
+      let kind = '';
+      if (inCave) kind = 'crystal';
+      else if (x < -140 && x > -232 && z < -46 && z > -128) continue;      // nothing on the roof of the hill
+      else if (id === 'flats' || (h < 1.7 && r > shoreR(a) - 16)) kind = ['shell', 'whelk', 'seaglass'][Math.floor(pr() * 3)];
+      else if (id === 'woods' || id === 'valley') kind = 'mushroom';
+      else if (h > 17 && pr() < 0.4) kind = 'feather';
+      else if (h > 6) kind = 'sprig';
+      if (!kind || !(want[kind] > 0) || pickups.some((q) => far2(q, { x, z }) < (inCave ? 16 : 64)) || chests.some((c) => far2(c, { x, z }) < 9)) continue;
+      want[kind]--; pickups.push({ kind, x, z, cave: inCave, group: null, there: true, back: 0 });
+    }
+  }
+  loadProps().then((make) => {
+    if (!make || !make('chest_plain')) return;
+    for (const c of chests) {
+      const model = c.kind === 'iron' ? 'chest_iron' : 'chest_plain', g = make(model, model + '_lid'), lid = make(model + '_lid'), hinge = new THREE.Group();
+      if (!g || !lid) continue;
+      hinge.position.set(0, 0.34, -0.23); lid.position.set(0, -0.34, 0.23); hinge.add(lid); g.add(hinge);      // the lid turns about its back edge
+      g.position.set(c.x, (c.at === 'cottage' ? COTTAGE.y : terrainHeight(c.x, c.z)) - 0.02, c.z); g.rotation.y = c.ry; g.scale.setScalar(1.2);
+      g.traverse((o) => { if (o.isMesh) o.castShadow = false; }); scene.add(g); c.group = g; c.lid = hinge; hinge.rotation.x = c.open ? -1.9 : 0;
+      updaters.push((dt) => { const to = c.open ? -1.9 : 0; if (Math.abs(hinge.rotation.x - to) > 0.002) hinge.rotation.x += (to - hinge.rotation.x) * (1 - Math.exp(-dt * 5)); });
+    }
+    for (const pk of pickups) {
+      const m = make(ITEMS[pk.kind].model); if (!m) continue;
+      const g = new THREE.Group(); m.scale.setScalar(pk.kind === 'crystal' ? 1.5 : 1.35); g.add(m);
+      m.traverse((o) => { if (o.isMesh) { o.castShadow = false; if (pk.kind === 'crystal') { o.material.emissive = new THREE.Color(0x3fb6c2); o.material.emissiveIntensity = 0.7; } } });
+      g.position.set(pk.x, terrainHeight(pk.x, pk.z) + 0.02, pk.z); g.rotation.y = pk.x * 1.7; g.visible = pk.there; scene.add(g); pk.group = g;
+    }
+  });
+  if (FAR) {
+    // The lake under the hill: still, black water that gives back whatever light is brought to it.
+    const lake = new THREE.Mesh(new THREE.CircleGeometry(CAVE.lake.r - 1.2, 24).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x1b3d47, roughness: 0.08, metalness: 0.55, transparent: true, opacity: 0.86, flatShading: true, emissive: 0x0a2a30, emissiveIntensity: 0.6 }));
+    lake.position.set(CAVE.lake.x, CAVE.lake.y, CAVE.lake.z); lake.userData.noShadow = true; scene.add(lake);
+  }
   // Where what the tower needs can be had: fallen stone on the point and under the crag, ship's timber on the Far
   // Beach and in the wreck (when the tide is off her), crystal in the round room under the hill, lamp-seed in the valley.
   const sources = FAR ? [
@@ -1233,9 +1301,9 @@ export function buildWorld(scene, opts = {}) {
     let uIn = 0, uOut = 1;
     for (let u = 0; u < 0.5; u += 0.01) { const p = at(u); if (caveRoofed(p.x, p.z, 0.5)) { uIn = u; break; } }
     for (let u = 1; u > 0.5; u -= 0.01) { const p = at(u); if (caveRoofed(p.x, p.z, 0.5)) { uOut = u; break; } }
-    const inside = (lo, hi) => { for (let k = 0; k < 300; k++) { const x = -218 + cr() * 80, z = -116 + cr() * 60, c = caveAt(x, z); if (c.e > lo && c.e < hi && c.u > uIn + 0.04 && c.u < uOut - 0.04 && caveRoofed(x, z, 0.5)) return { x, z, c }; } return null; };
+    const inside = (lo, hi) => { for (let k = 0; k < 300; k++) { const x = -230 + cr() * 96, z = -126 + cr() * 78, c = caveAt(x, z); if (c.e > lo && c.e < hi && c.u > uIn + 0.04 && c.u < uOut - 0.04 && caveRoofed(x, z, 0.5)) return { x, z, c }; } return null; };
     // The Hermit sits outside the eastern mouth, to one side of the way in, looking down the path.
-    { const p = at(uIn); hermit.x = p.x - p.dx * 4.2 - p.dz * 4.4; hermit.z = p.z - p.dz * 4.2 + p.dx * 4.4; hermit.home = Math.atan2(p.dz, -p.dx) + 0.5; colliders.push({ x: hermit.x, z: hermit.z, r: 0.8 }); }
+    { const p = at(uIn); hermit.x = p.x - p.dx * 6.2 - p.dz * 2.3; hermit.z = p.z - p.dz * 6.2 + p.dx * 2.3; hermit.home = Math.atan2(p.dz, -p.dx) + 0.5; colliders.push({ x: hermit.x, z: hermit.z, r: 0.8 }); }
     // The painted stones: three slabs leaned against the wall of the dark gallery. What is on them is drawn here,
     // in ochre, charcoal and chalk, and can only be seen by lantern light (main.js turns each one up or down).
     const INK = '#231d1b', OCHRE = '#b5562a', CHALK = '#efe6d0';
@@ -1298,7 +1366,7 @@ export function buildWorld(scene, opts = {}) {
       for (let i = 0; i < 12; i++) { const p = inside(-1.2, 0.2); if (!p) continue; const m = make('glow_mushrooms'); glow(m); m.position.set(p.x, groundHeight(p.x, p.z), p.z); m.scale.setScalar(0.6 + cr() * 0.6); scene.add(m); }
     });
     const NG = 240, gp = new Float32Array(NG * 3); let n = 0;
-    for (let k = 0; k < 4000 && n < NG; k++) { const x = -218 + cr() * 80, z = -116 + cr() * 60, c = caveAt(x, z); if (c.e > -0.2 || !caveRoofed(x, z, 0.3)) continue; gp[n * 3] = x; gp[n * 3 + 1] = c.top - 0.12 - cr() * 0.25; gp[n * 3 + 2] = z; n++; }
+    for (let k = 0; k < 4000 && n < NG; k++) { const x = -230 + cr() * 96, z = -126 + cr() * 78, c = caveAt(x, z); if (c.e > -0.2 || !caveRoofed(x, z, 0.3)) continue; gp[n * 3] = x; gp[n * 3 + 1] = c.top - 0.12 - cr() * 0.25; gp[n * 3 + 2] = z; n++; }
     const worms = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(gp.subarray(0, n * 3), 3)), new THREE.PointsMaterial({ size: 0.2, color: 0x8ff5e0, map: glowTex, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false }));
     scene.add(worms);
     updaters.push((dt, t) => {
@@ -1360,7 +1428,7 @@ export function buildWorld(scene, opts = {}) {
   let propAt = 0; const propBox = new THREE.Box3(), propSphere = new THREE.Sphere();
   if (FAR) updaters.push(() => {
     const cam = opts.camera; if (!cam) return;
-    for (let k = 0; k < 40 && cells.length; k++) { const c = cells[cellAt++ % cells.length]; c.inst.visible = Math.hypot(c.x - cam.position.x, c.z - cam.position.z) < c.far * reach + c.pad; }
+    for (let k = 0; k < 90 && cells.length; k++) { const c = cells[cellAt++ % cells.length]; const cd = Math.hypot(c.x - cam.position.x, c.z - cam.position.z), close = !c.lod || cd < c.near * (0.55 + 0.45 * reach) + c.pad; c.inst.visible = close && cd < c.far * reach + c.pad; if (c.lod) c.lod.visible = !close && cd < c.far * reach + c.pad; }
     // Everything else that stands still and is small (rocks, mushrooms, lanterns, heaps): out of the picture when it
     // is too far off to matter. Done with layers, so that nothing else's say over what is visible is disturbed.
     const kids = scene.children;
@@ -1939,6 +2007,9 @@ export function buildWorld(scene, opts = {}) {
     mapmaker, lighthouse, hermit, paintings, echo, stones, heron, cottage, flats,
     ringBell() { flats.bell.swing = 0.5; },
     sources, setLightStage(n) { lighthouse.stage = n; lighthouse.parts.forEach((part, k) => { if (part) part.visible = k <= n; }); if (lighthouse.frame) lighthouse.frame.visible = n >= 2; },
+    chests, pickups,
+    setChestOpen(id, open, now) { const c = chests.find((q) => q.id === id); if (c) { c.open = open; if (now && c.lid) c.lid.rotation.x = open ? -1.9 : 0; } },
+    setPickup(i, there) { const pk = pickups[i]; if (pk) { pk.there = there; if (pk.group) pk.group.visible = there; } },
     logPages, setLogPage(i, there) { const pg = logPages[i]; if (pg) { pg.there = there; if (pg.group) pg.group.visible = there; } },
     setCairn(n) { hidden.laid = Math.min(60, n); if (hidden.cairnStones) hidden.cairnStones.count = hidden.laid; },
     ringStone(i, ms = 900) { if (stones[i]) stones[i].until = Date.now() + ms; },

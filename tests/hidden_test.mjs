@@ -4,7 +4,7 @@ const errs = []; let fails = 0;
 const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
 await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); });
 await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);

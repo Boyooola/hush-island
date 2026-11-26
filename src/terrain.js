@@ -230,6 +230,8 @@ function farRaw(x, z) {
   h = lerp(LIGHTHOUSE.y, h, smoothstep(5, 11, Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z)) );
   // The camp clearing.
   h = lerp(1.62, h, smoothstep(5.5, 11, r));
+  // Rock over everything that is hollow under the hill: where the land would lie too low to roof a passage, it rises.
+  if (nearCave(x, z)) { const c = caveAt(x, z); if (c.deep && c.e < 9) h = Math.max(h, lerp(h, c.top + 3.2 + 1.2 * Math.sin(x * 0.31) * Math.cos(z * 0.27), 1 - smoothstep(1.5, 9, c.e))); }
   return h;
 }
 // The caves under Hollow Hill: a way cut through the hill from its eastern foot to its western, with two chambers
@@ -238,7 +240,17 @@ function farRaw(x, z) {
 export const CAVE = { pts: [[-150, -70], [-166, -84], [-182, -92], [-204, -102]], y0: 9.6, y1: 3.2, half: 2.7, rooms: [[1, 6.5], [2, 7.5]], roof: 4.4,
   // A side passage from the round chamber, shut by a stone door until the chamber is made to ring, and at its end
   // a small room with a pool in it.
-  branch: [[-182, -92], [-190, -76]], pool: { x: -190, z: -76, r: 5.6 }, door: { x: -185.6, z: -84.8 } };
+  branch: [[-182, -92], [-190, -76]], pool: { x: -190, z: -76, r: 5.6 }, door: { x: -185.6, z: -84.8 },
+  // The rest of what is under the hill: passages off the main way, each from one spot to another at a given floor
+  // height and half-width, some ending in a room. [ax, az, ay, bx, bz, by, half, room at the far end]
+  more: [
+    [-166, -84, 7.4, -158, -100, 7.0, 2.3, 0], [-158, -100, 7.0, -170, -112, 6.4, 2.3, 6.5],      // to the crystal gallery
+    [-170, -112, 6.4, -188, -110, 5.2, 2.2, 0], [-188, -110, 5.2, -193, -97, 4.4, 2.2, 0],          // and round, back to the main way
+    [-166, -84, 7.4, -171, -70, 7.8, 2.1, 0], [-171, -70, 7.8, -162, -60, 8.2, 2.1, 4.6],            // a passage that goes nowhere
+    [-190, -76, 4.1, -203, -72, 3.6, 2.2, 0], [-203, -72, 3.6, -214, -82, 2.9, 2.4, 9],              // beyond the pool, down to the lake
+    [-158, -77, 8.5, -151, -86, 8.6, 1.9, 3.6],                                                     // a nook near the mouth
+  ],
+  gallery: { x: -170, z: -112 }, deadend: { x: -162, z: -60 }, lake: { x: -214, z: -82, r: 9, y: 2.72 }, nook: { x: -151, z: -86 } };
 const caveLens = CAVE.pts.slice(1).map((p, i) => Math.hypot(p[0] - CAVE.pts[i][0], p[1] - CAVE.pts[i][1])), caveLen = caveLens.reduce((a, b) => a + b, 0);
 // For a spot: e, how far it is outside the hollowed space (negative inside it); u, how far along the way (0..1);
 // floor, the height of the cave floor there; top, the height of the cave roof.
@@ -258,10 +270,19 @@ export function caveAt(x, z) {
     const d = Math.hypot(x - a[0] - bx * k, z - a[1] - bz * k), dp = Math.hypot(x - CAVE.pool.x, z - CAVE.pool.z), eb = Math.min(d - 2.4, dp - CAVE.pool.r);
     if (eb < e) { e = eb; u = BRANCH_U; floor = BRANCH_Y - 1.0 * k - 0.5 * (1 - smoothstep(1.5, CAVE.pool.r - 1, dp)); lift = 1.2 * (1 - smoothstep(0, CAVE.pool.r, dp)); }
   }
-  return { e, u, floor, top: floor + CAVE.roof + lift };
+  let deep = eDeep(e, u);
+  for (const [ax, az, ay, bx, bz, by, half, room] of CAVE.more) {
+    const dx = bx - ax, dz = bz - az, k = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1);
+    let em = Math.hypot(x - ax - dx * k, z - az - dz * k) - half, fl = lerp(ay, by, k), lf = 0;
+    if (room) { const d = Math.hypot(x - bx, z - bz); if (d - room < em) { em = d - room; fl = by - (room > 8 ? 1.1 * (1 - smoothstep(2, room - 1.5, d)) : 0); } lf = 1.6 * (1 - smoothstep(0, room, d)); }
+    if (em < e) { e = em; u = BRANCH_U; floor = fl; lift = lf; deep = true; }
+  }
+  return { e, u, floor, top: floor + CAVE.roof + lift, deep };
 }
+// Whether a spot on the main way is far enough in from either mouth to want rock over it.
+const eDeep = (e, u) => u > 0.1 && u < 0.9;
 const BRANCH_U = (caveLens[0] + caveLens[1]) / caveLen, BRANCH_Y = lerp(CAVE.y0, CAVE.y1, BRANCH_U);
-const nearCave = (x, z) => x < -138 && x > -218 && z < -56 && z > -116;
+const nearCave = (x, z) => x < -136 && x > -232 && z < -46 && z > -128;
 function farHeight(x, z) {
   const h = farRaw(x, z);
   if (!nearCave(x, z)) return h;

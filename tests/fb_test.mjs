@@ -4,7 +4,7 @@ const errs = [];
 const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(2500);
 await p.click('#enter'); await p.waitForTimeout(4500);
 await p.click('#btn-feedback'); await p.waitForTimeout(400);

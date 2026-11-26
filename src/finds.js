@@ -8,7 +8,7 @@ import { timeNow } from './now.js';
 import { loadProps } from './props.js';
 
 export const FINDS = [
-  { id: 'sprat', group: 'From the dock', name: 'Silver sprat', hint: 'Paw at the water from the end of the dock, by day.' },
+  { id: 'sprat', group: 'From the dock', name: 'Silver sprat', hint: 'Fish from the end of the dock, by day.' },
   { id: 'perch', group: 'From the dock', name: 'Striped perch', hint: 'A daytime fish, less common than the sprat.' },
   { id: 'moonfish', group: 'From the dock', name: 'Moonfish', hint: 'Fish from the dock after dark.' },
   { id: 'rainfish', group: 'From the dock', name: 'Rain minnow', hint: 'They come up when it rains.' },

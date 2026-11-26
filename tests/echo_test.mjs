@@ -4,10 +4,11 @@ const errs = []; let fails = 0;
 const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (!c) fails++; };
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
 await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); });
 await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);
+await p.evaluate(() => window.__ember.setLamp(true));      // the hill turns out anyone with no light
 const S = '/home/claude/ember-isle/shots/';
 const go = async (x, z, yaw, cam, wait = 2500) => { await p.evaluate(([x, z, yaw, cam]) => { const e = window.__ember; e.teleport(x, z, yaw); e.cam(...cam); }, [x, z, yaw, cam]); await p.waitForTimeout(wait); };
 const E = await p.evaluate(() => { const e = window.__ember.world.echo; return { cr: e.crystals.map((c) => ({ x: c.x, z: c.z })), door: { x: e.door.x, z: e.door.z }, mark: e.mark }; });
@@ -20,7 +21,7 @@ ok(await p.evaluate(() => window.__ember.world.echo.door.open && window.__ember.
 await p.waitForTimeout(7000);
 await go(-190, -77, 4, [0.4, 0.7, 9], 5000); await p.screenshot({ path: S + 'e4.png' });
 ok(await p.evaluate(() => !!window.__emberCards().deeppool), 'the pool under the hill is a stamp');
-await go(E.mark.x - 0.6, E.mark.z - 2.2, 0, [3.14, 0.25, 4.5], 2500);
+await p.evaluate(() => window.__ember.setLamp(true)); await go(E.mark.x - 0.6, E.mark.z - 2.2, 0, [3.14, 0.25, 4.5], 2500);
 const acts = await p.evaluate(() => window.__ember.actions.join(' | ')); ok(/mark on the rock/.test(acts), 'the mark can be looked at', acts);
 await p.evaluate(() => { const e = window.__ember; e.run(e.actions.indexOf('Look at the mark on the rock')); }); await p.waitForTimeout(900); await p.screenshot({ path: S + 'e5.png' });
 console.log(' ', await p.evaluate(() => window.__ember.log.slice(-4).join(' || ')));

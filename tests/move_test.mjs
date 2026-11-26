@@ -36,7 +36,7 @@ const errs = [], outside = [];
 const open = async (guestName) => {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 560 } });
   await ctx.route((u) => u.hostname !== 'localhost', (r) => { outside.push(r.request().url()); r.abort(); });
-  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+  const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
   await p.goto(R + '/index.html', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(1000);
   await p.evaluate(([g, uid]) => { localStorage.setItem('ember.starter', '4'); if (g) localStorage.setItem('hush.guest', JSON.stringify({ access_token: 'x'.repeat(48) + '.y.guest-' + g, refresh_token: 'r', expires_at: Math.floor(Date.now() / 1000) + 3000, user: { id: uid } })); }, [guestName, guestName ? md5uid(guestName) : '']);
   await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(2500);

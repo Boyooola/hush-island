@@ -13,7 +13,7 @@ const enter = async (p, animal) => {
 const open = async (animal, ua) => {
   const ctx = await browser.newContext({ viewport: { width: 960, height: 540 }, userAgent: ua });
   await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+  const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
   await p.goto('http://localhost:8787/index.html'); await p.waitForTimeout(1500);
   await p.evaluate(() => localStorage.setItem('ember.starter', '4'));
   await enter(p, animal);

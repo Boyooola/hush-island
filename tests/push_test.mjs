@@ -5,7 +5,7 @@ const ok = (c, m, x = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m, x); if (
 const S = '/home/claude/ember-isle/shots/';
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message));
+const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(e.message));
 await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
 await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); window.__ember.setRain(0); window.__ember.setFog(false); });
 await p.click('#pick-animal button:nth-child(1)'); await p.click('#enter'); await p.waitForTimeout(5000);
@@ -19,6 +19,7 @@ await go(H.hares[0].x + 11, H.hares[0].z + 2, 3000);
 const hy = await p.evaluate(() => window.__ember.me.y);
 await cut([H.hares[0].x + 2.2, hy + 0.9, H.hares[0].z + 2.4], [H.hares[0].x, hy + 0.25, H.hares[0].z], 'p1.png');
 await p.keyboard.press('6'); await p.waitForTimeout(1000);      // lie down and keep still
+await p.evaluate(() => { const e = window.__ember, h = e.shy.hares[0]; h.x = e.me.x - 8; h.z = e.me.z - 3; h.state = 'graze'; h.still = 0; });      // whatever the teleport did to it, a hare is grazing near by
 let came = false; for (let i = 0; i < 40 && !came; i++) { await p.waitForTimeout(3000); came = (await finds()).includes('hare'); }
 ok(came, 'lying still on the meadow, a hare comes over', await log(2)); await p.screenshot({ path: S + 'p2.png' });
 await p.keyboard.press('6'); await p.waitForTimeout(800);

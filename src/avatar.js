@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { quadState, requestQuad, buildQuad } from './quad.js';
 import { lerp, clamp } from './terrain.js';
 import { makeNameTag, makeBubble, makeGlowTexture } from './labels.js';
+import { loadProps } from './props.js';
+import { ITEMS, WEAR_IDS } from './items.js';
 
 // Each species is a four-legged model (see quad.js). `tints` are fur colour variants: null keeps the artist's colour.
 // `toy` is the simple stand-in shape used only if a model cannot be loaded.
@@ -295,6 +297,7 @@ function makeQuad(spec, paletteIndex) {
   P.mouth.add(plankMesh);
   // Keepsakes: a scarf round the neck, with a lantern hanging from it.
   P.neck.scale.setScalar(inv);
+  P.crown.scale.setScalar(inv); P.back.scale.setScalar(inv);
   const scarfMat = mat(spec.id === 'fox' ? '#3fa7a0' : '#d9483b');
   const scarf = new THREE.Group();
   const wrap = new THREE.Mesh(new THREE.TorusGeometry(P.neckR * 1.04 + 0.01, 0.04, 7, 18), scarfMat);
@@ -415,6 +418,7 @@ export class Avatar {
     }
     this.group.add(this.parts.rig);
     this.setHeld(this.held);
+    if (this.wear) { this.wearKey = ''; this.setWear(this.wear); }
     this.coatShown = false; this.setCoat(this.warmth, this.wet);
     this.castsShadow = undefined;
     this.setButterfly(this.butterfly);
@@ -428,8 +432,55 @@ export class Avatar {
     this.nights = nights;
     this.firefly.visible = nights >= 14;
     if (!this.parts || this.parts.empty) return;
-    this.parts.scarf.visible = nights >= 3;
+    this.parts.scarf.visible = nights >= 3 && !this.parts.scarf.userData.hide;
     this.parts.lantern.visible = nights >= 7;
+  }
+
+  // What is worn: places in WEAR_IDS for the head, the neck and the back (0 for nothing). The pieces are modelled
+  // for a head and neck of a set size and fitted to each animal from its own measurements.
+  setWear(list) {
+    const want = [0, 1, 2].map((i) => (Array.isArray(list) && WEAR_IDS[list[i]] ? list[i] | 0 : 0));
+    if (this.wearKey === want.join() && this.wearOn === this.parts) return;
+    this.wearKey = want.join(); this.wear = want;
+    const P = this.parts;
+    if (!P || !P.quad) return;
+    this.wearOn = P;
+    for (const g of P.worn || []) g.parent && g.parent.remove(g);
+    P.worn = [];
+    if (P.scarf) P.scarf.userData.hide = want[1] > 0;      // a keepsake scarf gives way to anything else worn round the neck
+    if (!want.some(Boolean)) return;
+    loadProps().then((make) => {
+      if (!make || this.parts !== P || this.wearKey !== want.join()) return;
+      want.forEach((n, slot) => {
+        if (!n) return;
+        const it = ITEMS[WEAR_IDS[n]];
+        let m;
+        if (slot === 1) {
+          // Round the neck: the band is made to the animal's own neck; what hangs from it is modelled, and hangs
+          // straight down from the lowest point of the band however the neck is carried.
+          m = new THREE.Group();
+          const R = P.neckR * 1.04 + 0.01;
+          const band = new THREE.Mesh(new THREE.TorusGeometry(R, it.ring[1], 7, 18), new THREE.MeshStandardMaterial({ color: it.ring[0], roughness: 0.85, flatShading: true }));
+          band.rotation.x = Math.PI / 2; m.add(band);
+          const hang = make(it.model + '_hang');
+          if (hang) {
+            P.rig.updateMatrixWorld(true);
+            const down = new THREE.Vector3(0, -1, 0).applyQuaternion(P.neck.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+            const out = new THREE.Vector3(down.x, 0, down.z); if (out.lengthSq() < 0.01) out.set(0, 0, 1); out.normalize();
+            const right = new THREE.Vector3().crossVectors(down.clone().negate(), out).normalize(), fwd = new THREE.Vector3().crossVectors(right, down.clone().negate()).normalize();
+            const pivot = new THREE.Group(); pivot.position.copy(out).multiplyScalar(R);
+            pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, down.clone().negate(), fwd));
+            const k = Math.max(0.85, Math.min(1.5, P.neckR / 0.12)); hang.scale.setScalar(k); hang.position.set(0, 0, -0.11 * k);
+            pivot.add(hang); m.add(pivot);
+          }
+        } else {
+          m = make(it.model); if (!m) return;
+          m.scale.setScalar(Math.max(0.6, Math.min(2.2, slot === 0 ? P.crownR / 0.1 : P.backW / 0.14)));
+        }
+        m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.caster = false; if (o.material.name === 'c_lantern_glow') { o.material = o.material.clone(); o.material.emissive.set(0xffb45a); o.material.emissiveIntensity = 1.8; o.material.color.set(0xffd9a0); } } });
+        (slot === 0 ? P.crown : slot === 1 ? P.neck : P.back).add(m); P.worn.push(m);
+      });
+    });
   }
 
   // 0 nothing, 1 a stick for the fire, 2 a fish, 3 driftwood for the boat.

@@ -33,7 +33,7 @@ ok('and it is gone from the sand', !(await a.evaluate(() => JSON.stringify(windo
 await a.evaluate(() => window.__ember.found('moonfish')); await a.evaluate(() => window.__ember.found('cockle'));
 await a.evaluate(() => window.__ember.openJournal('finds')); await a.waitForTimeout(800);
 const sheet = await a.evaluate(() => document.getElementById('sheet').innerText);
-ok('the journal lists what is found, how often, and hints for the rest', /Cockle shell\s+found 2 times/.test(sheet) && /Moonfish\s+found once/.test(sheet) && /Not found yet\s+It only bites during campfire hour/.test(sheet) && /2 of 20 found/.test(sheet), sheet.slice(0, 300).replace(/\n/g, ' / '));
+ok('the journal lists what is found, how often, and hints for the rest', /Cockle shell · found 2 times/.test(sheet) && /Moonfish · found once/.test(sheet) && /It only bites during campfire hour/.test(sheet) && /2 of 20 found/.test(sheet), sheet.slice(0, 300).replace(/\n/g, ' / '));
 await a.screenshot({ path: '/home/claude/ember-isle/shots/j2-journal.png' });
 await a.click('#sheet-close');
 ok('others can tell how full your journal is', await until(b, () => [...window.__ember.peers.values()].some((p) => p.data.found === 2), 15000));

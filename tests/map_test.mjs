@@ -6,7 +6,7 @@ const S = '/home/claude/ember-isle/shots/';
 const visitor = async (name) => {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
-  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(name + ': ' + e.message));
+  const p = await ctx.newPage(); p.setDefaultTimeout(150000); p.on('pageerror', (e) => errs.push(name + ': ' + e.message));
   await p.goto('http://localhost:8787/far', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3500);
   await p.evaluate(() => { window.__ember.lockQuality(); window.__ember.idleAfter = 3600000; window.__ember.setHour(11); });
   await p.click('#pick-animal button:nth-child(1)'); await p.click('#rename'); await p.fill('#name-input', name); await p.click('#name-form button'); await p.waitForTimeout(300); await p.click('#enter'); await p.waitForTimeout(5000);

@@ -15,6 +15,7 @@ import { buildSite, BOAT_GOAL } from './build.js';
 import { voyageAt, BOARD_MS } from './voyage.js';
 import { timeNow, clockSkew } from './now.js';
 import { campfireAt, clockTime, inWords, bothTimes } from './campfire.js';
+import { FINDS, FIND, fishKind, createFinds } from './finds.js';
 import { buildTraces } from './traces.js';
 import { judge } from './words.js';
 
@@ -85,6 +86,9 @@ if (typeof myKey !== 'string' || !/^[a-z0-9]{24,40}$/.test(myKey)) { const b = n
 let myCode = store('ember.code');
 if (!/^\d{4}$/.test(String(myCode))) { myCode = String(1000 + Math.floor(Math.random() * 9000)); store('ember.code', myCode); }
 const fullName = (name, code) => (code ? `${name} #${code}` : name);
+// The journal: every kind of thing found so far, with how many times and when first. Kept on the device.
+let journal = (() => { const j = store('ember.finds'); return j && typeof j === 'object' && !Array.isArray(j) ? j : {}; })();
+const journalCount = () => FINDS.filter((f) => journal[f.id]).length;
 let fires = (() => { const r = store('ember.fires'); return r && Number.isFinite(r.count) ? r : { count: 0, last: 0 }; })();      // campfire hours been at, and the last one
 let sailed = Number(store('ember.sailed')) || 0;      // times round the island in the boat
 const withMarks = (muted, away, it, text, code, sailor, flame) => `${code ? `§#${code}` : ''}${muted ? '§m' : ''}${away ? '§z' : ''}${it ? '§i' : ''}${sailor ? '§s' : ''}${flame ? '§f' : ''}${String(text || '').replace(/§/g, '')}`;
@@ -500,7 +504,9 @@ function pawAtWater() {
     if (life.splash(fs.x, fs.z + (me.z * 0.5), canCatch)) {
       fishTonight++;
       setHeld(2);
-      addLog('', fishTonight === 1 ? 'You caught a fish.' : `You caught a fish. That makes ${fishTonight} this visit.`, 'sys');
+      const kind = fishKind({ dark: skyNow.dark, rain: rainNow, campfire: campNow().on });
+      addLog('', `You caught ${kind === 'oldone' ? 'the old one' : (/^[aeiou]/i.test(FIND[kind].name) ? 'an ' : 'a ') + FIND[kind].name.toLowerCase()}.${fishTonight > 1 ? ` That makes ${fishTonight} fish this visit.` : ''}`, 'sys');
+      found(kind, true);
       setTimeout(() => playEmote('wag'), 900);
       pushPresence(true);
     }
@@ -1096,7 +1102,7 @@ function updateVoyage(dt) {
   // Twice on the way round, dolphins come alongside for a while.
   const dolphins = !!v && v.phase === 'sail' && ((v.u > 0.14 && v.u < 0.42) || (v.u > 0.58 && v.u < 0.84));
   life.escort(dolphins ? v.pose : null);
-  if (dolphins && voyage && voyageSeated && !voyageDolphins) { voyageDolphins = true; addLog('', 'Dolphins! Two of them, leaping alongside.', 'sys'); audio.pop(760); }
+  if (dolphins && voyage && voyageSeated && !voyageDolphins) { voyageDolphins = true; addLog('', 'Dolphins! Two of them, leaping alongside.', 'sys'); audio.pop(760); found('dolphin', true); }
   if (v && v.phase !== voyageWas) {
     if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'She swings away from the shore.', 'sys'); } }
   }
@@ -1372,7 +1378,7 @@ function callOut() {
     ripple(me.x, me.z, 9, 0xffc978);
     net.note('answer');
   } else { myCallOpen = t; answeredBy = new Set(); }
-  if (stargazing) { life.meteor(emoteMsg[1] % 100000); did('hill'); }      // call at the sky from the hill and a star answers
+  if (stargazing) { life.meteor(emoteMsg[1] % 100000); did('hill'); if (skyNow.dark > 0.6) found('star', true); }      // call at the sky from the hill and a star answers
 }
 // Greeting: a dip of the head and a wagging tail.
 function greet(av, name) {
@@ -1507,7 +1513,7 @@ function presenceState() {
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, cf: fires.count, gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
+    it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, cf: fires.count, jn: journalCount(), gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -2114,6 +2120,8 @@ function updateActions() {
     if (who) opts.push({ label: `Greet ${who.name}`, run: () => greet(who.av, who.name), side: true });
     const drift = yard.near(me.x, me.z);
     if (drift >= 0) opts.push({ label: 'Pick up the driftwood', run: () => pickUpDriftwood(drift) });
+    // Something small on the ground: it goes straight into the journal, not the mouth.
+    if (lying.near(me.x, me.z) >= 0) opts.push({ label: 'See what that is', run: pickUpFind });
     if (Math.hypot(yard.site.x - me.x, yard.site.z - me.z) < 3.4) opts.push({ label: 'Look over the boat', run: lookAtBoat });
     const tr = traces.near(me.x, me.z);
     if (tr && !who && drift < 0) opts.push({ label: 'Sniff at the tracks', run: () => sniffTracks(tr) });
@@ -2167,6 +2175,50 @@ function updateActions() {
     }
   });
   actions = next;
+}
+
+// ---------- finds and the journal ----------
+const lying = createFinds(scene);
+function found(id, quiet = false) {
+  const f = FIND[id];
+  if (!f || !entered) return;
+  const first = !journal[id];
+  journal[id] = { n: (journal[id] ? journal[id].n : 0) + 1, at: journal[id] ? journal[id].at : Date.now() };
+  store('ember.finds', journal);
+  if (first) {
+    flash('New in your journal', f.name); audio.pop(820);
+    addLog('', `${f.name}: new in your journal. That is ${journalCount()} of ${FINDS.length}.`, 'sys');
+    net.note('find'); pushPresence(true);
+  } else if (!quiet) addLog('', `${f.name}. You have found ${journal[id].n} of these.`, 'sys');
+  showJournalCount();
+}
+function showJournalCount() { $('journal-count').textContent = `${journalCount()} of ${FINDS.length}`; }
+function pickUpFind() {
+  const i = lying.near(me.x, me.z);
+  if (i < 0) return;
+  const kind = lying.take(i);
+  if (!kind) return;
+  playEmote('paw'); audio.step('sand', 1);
+  found(kind);
+}
+function openJournal() {
+  const lines = [];
+  let group = '';
+  for (const f of FINDS) {
+    if (f.group !== group) { group = f.group; lines.push({ text: group, kind: 'head' }); }
+    const j = journal[f.id];
+    lines.push(j ? { text: f.name, meta: `${j.n === 1 ? 'found once' : `found ${j.n} times`} · first on ${new Date(j.at).toLocaleDateString([], { day: 'numeric', month: 'short' })}` } : { text: 'Not found yet', meta: f.hint });
+  }
+  openSheet({ title: 'Your journal', lines, note: `${journalCount()} of ${FINDS.length} found. Some things only show at night, in rain, or at campfire hour.` });
+}
+$('journal-btn').addEventListener('click', () => { openJournal(); });
+showJournalCount();
+let whaleCheck = 0;
+function updateFinds() {
+  lying.update(t, { dark: skyNow.dark, rain: rainNow });
+  if (t - whaleCheck < 1) return;
+  whaleCheck = t;
+  if (entered && !journal.whale && life.whaleUp && (voyageSeated || atDockEnd() || Math.hypot(me.x - HILL.x, me.z - HILL.z) < 6)) { addLog('', 'Far out, a great back rolls up out of the sea and under again.', 'sys'); found('whale'); }
 }
 
 // ---------- campfire hour ----------
@@ -2334,7 +2386,7 @@ function frame() {
     const onStone = me.mode === 'lie' && Math.hypot(life.stone.x - me.x, life.stone.z - me.z) < 1.3;
     if (onStone && skyNow.dark < 0.4 && rainNow < 0.2) {
       warmth = Math.min(1, warmth + dt * 0.03); stoneFor += dt;
-      if (stoneFor > 5 && !stoneSaid) { stoneSaid = true; addLog('', 'The stone is warm from the sun.', 'sys'); did('stone'); }
+      if (stoneFor > 5 && !stoneSaid) { stoneSaid = true; addLog('', 'The stone is warm from the sun.', 'sys'); did('stone'); found('stone', true); }
     } else {
       if (onStone && !stoneSaid) { stoneSaid = true; addLog('', rainNow >= 0.2 ? 'The stone is wet and cold.' : 'The stone has gone cold. It warms up again by day.', 'sys'); }
       if (!onStone) { stoneFor = 0; stoneSaid = false; }
@@ -2343,7 +2395,7 @@ function frame() {
     const mn = life.meadowNear(me.x, me.z);
     if (mn.flying && mn.dist < 3.4 && me.speed > 2.4) life.startle(mn.meadow);
     stillFor = mn.flying && mn.dist < 3.2 && me.speed < 0.1 && !me.emote && mn.meadow.scare < 0.1 ? stillFor + dt : 0;
-    if (!hasButterfly && stillFor > 5) { hasButterfly = true; me.setButterfly(true); addLog('', 'A butterfly has landed on your nose. Keep still.', 'sys'); did('butterfly'); pushPresence(true); }
+    if (!hasButterfly && stillFor > 5) { hasButterfly = true; me.setButterfly(true); found(skyNow.dark > 0.55 ? 'moth' : 'butterfly', true); addLog('', 'A butterfly has landed on your nose. Keep still.', 'sys'); did('butterfly'); pushPresence(true); }
     if (hasButterfly && (me.speed > 0.5 || !mn.flying || mn.dist > 4.5 || me.emote === 'shake' || me.emote === 'hop' || me.emote === 'call')) { hasButterfly = false; me.setButterfly(false); pushPresence(true); }
     if (voyage) wet = Math.max(0, wet - dt / 150);
     else if (world.surface(me.x, me.z) === 'water') wet = Math.min(1, wet + dt / 1.8);
@@ -2362,6 +2414,7 @@ function frame() {
   updateVoyage(dt);
   if (hop) updateHop();
   updateCampfire(dt);
+  updateFinds();
   updateWith();
   me.update(dt, t);
 
@@ -2534,9 +2587,10 @@ window.__ember = {
   get pid() { return myPid; },
   get keptBy() { return keptBy; },
   get code() { return myCode; },
-  get boatTotal() { return boatTotal; }, get carvings() { return carvings; }, store: saved,
+  get boatTotal() { return boatTotal; }, get drawn() { return { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }; }, get carvings() { return carvings; }, store: saved,
   startParty, joinParty, leaveParty,
   boardBoat, castOff, leaveBoat,
+  get journal() { return journal; }, found, openJournal, lying, pickUpFind,
   get campfire() { const c = campNow(); return { on: c.on, id: c.id, next: c.next, secs: campSecs, fires: fires.count, line: campLine(), top: $('camp').textContent }; },
   set campShift(ms) { campShift = ms; campCheck = 0; }, set campSecs(v) { campSecs = v; },
   surface: (x, z) => world.surface(x, z), get moving() { return !!moveTarget || !!hop; },

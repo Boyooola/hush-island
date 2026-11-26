@@ -1,5 +1,6 @@
 // Things that live on and around the island: fish under the dock, splashes and shaken-off droplets,
 // and the falling stars everyone sees at the same moment.
+import { loadProps } from './props.js';
 import { timeNow } from './now.js';
 import * as THREE from 'three';
 import { DOCK, clamp, lerp, shoreRadius, terrainHeight } from './terrain.js';
@@ -147,10 +148,24 @@ export function buildLife(scene, world) {
       gulls.push({ g, l, r, a: 0, rad: 30 + rank * side * 1.6, lag: rank * 0.06, h: 36 - rank * 0.4, sp: 0.085, ph: i * 0.9, cx: -15, cz: -12, flock: true });
     }
     gulls.mat = white;
+    // The modelled gull (props.glb): a body with a head, beak and tail, and two wings that beat.
+    loadProps().then((make) => {
+      if (!make || !make('gull')) return;
+      const mats = new Set();
+      for (const b of gulls) {
+        const body = make('gull', 'gull_wing'), l = make('gull_wing_l'), r = make('gull_wing_r');
+        l.position.set(0.05, 0.03, 0); r.position.set(-0.05, 0.03, 0);
+        while (b.g.children.length) b.g.remove(b.g.children[0]);
+        b.g.add(body, l, r); b.l = l; b.r = r;
+        b.g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; o.material.transparent = true; o.material.side = THREE.DoubleSide; mats.add(o.material); } });
+      }
+      gulls.mats = [...mats];
+    });
   }
   let daylight = 0;
   updaters.push((dt, t) => {
     gulls.mat.opacity = daylight;
+    if (gulls.mats) for (const m of gulls.mats) m.opacity = daylight;
     for (const b of gulls) {
       b.g.visible = daylight > 0.02;
       if (!b.g.visible) continue;
@@ -472,6 +487,7 @@ export function buildLife(scene, world) {
     get shower() { return showerOn; },
     // Send the dolphins alongside the boat at this place and heading, or (null) call them off.
     escort(pose) { escortPose = pose; },
+    get whaleUp() { return !!(seaLife.whale && seaLife.whale.visible); },
     get escorting() { return escorts.filter((e) => e.visible).length; },
     forceShower(ms = 20000) { forced = timeNow() + ms; },
     get fish() { return fish.map((f) => ({ x: f.x, z: f.z, gone: f.gone > 0, scare: f.scare })); },

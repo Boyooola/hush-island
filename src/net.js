@@ -52,7 +52,9 @@ export function parsePeer(p) {
     // The boat: which voyage this visitor is aboard and when it casts off; and how many times they have sailed.
     voyage: Array.isArray(s.vy) && num(s.vy[0], 0, 1e15) > 0 ? { id: num(s.vy[0], 0, 1e15), cast: num(s.vy[1], 0, 1e15), seated: s.vy[2] === 1 } : null,
     sailed: Math.floor(num(s.sv, 0, 99999)),
-    fires: Math.floor(num(s.cf, 0, 99999)),      // campfire hours this visitor has been at
+    fires: Math.floor(num(s.cf, 0, 99999)),
+    found: Math.floor(num(s.jn, 0, 999)),        // how many kinds of thing are in their journal
+      // campfire hours this visitor has been at
     // Where the keeper is, from whoever is moving him in a game of tag: game (-1 while he walks home), place, and his tags.
     keeper: Array.isArray(s.kp) && Number.isFinite(s.kp[0]) && s.kp[0] !== 0 ? { g: num(s.kp[0], -1, 1e15), x: num(s.kp[1], -40, 40), z: num(s.kp[2], -40, 40), it: num(s.kp[3], 0, 1e15), to: clean(s.kp[4], 16), at: num(s.kp[5], 0, 1e15) } : null,
     invTo: Array.isArray(s.ti) ? clean(s.ti[0], 16) : '',

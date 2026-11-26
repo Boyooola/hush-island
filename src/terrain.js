@@ -94,6 +94,24 @@ export function onDock(x, z) {
   return x >= DOCK.x0 && x <= DOCK.x1 && z >= DOCK.z0 && z <= DOCK.z1;
 }
 
+// The worn paths: from the beach up to the fire, and from the fire out to the dock, the hill and the boatyard.
+// pathAmount is 1 on a path, 0 well off it, with a ragged edge.
+export const PATHS = [
+  [[0.5, 22.5], [0.9, 14], [0.3, 5.6]],
+  [[5.4, 0.4], [16, -0.6], [29.6, 0]],
+  [[-3.8, -3.0], [-9.5, -6.6], [-13.4, -10.6]],
+  [[-5.2, 0.4], [-11, 3.2], [-17, 9.2], [-22.6, 13.2]],
+];
+export function pathAmount(x, z) {
+  let d = 1e9;
+  for (const p of PATHS) for (let i = 0; i < p.length - 1; i++) {
+    const ax = p[i][0], az = p[i][1], bx = p[i + 1][0] - ax, bz = p[i + 1][1] - az;
+    const k = clamp(((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz), 0, 1);
+    d = Math.min(d, Math.hypot(x - ax - bx * k, z - az - bz * k));
+  }
+  return 1 - smoothstep(0.55, 1.45, d + noise2(x * 0.9 + 11, z * 0.9 - 5) * 0.45);
+}
+
 // Height an avatar stands at.
 export function groundHeight(x, z) {
   const h = terrainHeight(x, z);

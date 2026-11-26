@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { shoreRadius, terrainHeight, colliders, smoothstep, SLIP, slipPoint } from './terrain.js';
 import { makeSignTexture, makeGlowTexture } from './labels.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { loadProps } from './props.js';
 
 export const BOAT_GOAL = 120;
 export const SITE_A = 2.62;
@@ -31,7 +32,8 @@ export function buildSite(scene) {
   const HOME_YAW = g.rotation.y;
 
   // Stocks and keel.
-  for (const x of [-1.5, 0, 1.5]) { const b = box(0.3, 0.3, 1.1, frameMat); b.position.set(x, 0.15, 0); g.add(b); }
+  const yardRough = [];      // the stand-in yard furniture, until the modelled pieces arrive
+  for (const x of [-1.5, 0, 1.5]) { const b = box(0.3, 0.3, 1.1, frameMat); b.position.set(x, 0.15, 0); g.add(b); yardRough.push(b); }
   const keel = box(5.2, 0.16, 0.2, frameMat); keel.position.y = 0.38; hull.add(keel);
   for (const s of [-1, 1]) { const post = box(0.16, 1.25, 0.18, frameMat); post.position.set(s * 2.75, 0.85, 0); post.rotation.z = -s * 0.5; hull.add(post); }
   // Ribs: seven stations, widest amidships.
@@ -69,12 +71,23 @@ export function buildSite(scene) {
   const horse = new THREE.Group();
   const top = box(1.3, 0.1, 0.14, frameMat); top.position.y = 0.6; horse.add(top);
   for (const sx of [-0.5, 0.5]) for (const sz of [-1, 1]) { const leg = box(0.07, 0.68, 0.07, frameMat); leg.position.set(sx, 0.3, sz * 0.16); leg.rotation.x = sz * 0.3; horse.add(leg); }
-  horse.position.set(-1.2, 0, 2.3); horse.rotation.y = 0.4; g.add(horse);
-  for (let i = 0; i < 5; i++) { const p = box(1.5, 0.06, 0.2, paleMat); p.position.set(1.4 + (i % 2) * 0.08, 0.05 + i * 0.065, 2.2 + (i % 3) * 0.05); p.rotation.y = 0.15 + i * 0.05; g.add(p); }
+  horse.position.set(-1.2, 0, 2.3); horse.rotation.y = 0.4; g.add(horse); yardRough.push(horse);
+  for (let i = 0; i < 5; i++) { const p = box(1.5, 0.06, 0.2, paleMat); p.position.set(1.4 + (i % 2) * 0.08, 0.05 + i * 0.065, 2.2 + (i % 3) * 0.05); p.rotation.y = 0.15 + i * 0.05; g.add(p); yardRough.push(p); }
   const signPost = box(0.1, 1.5, 0.1, frameMat); signPost.position.set(3.4, 0.75, 1.9); g.add(signPost);
   const signMat = new THREE.MeshStandardMaterial({ map: makeSignTexture('Being built', '0 of 120 planks'), roughness: 1, emissive: 0xffffff, emissiveMap: null, emissiveIntensity: 0 });
   const sign = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.56, 0.06), [wood(0x6a4c32), wood(0x6a4c32), wood(0x6a4c32), wood(0x6a4c32), signMat, wood(0x6a4c32)]);
   sign.position.set(3.4, 1.35, 1.96); sign.rotation.y = -0.25; g.add(sign);
+  loadProps().then((make) => {
+    if (!make || !make('stocks')) return;
+    for (const r of yardRough) g.remove(r);
+    g.remove(signPost); g.remove(sign);
+    g.add(make('stocks'));
+    const h = make('sawhorse'); h.position.set(-1.2, 0, 2.3); h.rotation.y = 0.4; g.add(h);
+    const st = make('plank_stack'); st.position.set(1.4, 0, 2.2); st.rotation.y = 0.2; g.add(st);
+    const sp = make('signpost'); sp.position.set(3.4, 0, 1.87); sp.rotation.y = -0.25; sp.scale.setScalar(0.88);
+    const words = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.64), signMat); words.position.set(0, 1.5, 0.148); sp.add(words);
+    g.add(sp);
+  });
   // A lamp on the post so the yard can be found at night.
   const lamp = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeGlowTexture('rgba(255,255,255,1)'), color: 0xffc27a, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
   lamp.scale.setScalar(1.5); lamp.position.set(3.4, 1.75, 1.9); g.add(lamp);
@@ -126,6 +139,13 @@ export function buildSite(scene) {
     for (const x of [r0 + len * 0.33, r0 + len * 0.66]) { const cl = box(0.07, 0.03, 0.96, frameMat); cl.position.set(x, y0 + (y1 - y0) * ((x - r0) / (r1 - r0)) + 0.035, 0); cl.rotation.z = Math.atan2(y1 - y0, r1 - r0); slip.add(cl); }
     const post = box(0.16, 1.1, 0.16, frameMat); post.position.set(r0 - 0.4, y0 + 0.45, 1.5); slip.add(post);
     slip.rotation.y = -SITE_A;      // the group's x axis runs out to sea
+    loadProps().then((make) => {
+      const m = make && make('gangplank');
+      if (!m) return;
+      while (slip.children.length) slip.remove(slip.children[0]);
+      m.position.set(r0, y0, 0);
+      slip.add(m);
+    });
     slip.visible = false; scene.add(slip);
   }
   const BERTH_R = shoreRadius(SITE_A) + 0.2;
@@ -153,6 +173,10 @@ export function buildSite(scene) {
     scene.add(m);
     pieces.push({ m, glint, spot: -1, wait: 0 });
   }
+  loadProps().then((make) => {
+    if (!make || !make('driftwood_0')) return;
+    pieces.forEach((pc, i) => { pc.m.geometry = new THREE.BufferGeometry(); const d = make('driftwood_' + (i % 3)); d.position.y = -0.03; pc.m.add(d); });
+  });
   function place(pc) {
     const used = new Set(pieces.map((p) => p.spot));
     let k = Math.floor(Math.random() * SPOTS.length), guard = 0;

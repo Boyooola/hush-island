@@ -298,6 +298,15 @@
   }
   .act.alt kbd { color: var(--ink-quiet); }
   .bar { display: flex; gap: 8px 32px; width: min(900px, 100%); align-items: baseline; flex-wrap: wrap; }
+  #crossing { position: fixed; inset: 0; z-index: 95; background: #1b2433 center / cover no-repeat; display: flex; align-items: flex-end; justify-content: flex-start; transition: opacity .7s; }
+  #crossing[hidden] { display: none; }
+  #crossing.gone { opacity: 0; pointer-events: none; }
+  #crossing .cx-text { width: 100%; padding: 28px clamp(18px, 5vw, 56px) clamp(26px, 6vh, 56px); background: linear-gradient(transparent, rgba(12, 16, 26, 0.82)); color: #f6ecd6; }
+  #crossing h2 { margin: 0 0 4px; font: italic 600 clamp(30px, 6vw, 54px) Georgia, serif; color: #ffd28a; }
+  #crossing p { margin: 0 0 12px; font-size: clamp(15px, 2.2vw, 19px); }
+  #crossing .cx-bar { height: 6px; max-width: 520px; background: rgba(246, 236, 214, 0.25); border-radius: 3px; overflow: hidden; }
+  #crossing .cx-bar i { display: block; height: 100%; width: 0; background: #ffd28a; transition: width .5s; }
+  #crossing #cx-step { margin: 8px 0 0; font-size: 14px; opacity: 0.8; }
   .emotes { display: flex; gap: 6px 20px; flex-wrap: wrap; }
   #chat { flex: 1 1 260px; display: flex; gap: 12px; min-width: 0; align-items: baseline; }
   #say {
@@ -443,6 +452,14 @@
 </style>
 </head>
 <body>
+<!-- Shown while the other island loads, after the boat has cast off for it: a view of the shore ahead and how far along the loading is. -->
+<div id="crossing" hidden role="status" aria-live="polite">
+  <div class="cx-text"><h2 id="cx-name"></h2><p id="cx-line"></p><div class="cx-bar" aria-hidden="true"><i id="cx-fill"></i></div><p id="cx-step"></p></div>
+</div>
+<script>
+  // If the boat is bringing this visitor across, this is up before anything else is drawn, so the welcome page is never seen.
+  (function () { try { var c = JSON.parse(localStorage.getItem('ember.crossing')); if (c && c.to && Date.now() - (c.at || 0) < 90000) { var el = document.getElementById('crossing'), far = c.to === 'far'; el.style.backgroundImage = 'url(./shore-' + (far ? 'far' : 'home') + '.jpg)'; document.getElementById('cx-name').textContent = far ? 'Lantern Rock' : 'The first island'; document.getElementById('cx-line').textContent = far ? 'West, past where the land drops behind.' : 'East, toward the thread of smoke.'; document.getElementById('cx-step').textContent = 'Crossing'; document.getElementById('cx-fill').style.width = '12%'; el.hidden = false; } } catch (e) {} })();
+</script>
 <canvas id="scene" tabindex="0" aria-label="Hush Island: a small island with a campfire"></canvas>
 
 <section id="intro" aria-labelledby="title">

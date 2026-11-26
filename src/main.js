@@ -1189,7 +1189,7 @@ let partyStand = false;
 let voyage = 0, voyageCast = 0, seenVoyage = 0, seenCast = 0, voyageLine = '', voyageSaid = 0, voyageCalled = 0, voyageWas = '';
 let voyageNow = null, voyageCrew = [], voyageSeated = false, voyageWalkAt = 0, voyageDolphins = false;
 // Where she is bound: 0 once round the island and home, 1 across to the other island, 2 coming in from it.
-let voyageDest = 0, seenDest = 0, crossingOver = false;
+let voyageDest = 0, seenDest = 0, crossingOver = false, landedOnce = false, landedFrames = 0, snapPeers = 0;
 const OTHER = FAR ? 'the first island' : 'Lantern Rock', OTHER_SHORT = FAR ? 'home' : 'the far shore';
 // A short hop from one place to another (the last step into the boat, and back out onto the gangplank).
 let hop = null;
@@ -1253,19 +1253,26 @@ function leaveBoat(why = '') {
   } else addLog('', 'You stepped back onto the sand.', 'sys');
   pushPresence(true);
 }
-// The far end of a crossing: the page for the other island is opened, and the boat is picked up there as she comes in.
+// The loading screen for a crossing: the shore ahead, and a bar that moves as each part of the other island is ready.
+function crossScreen(to, share, step) {
+  const el = $('crossing'), far = to === 'far';
+  if (el.hidden) { el.style.backgroundImage = `url(./shore-${far ? 'far' : 'home'}.jpg)`; $('cx-name').textContent = far ? 'Lantern Rock' : 'The first island'; $('cx-line').textContent = far ? 'West, past where the land drops behind.' : 'East, toward the thread of smoke.'; el.hidden = false; }
+  $('cx-fill').style.width = `${Math.round(share * 100)}%`; if (step) $('cx-step').textContent = step;
+}
+function crossDone() { const el = $('crossing'); if (el.hidden) return; crossScreen(ISLE, 1, 'Ashore'); setTimeout(() => { el.classList.add('gone'); setTimeout(() => { el.hidden = true; el.classList.remove('gone'); }, 800); }, 350); }
+// The far end of a crossing: the other island is loaded, and the visitor steps out onto its sand.
 function crossOver() {
   if (crossingOver) return; crossingOver = true;
   store('ember.crossing', { id: voyage, cast: voyageCast + CROSS_MS, to: FAR ? 'home' : 'far', seat: Math.max(0, voyageCrew.indexOf(myWireId())), at: Date.now() });
   questEvent('crossing'); try { keepProgress(); } catch (e) { /* it is kept in this browser all the same */ }
-  const veil = document.createElement('div'); veil.style.cssText = 'position:fixed;inset:0;background:#cfd8dc;opacity:0;transition:opacity 1.4s;z-index:90'; document.body.appendChild(veil); requestAnimationFrame(() => { veil.style.opacity = '1'; });
-  addLog('', 'The haze closes round her. For a while there is nothing but water.', 'sys');
+  crossScreen(FAR ? 'home' : 'far', 0.06, 'Casting off');
   store('ember.isle', FAR ? 'home' : 'far');      // which shore this browser is on from now, until the boat takes it back
-  setTimeout(() => { location.href = LOCAL_DEV ? (FAR ? '/' : '/far') : '/'; }, 1700);
+  setTimeout(() => { location.href = LOCAL_DEV ? (FAR ? '/' : '/far') : '/'; }, 700);
 }
 // Arriving by boat: there is no stepping ashore from the title page; the visitor is already in their seat as she comes in.
 const arriving = (() => { const c = store('ember.crossing'); return c && typeof c === 'object' && c.to === ISLE && Date.now() - (c.at || 0) < 90000 ? c : null; })();
 if (store('ember.crossing')) store('ember.crossing', null);
+if (arriving) { crossScreen(ISLE, 0.3, 'Raising the island'); loadProps().then(() => { if (!entered) crossScreen(ISLE, 0.55, 'Finding the shore'); }); setTimeout(() => { if (!entered) { $('crossing').hidden = true; } }, 25000); }
 function updateVoyage(dt) {
   // Which voyage is on: mine, or the earliest one anybody near is on.
   const now = timeNow();
@@ -1326,7 +1333,7 @@ function updateVoyage(dt) {
       if (v.phase === 'sail') {
         // Things worth saying on the way round, once each.
         const say = (n, text) => { if (voyageSaid < n) { voyageSaid = n; addLog('', text, 'sys'); } };
-        if (seenDest === 1) { if (v.u > 0.25) say(1, 'The island gets small behind you. From out here the whole of it fits in one look.'); if (v.u > 0.6) say(2, FAR ? 'East, where the sea meets the sky, there is a smudge with a thread of smoke over it. Home.' : 'West, where the sea meets the sky, there is a dark line. It has a tower on it, with no light.'); if (v.u > 0.86) say(3, 'The swell gets longer out here. She puts her nose into it and keeps going.'); }
+        if (seenDest === 1) { /* she is only pulling clear: the rest of the way is the loading screen */ }
         else if (seenDest === 2) { if (v.u > 0.15) say(1, FAR ? 'It comes up out of the haze: cliffs, a hill with a flat top, and a tower with no light.' : 'There is the fire. Somebody has kept it burning.'); if (v.u > 0.7) say(2, 'She is coming in. There is the dock.'); }
         else if (v.u > 0.2) say(1, 'From out here the whole island fits in one look.');
         if (!seenDest && v.u > 0.47) say(2, skyNow.dark > 0.55 ? 'The fire is a small warm light across the water.' : 'There is the dock, and the hill behind it.');
@@ -2207,7 +2214,7 @@ $('name-form').addEventListener('submit', (e) => {
 // and step ashore by yourself when your turn comes.
 let asking = false;
 const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
-if (arriving) setTimeout(() => { if (!entered) $('enter').click(); }, 900);
+if (arriving) setTimeout(() => { if (!entered) $('enter').click(); }, 60);
 $('enter').addEventListener('click', () => {
   if (entered || asking) return;
   asking = true;
@@ -2281,8 +2288,17 @@ function comeAshore(q = {}) {
   store('ember.identity', identity);
   document.body.classList.add('playing');
   me.targetYaw = Math.atan2(FIRE.x - SPAWN.x, FIRE.z - SPAWN.z);      // turn to face the fire
-  if (arriving) { voyage = arriving.id; voyageCast = Math.max(arriving.cast, timeNow() - ARRIVE_MS * 0.5); voyageDest = seenDest = 2; voyageSeated = true; voyageSaid = 0; setMode('sit'); const st = yard.seat(arriving.seat || 0); me.x = st.x; me.z = st.z; pushPresence(true); }
-  if (arriving && voyage) addLog('', FAR ? 'Water on every side, and ahead of her a dark shore coming up out of the haze.' : 'Water on every side, and ahead of her a thread of smoke: the fire on the first island.', 'sys');
+  if (arriving && !landedOnce) {
+    // Off the boat and onto the sand beside the dock, each of the crew a little apart.
+    landedOnce = true; const i = arriving.seat || 0; me.x = SPAWN.x + ((i % 3) - 1) * 1.4; me.z = SPAWN.z + Math.floor(i / 3) * 1.3 + (i % 2) * 0.5; me.y = groundHeight(me.x, me.z);
+    const n = (Number(store('ember.crossed')) || 0) + 1; store('ember.crossed', n);
+    crossScreen(ISLE, 0.85, 'Stepping ashore'); landedFrames = 6;
+    setTimeout(() => { flash(FAR ? 'Lantern Rock' : 'Home again', FAR ? (n <= 1 ? 'You have crossed to the far shore' : 'The far shore') : 'Back on the first island'); addLog('', FAR ? 'Her keel takes the sand. You are across. The camp fire up the path is the Mapmaker\'s.' : 'Her keel takes the sand. You are home, with whatever you found over there.', 'sys'); audio.pop(880); questEvent('landed'); tally('crossed:' + ISLE); }, 1600);
+  } else if (!arriving) {
+    // Back where the visitor was when they last left this island, if that is still somewhere an animal can stand.
+    const at = store('ember.at'); if (at && at.isle === ISLE && Date.now() - (at.at || 0) < 21 * 86400000 && Number.isFinite(at.x) && Number.isFinite(at.z) && walkable(at.x, at.z) && Math.hypot(at.x - SPAWN.x, at.z - SPAWN.z) > 6) { me.x = at.x; me.z = at.z; me.y = groundHeight(me.x, me.z); me.yaw = me.targetYaw = at.yaw || 0; setTimeout(() => addLog('', 'You are where you left off.', 'sys'), 2200); }
+  }
+  if (arriving && landedOnce) { /* said when the loading screen lifts */ }
   else addLog('', FAR ? 'You step onto a shore nobody has mapped. A camp fire is burning up the path.' : (quests.cold ? 'You come ashore again. The fire is still burning.' : 'You wash ashore on a small island. Someone has kept a fire burning here for a long time.'), 'sys');
   // When to find company: said to everyone on arrival, since the beach is often empty.
   setTimeout(() => { if (entered) addLog('', campLine(), 'sys'); }, 3500);
@@ -2310,6 +2326,10 @@ function comeAshore(q = {}) {
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { me.tag.userData.draw(me.name, me.sub); keeper.tag.userData.draw(keeper.name, keeper.sub); });
 setInterval(() => { me.setName(me.name, mySub()); pushPresence(false); }, 20000);
+// Where the visitor is, kept every few seconds, so that the next visit to this island begins where this one ended.
+setInterval(() => { if (entered && !voyage && !perch && !crossingOver && !(wide && wide.riding && wide.riding()) && walkable(me.x, me.z)) store('ember.at', { isle: ISLE, x: Math.round(me.x * 10) / 10, z: Math.round(me.z * 10) / 10, yaw: Math.round(me.yaw * 100) / 100, at: Date.now() }); }, 4000);
+// Coming back from another tab, the boat and the other animals are not where they were. The picture is brought up again over a moment, so nothing is seen to jump.
+{ let hiddenAt = 0; document.addEventListener('visibilitychange', () => { const c = renderer.domElement; if (document.hidden) { hiddenAt = Date.now(); return; } if (!hiddenAt || Date.now() - hiddenAt < 1500) return; c.style.transition = 'none'; c.style.opacity = '0'; requestAnimationFrame(() => requestAnimationFrame(() => { c.style.transition = 'opacity .45s'; c.style.opacity = '1'; })); }); }
 
 // ---------- frame ----------
 function updateActions() {
@@ -3511,8 +3531,10 @@ function tally(k) { if (tallied.has(k) || tallied.size > 60) return; tallied.add
 
 function frame() {
   const nowMs = performance.now();
+  if (nowMs - lastFrame > 700) snapPeers = 2;      // back from another tab or a long stall: things are put where they are now, not slid there
   const dt = Math.min((nowMs - lastFrame) / 1000, 0.05);
   lastFrame = nowMs;
+  if (landedFrames > 0 && entered && --landedFrames === 0) crossDone();
   t += dt;
 
   watchQuality(Math.min((nowMs - (frame.prev || nowMs)) / 1000 || dt, 1));
@@ -3659,13 +3681,14 @@ function frame() {
     m.group.scale.set(1.25, 1.25 * (1 + Math.sin(t * 1.3) * 0.012 + talk), 1.25);
   }
 
+  if (snapPeers) snapPeers--;
   viewFrustum.setFromProjectionMatrix(viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
   // Other visitors glide toward where they last said they were.
   for (const [id, p] of peers) {
     const av = p.av, d = p.data;
-    const k = 1 - Math.exp(-dt * 8);
-    const px = av.x, pz = av.z;
-    av.x = lerp(av.x, d.x, k); av.z = lerp(av.z, d.z, k);
+    const k = snapPeers ? 1 : 1 - Math.exp(-dt * 8);
+    const px = snapPeers ? d.x : av.x, pz = snapPeers ? d.z : av.z;
+    av.x = lerp(av.x, d.x, k); av.z = lerp(av.z, d.z, k); if (snapPeers) av.yaw = d.yaw;
     av.speed = lerp(av.speed, Math.hypot(av.x - px, av.z - pz) / dt, 0.25);
     av.targetYaw = d.yaw;
     av.y = groundHeight(av.x, av.z);

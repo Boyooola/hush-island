@@ -4,7 +4,7 @@
 import { smoothstep, shoreRadius } from './terrain.js';
 import { SITE_A, MOOR_R } from './build.js';
 
-export const CROSS_MS = 62000;     // from the mooring out to where the land drops behind
+export const CROSS_MS = 6500;      // she pulls away from the mooring, for those on the shore to see, and then the other island is loaded
 export const ARRIVE_MS = 36000;    // from out there in to the other island's mooring
 const FAR_OUT = 150;
 // A crossing runs straight out to sea from the mooring (which on each island faces the other), and straight in at the far end.

@@ -26,7 +26,7 @@ await a.screenshot({ path: '/home/claude/ember-isle/shots/lv1-picker.png' });
 // Ashore, then leave.
 await a.click('#enter'); await a.waitForTimeout(3500);
 ok('ashore', await a.evaluate(() => document.body.classList.contains('playing')) && (await status()).ashore === 1, JSON.stringify(await status()));
-await a.click('#btn-leave'); await a.waitForTimeout(2500);
+await a.evaluate(() => document.getElementById('btn-leave').click()); await a.waitForTimeout(2500);
 const left = await a.evaluate(() => ({ playing: document.body.classList.contains('playing'), hint: document.getElementById('hint').textContent, btn: document.getElementById('enter').textContent, picker: !document.getElementById('picker').hidden }));
 ok('leaving returns to the title screen', !left.playing && left.picker && left.hint.includes('left the island'), JSON.stringify(left));
 ok('and frees the place', (await status()).ashore === 0, JSON.stringify(await status()));

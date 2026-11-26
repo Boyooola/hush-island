@@ -51,6 +51,7 @@ export class Island extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS docs (coll TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, d TEXT NOT NULL, PRIMARY KEY (coll, id))');
     this.sql.exec('CREATE INDEX IF NOT EXISTS docs_at ON docs (coll, at)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS gone (id TEXT PRIMARY KEY)');                      // records removed here, so the move does not bring them back
+    this.sql.exec('CREATE TABLE IF NOT EXISTS saves (pid TEXT PRIMARY KEY, at INTEGER, d TEXT)');      // each visitor's progress, so that it outlives one browser
     this.sql.exec('CREATE TABLE IF NOT EXISTS alias (kh TEXT PRIMARY KEY, pid TEXT, code TEXT, at INTEGER)');   // browsers that kept the number they had as a Supabase guest
     this.sql.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)');
     this.dbRate = new Map();      // scrambled address -> [minute, reads, writes]
@@ -168,7 +169,24 @@ export class Island extends DurableObject {
     try { const raw = await request.text(); if (raw.length <= 3000) m = JSON.parse(raw); } catch (e) { m = null; }
     if (!m || typeof m !== 'object') return json({ error: 'bad request' }, 400);
     const coll = m.coll, now = Date.now();
-    if (coll !== 'boat' && coll !== 'carvings' && coll !== 'bottles' && coll !== 'firsts' && coll !== 'light' && coll !== 'cairn') return json({ error: 'no such collection' }, 404);
+    if (coll !== 'boat' && coll !== 'carvings' && coll !== 'bottles' && coll !== 'firsts' && coll !== 'light' && coll !== 'cairn' && coll !== 'today' && coll !== 'guests' && coll !== 'tally') return json({ error: 'no such collection' }, 404);
+    // The keeper of the island can clear what Lantern Rock remembers (first footprints, the tower, the cairn), with the key.
+    if (m.op === 'tally') {
+      const want = this.env.ADMIN_KEY, got = request.headers.get('x-keeper-key') || '';
+      if (!want || got.length !== want.length || !crypto.subtle.timingSafeEqual(new TextEncoder().encode(got), new TextEncoder().encode(want))) return json({ error: 'wrong key' }, 403);
+      const rows = this.sql.exec("SELECT json_extract(d, '$.k') AS k, COUNT(*) AS n, SUM(CASE WHEN at > ? THEN 1 ELSE 0 END) AS today FROM docs WHERE coll = 'tally' GROUP BY k ORDER BY n DESC LIMIT 400", now - 86400000).toArray();
+      return json({ rows });
+    }
+    if (m.op === 'wipe') {
+      const want = this.env.ADMIN_KEY, got = request.headers.get('x-keeper-key') || '';
+      if (!want) return json({ error: 'no key set' }, 503);
+      if (got.length !== want.length || !crypto.subtle.timingSafeEqual(new TextEncoder().encode(got), new TextEncoder().encode(want))) return json({ error: 'wrong key' }, 403);
+      if (coll !== 'firsts' && coll !== 'light' && coll !== 'cairn' && coll !== 'today') return json({ error: 'not that one' }, 403);
+      const n = this.sql.exec('SELECT COUNT(*) AS n FROM docs WHERE coll = ?', coll).toArray()[0].n;
+      this.sql.exec('DELETE FROM docs WHERE coll = ?', coll);
+      for (const { ws } of this.everyone()) this.send(ws, { t: 'db', c: coll });
+      return json({ ok: true, cleared: n });
+    }
     const write = m.op === 'put' || m.op === 'patch' || m.op === 'del';
     const h = (await this.hashOf(request)) || 'none', minute = Math.floor(now / 60000);
     let r = this.dbRate.get(h);
@@ -199,7 +217,12 @@ export class Island extends DurableObject {
           : coll === 'carvings' ? text(d.text, 60) && size < 600
           // What has been carried to the tower on Lantern Rock: one record for each load set down.
           : coll === 'cairn' ? d.n === 1 && size < 160
-          : coll === 'light' ? ['stone', 'timber', 'glass', 'oil'].includes(d.kind) && Number.isInteger(d.n) && d.n >= 1 && d.n <= 6 && size < 300
+          // The guest book in the keeper's cottage, and the count of what visitors do (a key and nothing else: no names).
+          : coll === 'guests' ? text(d.text, 80) && text(d.name, 22) && size < 300
+          : coll === 'tally' ? typeof d.k === 'string' && /^[a-z0-9:_-]{2,40}$/.test(d.k) && size < 120
+          // The first to stand somewhere today (by the island's own calendar, UTC): the id carries the day and the place.
+          : coll === 'today' ? m.id === `t-${new Date(now).toISOString().slice(0, 10).replace(/-/g, '')}-${d.place}` && /^[as]-[a-z]{3,12}$/.test(String(d.place)) && text(d.name, 22) && (d.code === '' || /^\d{4}$/.test(d.code)) && size < 260
+          : coll === 'light' ? ['stone', 'timber', 'glass', 'oil', 'plank', 'sail', 'rope'].includes(d.kind) && Number.isInteger(d.n) && d.n >= 1 && d.n <= 6 && size < 300
           // The Mapmaker's record: the first name to reach each place (the id is the place, so a second claim meets
           // the one already there), and the roll of those who walked the whole island (one line per visitor).
           : coll === 'firsts' ? /^(first-[as]-[a-z]{3,12}|whole-[\w-]{6,40})$/.test(m.id) && d.place === m.id && text(d.name, 22) && (d.code === '' || /^\d{4}$/.test(d.code)) && size < 260
@@ -210,6 +233,9 @@ export class Island extends DurableObject {
         this.sql.exec('INSERT INTO docs (coll, id, at, d) VALUES (?, ?, ?, ?)', coll, m.id, now, JSON.stringify(d));
         // Marks on the wall fade after a week; the wall is swept whenever a new one is cut.
         if (coll === 'carvings') this.sql.exec('DELETE FROM docs WHERE coll = ? AND at < ?', 'carvings', now - 7 * 86400000);
+        if (coll === 'today') this.sql.exec('DELETE FROM docs WHERE coll = ? AND at < ?', 'today', now - 2 * 86400000);
+        if (coll === 'tally') { this.sql.exec('DELETE FROM docs WHERE coll = ? AND at < ?', 'tally', now - 14 * 86400000); return json({ ok: true }); }      // nobody needs telling
+        if (coll === 'guests') this.sql.exec('DELETE FROM docs WHERE coll = ? AND id NOT IN (SELECT id FROM docs WHERE coll = ? ORDER BY at DESC LIMIT 300)', 'guests', 'guests');
         told();
         return json({ ok: true });
       }
@@ -641,6 +667,14 @@ export class Island extends DurableObject {
         const b = o.deserializeAttachment();
         if (b && b.role === 'in' && (b.isle || 'home') === (a.isle || 'home')) { try { o.send(out); } catch (e) { /* gone */ } }
       }
+    } else if (m.t === 'save') {
+      // A visitor's own progress, kept under the number only their browser's secret gives. Not more than once in fifteen seconds.
+      if (a.role === 'in' && a.pid && typeof m.d === 'string' && m.d.length <= 60000 && now - (a.sv || 0) > 15000) {
+        a.sv = now; ws.serializeAttachment(a);
+        try { JSON.parse(m.d); this.sql.exec('INSERT OR REPLACE INTO saves (pid, at, d) VALUES (?, ?, ?)', a.pid, now, m.d); } catch (e) { /* not kept */ }
+      }
+    } else if (m.t === 'load') {
+      if (a.role === 'in' && a.pid) { const r = this.sql.exec('SELECT at, d FROM saves WHERE pid = ?', a.pid).toArray(); this.send(ws, { t: 'saved', at: r.length ? r[0].at : 0, d: r.length ? r[0].d : '' }); }
     } else if (m.t === 'friend') {
       if (a.role === 'in') await this.befriend(ws, a, m);
     } else if (m.t === 'unfriend') {
@@ -746,6 +780,29 @@ const STATUS_PAGE = `<!DOCTYPE html>
 </html>`;
 
 // Reports, for the keeper of the island.
+const RECORD_PAGE = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>What Lantern Rock remembers</title>
+<style>body{font:17px/1.5 Georgia,serif;max-width:40rem;margin:2.5rem auto;padding:0 1.2rem;color:#2c2118;background:#f3ead8}h1{font-size:1.6rem}input{font:inherit;padding:.4rem .6rem;width:100%;box-sizing:border-box;margin:.3rem 0 1rem}button{font:inherit;padding:.45rem .9rem;margin:.3rem .5rem .3rem 0;cursor:pointer}p.note{color:#6a5a48}#out{font-weight:700}</style></head><body>
+<h1>What Lantern Rock remembers</h1>
+<p>For the keeper of the island. Each button clears one thing for every visitor, for good. Visitors keep their own quests, stamps and satchels.</p>
+<label for="k">The keeper's key</label><input id="k" type="password" autocomplete="off">
+<p><button data-c="firsts">Clear the first footprints and the island's name</button><br><span class="note">The map goes back to blank paper. The roll of those who walked it all is cleared too.</span></p>
+<p><button data-c="today">Clear today's firsts</button></p>
+<p><button data-c="light">Clear the tower</button><br><span class="note">Everything carried to it is forgotten and it is a ruin again.</span></p>
+<p><button data-c="cairn">Clear the cairn</button></p>
+<p><button id="tally" type="button">Show what visitors have been doing</button><br><span class="note">Counts for the last fourteen days, with no names: where they went, what they found, where they got stuck.</span></p>
+<table id="tt" style="border-collapse:collapse;width:100%"></table>
+<p id="out" role="status"></p>
+<script>
+document.getElementById('tally').onclick = async () => { const r = await fetch('/room/db', { method: 'POST', headers: { 'content-type': 'application/json', 'x-keeper-key': document.getElementById('k').value }, body: JSON.stringify({ coll: 'tally', op: 'tally' }) }); const j = await r.json(); const t = document.getElementById('tt'); t.textContent = ''; if (!j.rows) { document.getElementById('out').textContent = j.error || 'Nothing came back.'; return; } const head = t.insertRow(); for (const h of ['What', 'Fourteen days', 'Last day']) { const c = document.createElement('th'); c.textContent = h; c.style.textAlign = 'left'; head.appendChild(c); } for (const row of j.rows) { const tr = t.insertRow(); for (const v of [row.k, row.n, row.today]) tr.insertCell().textContent = v; } document.getElementById('out').textContent = j.rows.length + ' kinds of thing counted.'; };
+for (const b of document.querySelectorAll('button[data-c]')) b.onclick = async () => {
+  const out = document.getElementById('out'), c = b.dataset.c;
+  if (!confirm(b.textContent + '? This cannot be undone.')) return;
+  out.textContent = 'Asking the island…';
+  try { const r = await fetch('/room/db', { method: 'POST', headers: { 'content-type': 'application/json', 'x-keeper-key': document.getElementById('k').value }, body: JSON.stringify({ op: 'wipe', coll: c }) }); const j = await r.json(); out.textContent = r.ok ? 'Done. ' + j.cleared + ' records cleared.' : r.status === 403 ? 'That is not the key.' : r.status === 503 ? 'No key has been set on the Worker yet.' : 'It did not work (' + (j.error || r.status) + ').'; }
+  catch (e) { out.textContent = 'Could not reach the island.'; }
+};
+</script></body></html>`;
 const REPORTS_PAGE = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1029,7 +1086,9 @@ export default {
     const room = () => env.ISLAND.get(env.ISLAND.idFromName('main')).fetch(request);
     if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback' || url.pathname === '/room/db') return room();
     // The far shore is the same game on another island: the same page, which reads the address to know where it is.
-    if (url.pathname === '/far' || url.pathname === '/far/') return env.ASSETS.fetch(new Request(new URL('/', url), request));
+    // Lantern Rock has no address of its own: it is reached by the boat. The old one goes to the first island (and still works on a developer's machine, for the tests).
+    if (url.pathname === '/far' || url.pathname === '/far/') return /^(localhost|127\.0\.0\.1)$/.test(url.hostname) ? env.ASSETS.fetch(new Request(new URL('/', url), request)) : Response.redirect(new URL('/', url).toString(), 302);
+    if (url.pathname === '/room/record' || url.pathname === '/room/record/') return new Response(RECORD_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } });
     if (url.pathname === '/room/reports' || url.pathname === '/room/reports/') return new Response(REPORTS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room/stats' || url.pathname === '/room/stats/') return new Response(STATS_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     if (url.pathname === '/room' || url.pathname === '/room/' || url.pathname === '/room/status' || url.pathname === '/room/status/') {

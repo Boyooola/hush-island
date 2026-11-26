@@ -35,7 +35,11 @@ export function noise2(x, z) {
 
 // Which island this page is: home (Hush Island) or the far shore (Lantern Rock), a second, much larger island
 // reached by boat. It is the same game on a different piece of land, chosen by the address of the page (/far).
-export const ISLE = typeof location !== 'undefined' && /^\/far\/?$/.test(location.pathname) ? 'far' : 'home';
+// Which island this is. There is no address for Lantern Rock: a visitor is there because the boat took them there, and
+// the browser remembers which shore they are on. (On a developer's own machine the address /far still chooses it, for the tests.)
+export const LOCAL = typeof location !== 'undefined' && (!location.hostname || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
+const shoreKept = (() => { try { return JSON.parse(localStorage.getItem('ember.isle')); } catch (e) { return null; } })();
+export const ISLE = typeof location === 'undefined' ? 'home' : LOCAL ? (/^\/far\/?$/.test(location.pathname) ? 'far' : 'home') : (shoreKept === 'far' ? 'far' : 'home');
 export const FAR = ISLE === 'far';
 
 // Key places (metres, y up, the fire at the origin). On the far shore the fire is the camp at the Landing, on
@@ -77,6 +81,47 @@ export const BONES = { x: -106, z: -134 };                // what is left of a w
 export const SEAT = { x: 29.5, z: 46 };                   // a chair cut from a boulder on the south-east cliff, facing home
 export const WAYCAIRN = { x: -20, z: 88 };                // a cairn on the south cliffs that every visitor adds to
 export const GARDEN = { x: VALLEY.x + 9, z: VALLEY.z - 24 };
+// The wider island: landmarks that can be seen from a long way off, and the places that are hard to find.
+export const WINDMILL = { x: -283, z: -31, ry: 2.2 };       // on the edge of the High Meadow, its sails gone
+export const WATCH = { x: -44, z: -118, ry: 0.6 };          // the stump of a watchtower on the north cliffs
+export const ORCHARD = { x: -14, z: 62 };                   // apple trees and beehives on the south-east shoulder
+export const WELL = { x: -72, z: -16 };                     // the well at the crossroads in Whisper Woods
+export const HUT = { x: -84, z: 110, ry: -0.9 };            // the Beachcomber's hut on posts, at the top of the flats
+export const GAP = { x: -226, z: 104, ry: 0.5 };            // the Whistling Gap: a split rock on the south-west cliffs
+export const TRUNK = { x: -104, z: 18, ry: 1.1 };           // a great fallen trunk in the woods, hollow underneath
+export const LEDGE = { x: SUMMIT.x - 9.5, z: SUMMIT.z + 4.5 };      // a ledge behind the summit crag
+export const DUSKRING = { x: -216, z: -13 };                // a ring of mushrooms in the valley that shows at dusk
+// Chapel Rock: a stack off the south-west cliffs with a roofless chapel on it, and the bridge that used to reach it.
+const CH_A = 2.75, CH_R = FAR ? shoreRadius(CH_A) : 300, cu = { x: Math.cos(CH_A), z: Math.sin(CH_A) };
+export const CHAPEL = { x: cu.x * (CH_R + 42), z: cu.z * (CH_R + 42), ry: Math.atan2(cu.x, cu.z), y: 5.3 };
+export const BRIDGE = { ax: cu.x * (CH_R - 3.5), az: cu.z * (CH_R - 3.5), bx: cu.x * (CH_R + 27.5), bz: cu.z * (CH_R + 27.5), half: 1.15, on: false, ya: 0, yb: 0 };
+export function bridgeAt(x, z) {
+  const dx = BRIDGE.bx - BRIDGE.ax, dz = BRIDGE.bz - BRIDGE.az, L2 = dx * dx + dz * dz, k = ((x - BRIDGE.ax) * dx + (z - BRIDGE.az) * dz) / L2;
+  if (k < -0.02 || k > 1.02) return -1;
+  return Math.hypot(x - BRIDGE.ax - dx * k, z - BRIDGE.az - dz * k) <= BRIDGE.half ? clamp(k, 0, 1) : -1;
+}
+export const bridgeY = (k) => lerp(BRIDGE.ya, BRIDGE.yb, k) - 0.55 * Math.sin(k * Math.PI);
+// A cove under the watchtower that only has a floor while the tide is out.
+const CV_A = -1.9, CV_R = FAR ? shoreRadius(CV_A) : 300;
+export const COVE = { x: Math.cos(CV_A) * (CV_R - 6), z: Math.sin(CV_A) * (CV_R - 6), y: 0.16, ox: Math.cos(CV_A), oz: Math.sin(CV_A) };
+// The Giant's Steps: columns of rock going out from the north-east cliff to a stack with a nest on it.
+const ST_A = -1.2, ST_R = FAR ? shoreRadius(ST_A) : 300;
+export const STACK = { x: Math.cos(ST_A) * (ST_R + 31), z: Math.sin(ST_A) * (ST_R + 31), y: 4.3, r: 4.6 };
+export const STEPS = [];
+export const STEP_GAP = { x: 0, z: 0, y: 0, r: 1.5 };      // one column of the Steps is missing; a plank goes across where it stood
+// A block of rock on the south cliffs too high to get onto alone, and the Gardener's tunnel from Stillwater out to the south shore.
+export const BOOST = { x: -168, z: 131, r: 1.5, y: 0, fx: -168, fz: 134.6 };
+export const TUNNEL = { a: { x: -200, z: 47 }, b: { x: -154, z: 121 } };
+// The Leap: a pinnacle standing off the north cliff, a little too far for most animals to jump to.
+const LP_A = -1.76, LP_R = FAR ? shoreRadius(LP_A) : 300;
+export const LEAP = { x: Math.cos(LP_A) * (LP_R + 4.6), z: Math.sin(LP_A) * (LP_R + 4.6), y: 4.4, r: 1.9, fx: Math.cos(LP_A) * (LP_R - 2.2), fz: Math.sin(LP_A) * (LP_R - 2.2) };
+// A sunken rowboat in the shallows of the Far Beach, and the mast of the ship it came from, further out.
+export const SUNKEN = { x: FARBEACH.x + Math.cos(FARBEACH.a) * 6 - Math.sin(FARBEACH.a) * 9, z: FARBEACH.z + Math.sin(FARBEACH.a) * 6 + Math.cos(FARBEACH.a) * 9 };
+export const MAST = { x: FARBEACH.x + Math.cos(FARBEACH.a) * 52 + Math.sin(FARBEACH.a) * 14, z: FARBEACH.z + Math.sin(FARBEACH.a) * 52 - Math.cos(FARBEACH.a) * 14 };
+// Where nothing should grow of its own accord: [x, z, reach].
+export const KEEP_CLEAR = FAR ? [[WINDMILL.x, WINDMILL.z, 9], [WATCH.x, WATCH.z, 8], [WELL.x, WELL.z, 5], [HUT.x, HUT.z, 6], [GAP.x, GAP.z, 7], [BOOST.x, BOOST.z, 6], [TUNNEL.a.x, TUNNEL.a.z, 5], [TUNNEL.b.x, TUNNEL.b.z, 5], [TRUNK.x, TRUNK.z, 7], [LEDGE.x, LEDGE.z, 4], [DUSKRING.x, DUSKRING.z, 5], [CHAPEL.x, CHAPEL.z, 26], [COVE.x, COVE.z, 12], [ORCHARD.x, ORCHARD.z, 17], [-88, 6, 4], [-186, -19, 4], [-257, -17, 4], [-80, 105, 4]] : [];
+// Level ground under whatever is built: [x, z, flat out to, back to the land's own shape by].
+const PADS = FAR ? [[WINDMILL.x, WINDMILL.z, 5, 10], [WATCH.x, WATCH.z, 5, 10], [WELL.x, WELL.z, 3, 7], [ORCHARD.x, ORCHARD.z, 9, 20], [GAP.x, GAP.z, 4, 9], [TRUNK.x, TRUNK.z, 4, 9], [LEDGE.x, LEDGE.z, 2.6, 5.5]].map(([x, z, r0, r1]) => ({ x, z, r0, r1, y: null, busy: false })) : [];
 export const LIGHTHOUSE = { x: -319, z: 7, y: 22.6 };      // on Lantern Point
 export const AREAS = FAR ? [
   { id: 'landing', name: 'The Landing', x: 6, z: 0, r: 30 },
@@ -87,6 +132,10 @@ export const AREAS = FAR ? [
   { id: 'meadow', name: 'The High Meadow', x: HILL.x, z: HILL.z, r: 30 },
   { id: 'point', name: 'Lantern Point', x: POINT.x, z: POINT.z, r: 30 },
   { id: 'farbeach', name: 'The Far Beach', x: FARBEACH.x, z: FARBEACH.z, r: 30 },
+  { id: 'north', name: 'The North Cliffs', x: -50, z: -104, r: 34 },
+  { id: 'orchard', name: 'The Orchard', x: ORCHARD.x, z: ORCHARD.z, r: 26 },
+  { id: 'southwest', name: 'The Whistling Shore', x: -232, z: 112, r: 36 },
+  { id: 'chapel', name: 'Chapel Rock', x: CHAPEL.x, z: CHAPEL.z, r: 24 },
 ] : [];
 // Where each sight lies, for the Mapmaker's map.
 export const SIGHT_AT = FAR ? {
@@ -156,6 +205,9 @@ export const PATHS = FAR ? [
   [[-40, -4], [-60, 46], [-84, 98], [-100, 126]],                                                      // south to the flats
   [[-200, 0], [-236, -10], [-270, -20], [-292, -8], [-310, 6]],                                       // up out of the valley, over the meadow, to Lantern Point
   [[-270, -20], [-286, -56], [-306, -86], [FARBEACH.x + 5, FARBEACH.z + 4]],                                                             // down to the Far Beach
+  [[-100, 126], [-140, 138], [-190, 138], [-226, 112], [-262, 118], [BRIDGE.ax, BRIDGE.az]],          // along the south-west cliffs to the bridge
+  [[-78, -8], [-66, -44], [-54, -82], [-45, -110]],                                                    // north out of the woods to the watchtower
+  [[-60, 46], [-38, 56], [-18, 61]],                                                                    // east to the orchard
 ] : [
   [[0.5, 22.5], [0.9, 14], [0.3, 5.6]],
   [[5.4, 0.4], [16, -0.6], [29.6, 0]],
@@ -188,6 +240,10 @@ function farRaw(x, z) {
       h = Math.max(h, 4.4 * Math.exp(-di * di / (2 * 7.5 * 7.5)) - 0.5 + 0.2 * noise2(x * 0.3, z * 0.3));
       const bx = ISLET.x - FLAT_EDGE.x, bz = ISLET.z - FLAT_EDGE.z, k = clamp(((x - FLAT_EDGE.x) * bx + (z - FLAT_EDGE.z) * bz) / (bx * bx + bz * bz), -0.15, 1), dc = Math.hypot(x - FLAT_EDGE.x - bx * k, z - FLAT_EDGE.z - bz * k);
       h = Math.max(h, lerp(-1.2, TIDE.flat - 0.12, 1 - smoothstep(1.6, 4.2, dc)));
+    }
+    if (Math.abs(x - CHAPEL.x) < 40 && Math.abs(z - CHAPEL.z) < 40) {
+      const di = Math.hypot(x - CHAPEL.x, z - CHAPEL.z);
+      h = Math.max(h, (CHAPEL.y + 1.2) * (1 - smoothstep(13.5, 23, di)) - 1.2 + 0.18 * noise2(x * 0.3, z * 0.3) * smoothstep(9, 14, di));
     }
     return h;
   }
@@ -230,6 +286,14 @@ function farRaw(x, z) {
   h = lerp(LIGHTHOUSE.y, h, smoothstep(5, 11, Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z)) );
   // The camp clearing.
   h = lerp(1.62, h, smoothstep(5.5, 11, r));
+  // Level ground under the landmarks.
+  for (const p of PADS) {
+    if (p.busy || Math.abs(x - p.x) > p.r1 || Math.abs(z - p.z) > p.r1) continue;
+    if (p.y === null) { p.busy = true; p.y = farRaw(p.x, p.z); p.busy = false; }
+    h = lerp(p.y, h, smoothstep(p.r0, p.r1, Math.hypot(x - p.x, z - p.z)));
+  }
+  // The cove under the watchtower: a notch in the cliff with a floor the high tide covers.
+  { const d = Math.hypot(x - COVE.x, z - COVE.z); if (d < 13) h = lerp(COVE.y + 0.5 * smoothstep(0, 6, (x - COVE.x) * -COVE.ox + (z - COVE.z) * -COVE.oz), h, smoothstep(5.5, 12, d)); }
   // Rock over everything that is hollow under the hill: where the land would lie too low to roof a passage, it rises.
   if (nearCave(x, z)) { const c = caveAt(x, z); if (c.deep && c.e < 9) h = Math.max(h, lerp(h, c.top + 3.2 + 1.2 * Math.sin(x * 0.31) * Math.cos(z * 0.27), 1 - smoothstep(1.5, 9, c.e))); }
   return h;
@@ -316,6 +380,13 @@ export function terrainHeight(x, z) {
   return h;
 }
 
+if (FAR) {
+  BRIDGE.ya = terrainHeight(BRIDGE.ax, BRIDGE.az) + 0.12; BRIDGE.yb = terrainHeight(BRIDGE.bx, BRIDGE.bz) + 0.12;
+  const n = 15, u = { x: Math.cos(ST_A), z: Math.sin(ST_A) }, r0 = ST_R - 2.4, r1 = ST_R + 31 - STACK.r + 0.6, y0 = terrainHeight(u.x * r0, u.z * r0);
+  for (let i = 0; i < n; i++) { const k = i / (n - 1), r = lerp(r0, r1, k), side = Math.sin(i * 1.7) * 0.9; const st = { x: u.x * r - u.z * side, z: u.z * r + u.x * side, y: lerp(y0, STACK.y, k) + (i % 2 ? 0.14 : -0.1) * Math.sin(k * Math.PI), r: 1.5 }; if (i === 8) Object.assign(STEP_GAP, st); else STEPS.push(st); }
+  BOOST.y = terrainHeight(BOOST.x, BOOST.z) + 3.0;
+  STEPS.push({ x: STACK.x, z: STACK.z, y: STACK.y, r: STACK.r });
+}
 // The gangplank out to the boat's mooring on the west beach: a sloping walkway from the sand to her side.
 // It is only there (on: true) once the boat is built. Lengths are along the line from the fire out through the yard.
 // Where the boat lies: the west beach at home, beside the dock on the far shore.
@@ -351,12 +422,19 @@ export function groundHeight(x, z) {
   const h = terrainHeight(x, z);
   if (onDock(x, z) && h < DOCK.y) return DOCK.y;
   if (onSlip(x, z)) return Math.max(h, slipHeight(x, z));
+  if (BRIDGE.on && Math.abs(x - CHAPEL.x) < 70 && Math.abs(z - CHAPEL.z) < 70) { const k = bridgeAt(x, z); if (k >= 0) return Math.max(h, bridgeY(k)); }
+  if (Math.abs(x - STACK.x) < 45 && Math.abs(z - STACK.z) < 45) { let y = h; for (const st of STEPS) if (Math.hypot(x - st.x, z - st.z) < st.r) y = Math.max(y, st.y); if (y > h) return y; }
+  if (Math.abs(x - LEAP.x) < 3 && Math.hypot(x - LEAP.x, z - LEAP.z) < LEAP.r) return Math.max(h, LEAP.y);
+  if (Math.abs(x - BOOST.x) < 3 && Math.hypot(x - BOOST.x, z - BOOST.z) < BOOST.r) return Math.max(h, BOOST.y);
   for (const st of STONES) if (Math.abs(x - st.x) < 0.75 && Math.abs(z - st.z) < 0.75 && Math.hypot(x - st.x, z - st.z) < 0.72) return Math.max(h, POOL.y + 0.1);      // a stepping stone
   return h;
 }
 
 export function walkable(x, z) {
   if (onDock(x, z) || onSlip(x, z)) return true;
+  if (BRIDGE.on && Math.abs(x - CHAPEL.x) < 70 && Math.abs(z - CHAPEL.z) < 70 && bridgeAt(x, z) >= 0) return true;
+  if (Math.abs(x - STACK.x) < 45 && Math.abs(z - STACK.z) < 45) for (const st of STEPS) if (Math.hypot(x - st.x, z - st.z) < st.r - 0.15) return true;
+  if (Math.abs(x - LEAP.x) < 3 && Math.hypot(x - LEAP.x, z - LEAP.z) < LEAP.r - 0.15) return true;
   return terrainHeight(x, z) > -0.22;
 }
 

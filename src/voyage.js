@@ -4,6 +4,18 @@
 import { smoothstep, shoreRadius } from './terrain.js';
 import { SITE_A, MOOR_R } from './build.js';
 
+export const CROSS_MS = 62000;     // from the mooring out to where the land drops behind
+export const ARRIVE_MS = 36000;    // from out there in to the other island's mooring
+const FAR_OUT = 150;
+// A crossing runs straight out to sea from the mooring (which on each island faces the other), and straight in at the far end.
+// k is how far out she is, 0 at the mooring and 1 where the crossing hands over; `inward` is which way she is going.
+function radial(k, inward) {
+  const r = MOOR_R + (FAR_OUT - MOOR_R) * k, ox = Math.cos(SITE_A), oz = Math.sin(SITE_A), tx = Math.sin(SITE_A), tz = -Math.cos(SITE_A);
+  const turn = smoothstep(0, 0.16, k), s = inward ? -1 : 1;      // at the mooring she lies along the shore; she swings to her course as she clears it
+  let hx = tx * (1 - turn) + ox * s * turn, hz = tz * (1 - turn) + oz * s * turn; const l = Math.hypot(hx, hz) || 1; hx /= l; hz /= l;
+  return { x: ox * r, z: oz * r, hx, hz };
+}
+
 export const BOARD_MS = 45000;      // time to climb in before she casts off by herself
 export const SAIL_MS = 130000;      // once round the island
 const OUT = 50;                     // how far from the fire she sails: clear of the end of the dock
@@ -25,8 +37,20 @@ function point(u) {
 }
 // Where the boat is on voyage (id, cast) at time now: null when there is no voyage to speak of.
 // phase 'board' (at her mooring, filling up), 'sail', or 'done'.
-export function voyageAt(id, cast, now) {
+export function voyageAt(id, cast, now, dest = 0) {
   if (!id) return null;
+  if (dest === 2) {      // coming in from the other island: there is no boarding, she is already under way
+    const t = (now - cast) / ARRIVE_MS;
+    if (t >= 1) return { phase: 'done', left: 0, pose: null, u: 1, dest };
+    const k = 1 - along(Math.max(0, t));
+    return { phase: 'sail', left: ((1 - t) * ARRIVE_MS) / 1000, pose: radial(k, true), u: Math.max(0, t), offshore: 2, dest };
+  }
+  if (dest === 1) {      // across to the other island
+    if (now < cast) return { phase: 'board', left: (cast - now) / 1000, pose: null, u: 0, dest };
+    const t = (now - cast) / CROSS_MS;
+    if (t >= 1) return { phase: 'done', left: 0, pose: null, u: 1, dest };
+    return { phase: 'sail', left: ((1 - t) * CROSS_MS) / 1000, pose: radial(along(t), false), u: t, offshore: 2, dest };
+  }
   if (now < cast) return { phase: 'board', left: (cast - now) / 1000, pose: null, u: 0 };
   const t = (now - cast) / SAIL_MS;
   if (t >= 1) return { phase: 'done', left: 0, pose: null, u: 1 };

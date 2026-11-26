@@ -1,6 +1,6 @@
 // All sound is generated in the browser: sea, fire, crickets and a slow music loop.
 // The music is timed from the wall clock, so everyone on the island hears the same bar.
-import { mulberry32, clamp } from './terrain.js';
+import { mulberry32, clamp , ISLE } from './terrain.js';
 
 const BEAT_MS = 857;            // 70 beats per minute
 const BAR_MS = BEAT_MS * 4;
@@ -65,6 +65,9 @@ export function createAudio() {
   const listReady = fetch('music/tracks.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((d) => {
     credit = d && typeof d.credit === 'string' ? d.credit.slice(0, 200) : '';
     tracks = d && Array.isArray(d.tracks) ? d.tracks.filter((x) => x && typeof x.file === 'string' && /^[\w .-]+\.(mp3|ogg|m4a)$/i.test(x.file)) : [];
+    // Each island has its own music: a piece marked for an island plays only there. The dance piece is for any fire.
+    const isle = ISLE;
+    tracks = tracks.filter((x) => (x.isle ? x.isle === isle : isle === 'home' || x.mood === 'dance'));
     return tracks;
   }).catch(() => []);
   function makeDeck() {
@@ -287,6 +290,8 @@ export function createAudio() {
     fallsGain.gain.setTargetAtTime(0.3 * (info.falls || 0) * (0.25 + 0.75 * open), t, 0.3);
     windGain.gain.setTargetAtTime(0.2 * (info.wind || 0) * open, t, 0.6);
     if (info.cave > 0.5) { dripAt -= dt; if (dripAt <= 0) { drip(0.6 + Math.random() * 0.4); dripAt = 0.9 + Math.random() * 3.6; } }
+    // What each part of the island sounds like, a little at a time: one small sound every so often, never a loop.
+    if (info.area !== undefined && open > 0.5) { areaAt -= dt; if (areaAt <= 0) { areaAt = areaSound(info.area || '', info.dark || 0, info.gap || 0); } }
     crackleAt -= dt;
     if (crackleAt <= 0) {
       crackle();
@@ -445,6 +450,26 @@ export function createAudio() {
   }
 
   // An owl: two soft low notes.
+  let areaAt = 4;
+  // Plays one sound for the place and says how long until the next.
+  function areaSound(id, dark, gap) {
+    const t0 = ctx.currentTime + 0.03, r = Math.random, night = dark > 0.6;
+    const chirp = (f, n, v) => { for (let i = 0; i < n; i++) tone('sine', f * (1 + (r() - 0.5) * 0.18), t0 + i * (0.09 + r() * 0.05), 0.008, 0.03, 0.07, v, ambBus); };
+    if (gap > 0.05) { tone('sine', 620 + r() * 60, t0, 0.9, 1.2, 1.6, 0.05 * gap, ambBus); tone('sine', 930 + r() * 40, t0 + 0.2, 1.1, 0.8, 1.6, 0.02 * gap, ambBus); return 3 + r() * 3; }
+    switch (id) {
+      case 'woods': if (night) { hoot(0.5); return 14 + r() * 20; } chirp(2300 + r() * 900, 2 + Math.floor(r() * 4), 0.028); return 2.5 + r() * 6;
+      case 'orchard': if (night) return 8; tone('sawtooth', 150 + r() * 30, t0, 0.5, 0.5 + r(), 0.7, 0.012, ambBus); if (r() < 0.4) chirp(2900, 3, 0.02); return 1.6 + r() * 2.5;
+      case 'meadow': if (r() < 0.55) voice(t0, 0.45 + r() * 0.3, 'sawtooth', 430, 410, 370, 0.035, 1000, 3, 0.05, 11, 0.3); else if (!night) chirp(3200 + r() * 600, 5 + Math.floor(r() * 5), 0.02); return 5 + r() * 9;
+      case 'valley': drip(0.25 + r() * 0.2); if (night && r() < 0.5) voice(t0 + 0.3, 0.18, 'square', 190, 230, 200, 0.02, 500, 2); return 3 + r() * 6;
+      case 'flats': voice(t0, 0.7, 'sine', 1000, 1650, 1750, 0.03, 1500, 1, 0.01, 7); if (r() < 0.5) voice(t0 + 0.8, 0.5, 'sine', 1100, 1700, 1700, 0.022, 1500, 1); return 7 + r() * 12;
+      case 'farbeach': case 'north': case 'southwest': voice(t0, 0.5, 'sawtooth', 1500, 1250, 1050, 0.022, 1700, 2, 0.02, 9, 0.2); if (r() < 0.6) voice(t0 + 0.55, 0.4, 'sawtooth', 1450, 1200, 1000, 0.018, 1700, 2, 0.02, 9, 0.2); return 6 + r() * 12;
+      case 'chapel': tone('sine', 196, t0, 1.6, 1.5, 2.5, 0.03, ambBus); if (r() < 0.5) tone('sine', 294, t0 + 0.8, 1.6, 1.0, 2.5, 0.016, ambBus); return 7 + r() * 8;
+      case 'hill': tone('sine', 150 + r() * 30, t0, 1.8, 1.0, 2.4, 0.03, ambBus); return 6 + r() * 8;
+      case 'point': tone('sine', 520, t0, 0.01, 0.05, 2.2, 0.014, ambBus); tone('sine', 1040, t0, 0.01, 0.03, 1.4, 0.006, ambBus); return 9 + r() * 14;
+      default: return 5;
+    }
+  }
+
   function hoot(volume = 1) {
     if (!ctx || ctx.state !== 'running' || volume <= 0.02) return;
     const t0 = ctx.currentTime + 0.02;

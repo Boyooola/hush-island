@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   mulberry32, clamp, lerp, smoothstep, noise2, terrainHeight, groundHeight, shoreRadius,
-  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount, FAR, LANDING, MAPMAKER, MAP_BOARD, PATHS, AREAS, SIGHT_AT, pathDist, WOODS, FLATS, VALLEY, POINT, LIGHTHOUSE, POOL, POST, LENS, CHEST, CRAG, STONES, GARDEN, HOLLOW_TREE, CAVE, caveAt, caveRoofed, terrainRaw, SUMMIT, STANDING, COTTAGE, TIDE, tideAt, FLAT_EDGE, ISLET, WRECK, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN } from './terrain.js';
+  FIRE, HILL, DOCK, WOODPILE, SIGN, WALL, CRATE, LOGS, colliders, onSlip, pathAmount, FAR, LANDING, MAPMAKER, MAP_BOARD, PATHS, AREAS, SIGHT_AT, pathDist, WOODS, FLATS, VALLEY, POINT, LIGHTHOUSE, POOL, POST, LENS, CHEST, CRAG, STONES, GARDEN, HOLLOW_TREE, CAVE, caveAt, caveRoofed, terrainRaw, SUMMIT, STANDING, COTTAGE, TIDE, tideAt, FLAT_EDGE, ISLET, WRECK, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN, KEEP_CLEAR, TRUNK, LEDGE, COVE, DUSKRING, SUNKEN, STACK, GAP, WATCH, CHAPEL, ORCHARD } from './terrain.js';
 import { timeNow } from './now.js';
 import { makeGlowTexture, makeSkyLabel, makeSignTexture, makeCarvingBoard } from './labels.js';
 import { CHESTS, ITEMS } from './items.js';
@@ -24,6 +24,7 @@ function seaHeight(x, z, t) {
   return (Math.sin(x * 0.42 + z * 0.2 + t * 1.25) * 0.085 + Math.sin(z * 0.55 - x * 0.16 - t * 1.0) * 0.07 + Math.sin((x + z) * 0.16 + t * 0.6) * 0.1) * out;
 }
 
+let starRush = false;      // the night of falling stars: they come every few seconds
 export function buildWorld(scene, opts = {}) {
   const rng = mulberry32(20261125);
   const rand = (a, b) => a + (b - a) * rng();
@@ -279,7 +280,7 @@ export function buildWorld(scene, opts = {}) {
       p.setXYZ(1, tail.x, tail.y, tail.z);
       p.needsUpdate = true;
       m.opacity = Math.sin(clamp(k, 0, 1) * Math.PI);
-      if (k >= 1) { life = -1; m.opacity = 0; next = t + 14 + rng() * 22; }
+      if (k >= 1) { life = -1; m.opacity = 0; next = t + (starRush ? 1.5 + rng() * 3 : 14 + rng() * 22); }
     });
   }
 
@@ -288,6 +289,9 @@ export function buildWorld(scene, opts = {}) {
   const STEP = FAR ? 2 : 1, GX0 = FAR ? -356 : -66, GZ0 = FAR ? -176 : -66, NX = FAR ? 206 : 132, NZ = FAR ? 204 : 132;
   const sand = C(0xd9c692), sandWet = C(0xa89868), deep = C(0x1d4854);
   const farRockA = C(0x6e6a76), farRockB = C(0x8f8894), shingle = C(0xc2baa6), shingleWet = C(0x7d7a70), farDeep = C(0x16444a), moss = C(0x5d7a5c), goldGrass = C(0xb09e54), heatherC = C(0x8a5f8c), paleTop = C(0xbdb98c), litter = C(0x96702f), mud = C(0x7c7466), pool = C(0x4f8a8a), valleyGreen = C(0x6fa06a), caveRock = C(0x4a4652);
+  // The season, by the real month: spring greener, summer gold, autumn rust, and in winter snow lies on the high ground.
+  const MONTH = new Date().getMonth(), SEASON = MONTH <= 1 || MONTH === 11 ? 'winter' : MONTH <= 4 ? 'spring' : MONTH <= 7 ? 'summer' : 'autumn', snow = C(0xeef2f4), orchardGreen = C(0x7fae62), pointTurf = C(0x8fa07c), beachGrass = C(0xb9b27a), chapelTurf = C(0x87957a), bracken = C(0x8f7a4c);
+  if (FAR) { if (SEASON === 'spring') { moss.lerp(C(0x6fa05c), 0.45); goldGrass.lerp(C(0x9fb85a), 0.5); } else if (SEASON === 'summer') { goldGrass.lerp(C(0xc9b25a), 0.4); } else if (SEASON === 'autumn') { goldGrass.lerp(C(0xb07a3c), 0.4); heatherC.lerp(C(0x9a4f6a), 0.35); litter.lerp(C(0xb5612a), 0.3); } else { moss.lerp(C(0x7b8a80), 0.45); goldGrass.lerp(C(0xa8a48c), 0.5); heatherC.lerp(C(0x7a6a78), 0.5); } }
   const grassA = C(0x4f8250), grassB = C(0x3f6f49), grassHi = C(0x67995a), rock = C(0x6f7482);
   {
     const positions = [], colors = [];
@@ -314,6 +318,15 @@ export function buildWorld(scene, opts = {}) {
           tmp.lerp(paleTop, smoothstep(6, 10, my) * 0.55);
           tmp.lerp(litter, (1 - smoothstep(WOODS.r * 0.6, WOODS.r * 1.1, Math.hypot(mx - WOODS.x, mz - WOODS.z))) * 0.75);
           tmp.lerp(valleyGreen, (1 - smoothstep(VALLEY.r * 0.7, VALLEY.r * 1.05, Math.hypot(mx - VALLEY.x, mz - VALLEY.z))) * 0.85);
+          tmp.lerp(orchardGreen, (1 - smoothstep(12, 24, Math.hypot(mx - ORCHARD.x, mz - ORCHARD.z))) * 0.7);
+          tmp.lerp(heatherC, (1 - smoothstep(20, 46, Math.hypot(mx + 232, mz - 112))) * 0.45 * smoothstep(-0.2, 0.3, hea));
+          tmp.lerp(farRockB, (1 - smoothstep(20, 40, Math.hypot(mx + 50, mz + 104))) * 0.35);
+          tmp.lerp(goldGrass, (1 - smoothstep(14, 26, Math.hypot(mx - HILL.x, mz - HILL.z))) * 0.4);                       // the meadow: pale grass
+          tmp.lerp(pointTurf, (1 - smoothstep(26, 48, Math.hypot(mx - LIGHTHOUSE.x, mz - LIGHTHOUSE.z))) * 0.5);            // the point: salt-bitten turf
+          tmp.lerp(beachGrass, (1 - smoothstep(20, 38, Math.hypot(mx - FARBEACH.x, mz - FARBEACH.z))) * 0.45 * smoothstep(1.5, 4, my));   // above the Far Beach: marram
+          tmp.lerp(chapelTurf, (1 - smoothstep(16, 24, Math.hypot(mx - CHAPEL.x, mz - CHAPEL.z))) * 0.7);                   // Chapel Rock: short and grey-green
+          tmp.lerp(bracken, (1 - smoothstep(26, 44, Math.hypot(mx - CAVE.pts[0][0], mz - CAVE.pts[0][1]))) * 0.4);           // round Hollow Hill: bracken brown
+          if (SEASON === 'winter') tmp.lerp(snow, smoothstep(9, 15, my + n * 1.5) * 0.85);
           const fl = 1 - smoothstep(FLATS.r * 0.6, FLATS.r, Math.hypot(mx - FLATS.x, mz - FLATS.z));
           if (fl > 0) { tmp.lerp(mud, fl * 0.9); if (n > 0.3) tmp.lerp(pool, fl * smoothstep(0.3, 0.5, n) * 0.8); }
           tmp.lerp(shingle, 1 - smoothstep(0.5, 0.85, my - n * 0.12));
@@ -942,6 +955,7 @@ export function buildWorld(scene, opts = {}) {
     const r = Math.hypot(x, z);
     if (r < 9.5) return true;                               // fire clearing
     if (FAR && (LANDING.some((p) => Math.hypot(x - p.x, z - p.z) < p.clear) || Math.hypot(x - MAPMAKER.x, z - MAPMAKER.z) < 2)) return true;
+    if (FAR && KEEP_CLEAR.some((k) => Math.abs(x - k[0]) < k[2] && Math.hypot(x - k[0], z - k[1]) < k[2])) return true;
     if (FAR) return pathAmount(x, z) > 0.02 || (x > 8 && Math.abs(z) < 4.5) || Math.hypot(x - HILL.x, z - HILL.z) < 14 || Math.hypot(x - SUMMIT.x, z - SUMMIT.z) < 4 || Math.hypot(x - MOONPOOL.x, z - MOONPOOL.z) < 7 || Math.hypot(x - BONES.x, z - BONES.z) < 11 || Math.hypot(x - SEAT.x, z - SEAT.z) < 4 || Math.hypot(x - WAYCAIRN.x, z - WAYCAIRN.z) < 4 || Math.hypot(x - SPRING.x, z - SPRING.z) < 6 || Math.hypot(x - SHELTER.x, z - SHELTER.z) < 6 || Math.hypot(x - COTTAGE.x, z - COTTAGE.z) < 8 || Math.hypot(x - FLATS.x, z - FLATS.z) < FLATS.r * 0.8 || Math.hypot(x - POOL.x, z - POOL.z) < 17 || Math.hypot(x - HOLLOW_TREE.x, z - HOLLOW_TREE.z) < 8 || Math.hypot(x - CRAG.x, z - CRAG.z - 3) < 12 || Math.hypot(x - GARDEN.x + 3, z - GARDEN.z - 5) < 12 || Math.hypot(x - LIGHTHOUSE.x, z - LIGHTHOUSE.z) < 12 || Math.hypot(x - WALL.x, z - WALL.z) < 3;
     if (Math.abs(x) < 4.2 && z > 6) return true;            // path from the beach
     if (x > 6 && Math.abs(z) < 3.4) return true;            // path to the dock
@@ -1086,7 +1100,7 @@ export function buildWorld(scene, opts = {}) {
   // Lantern Point: the keeper's cottage, half its roof gone, with a carving over the door; and the Lamplighter, a
   // heron who has been mending the tower alone, standing at the foot of her scaffold.
   const cs = Math.cos(COTTAGE.ry), sn = Math.sin(COTTAGE.ry), fromCottage = (lx, lz) => ({ x: COTTAGE.x + lx * cs + lz * sn, z: COTTAGE.z - lx * sn + lz * cs });
-  const heron = { x: LIGHTHOUSE.x + 5.6, z: LIGHTHOUSE.z + 3.4, group: null, home: 0 }, cottage = { door: fromCottage(-0.25, 3.4), inside: (x, z) => { const dx = x - COTTAGE.x, dz = z - COTTAGE.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; return Math.abs(lx) < 2.7 && Math.abs(lz) < 1.9; } };
+  const heron = { x: LIGHTHOUSE.x + 5.6, z: LIGHTHOUSE.z + 3.4, group: null, home: 0 }, cottage = { at: fromCottage, ry: COTTAGE.ry, door: fromCottage(-0.25, 3.4), inside: (x, z) => { const dx = x - COTTAGE.x, dz = z - COTTAGE.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; return Math.abs(lx) < 2.7 && Math.abs(lz) < 1.9; } };
   if (FAR) {
     heron.home = Math.atan2(-(POINT.z - heron.z), POINT.x + 6 - heron.x);
     colliders.push({ x: heron.x, z: heron.z, r: 0.6 });
@@ -1163,7 +1177,8 @@ export function buildWorld(scene, opts = {}) {
     landing: [MAPMAKER.x - 10, MAPMAKER.z - 13, 0.6], woods: [WOODS.x + 14, WOODS.z - 19, 2.1], meadow: [HILL.x + 19, HILL.z + 15, 4.2], farbeach: [SHELTER.x - 6, SHELTER.z - 7, 1.0],
     garden: [GARDEN.x - 9.5, GARDEN.z - 3.5, 2.6], cliff: [WAYCAIRN.x + 12, WAYCAIRN.z - 4, 5.5], grotto: [CRAG.x + 1.6, CRAG.z + 2.6, 3.4], cave1: [CAVE.deadend.x + 1.6, CAVE.deadend.z + 1.9, 3.9], cave2: [CAVE.gallery.x - 2.4, CAVE.gallery.z - 2.8, 0.9],
     bones: [BONES.x + 2.5, BONES.z + 1.5, 2.2], cottage: [cottage.door.x * 0 + fromCottage(-1.3, -1.0).x, fromCottage(-1.3, -1.0).z, COTTAGE.ry], islet: [ISLET.x - 3.4, ISLET.z - 1.6, 1.2], summit: [SUMMIT.x + 1.7, SUMMIT.z + 1.3, 3.8],
-    lake: [CAVE.lake.x + 5.6, CAVE.lake.z - 5.4, 5.2], moon: [MOONPOOL.x + 5.4, MOONPOOL.z - 2.6, 4.4], wreck: [WRECK.x - 8.5, WRECK.z + 6.5, 0.5],
+    trunk: [TRUNK.x - 2.6, TRUNK.z + 2.9, 1.1], ledge: [LEDGE.x - 1.6, LEDGE.z + 1.5, 4.9], cove: [COVE.x + COVE.ox * -2.2, COVE.z + COVE.oz * -2.2, 2.9], ring: [DUSKRING.x, DUSKRING.z, 0.7], sunken: [SUNKEN.x + 1.1, SUNKEN.z - 0.9, 2.3], stack: [STACK.x - 2.2, STACK.z + 2.0, 4.0], gap: [GAP.x, GAP.z, GAP.ry], watch: [WATCH.x + 0.4, WATCH.z + 0.3, WATCH.ry + 3.1], chapel: [CHAPEL.x - Math.sin(CHAPEL.ry) * 3.0 + 1.2, CHAPEL.z - Math.cos(CHAPEL.ry) * 3.0, CHAPEL.ry],
+    lake: [CAVE.lake.x + 5.6, CAVE.lake.z - 5.4, 5.2], two: [SEAT.x - 3.5, SEAT.z + 4.5, 2.0], moon: [MOONPOOL.x + 5.4, MOONPOOL.z - 2.6, 4.4], wreck: [WRECK.x - 8.5, WRECK.z + 6.5, 0.5],
   } : { h1: [16.7, -14.0, 2.4], h2: [-20.5, -17.5, 0.7], h3: [-22.5, 13.2, 5.0] };
   const chests = (CHESTS[FAR ? 'far' : 'home'] || []).map((c) => { const [x, z, ry] = CHEST_AT[c.at]; return { ...c, x, z, ry, group: null, lid: null, open: false, swing: 0, cave: FAR && roofedAt(x, z, 1.5) }; });
   for (const c of chests) colliders.push({ x: c.x, z: c.z, r: 0.45 });
@@ -1196,7 +1211,7 @@ export function buildWorld(scene, opts = {}) {
       const model = c.kind === 'iron' ? 'chest_iron' : 'chest_plain', g = make(model, model + '_lid'), lid = make(model + '_lid'), hinge = new THREE.Group();
       if (!g || !lid) continue;
       hinge.position.set(0, 0.34, -0.23); lid.position.set(0, -0.34, 0.23); hinge.add(lid); g.add(hinge);      // the lid turns about its back edge
-      g.position.set(c.x, (c.at === 'cottage' ? COTTAGE.y : terrainHeight(c.x, c.z)) - 0.02, c.z); g.rotation.y = c.ry; g.scale.setScalar(1.2);
+      g.position.set(c.x, (c.at === 'cottage' ? COTTAGE.y : c.at === 'stack' ? STACK.y : terrainHeight(c.x, c.z)) - 0.02, c.z); g.rotation.y = c.ry; g.scale.setScalar(1.2);
       g.traverse((o) => { if (o.isMesh) o.castShadow = false; }); scene.add(g); c.group = g; c.lid = hinge; hinge.rotation.x = c.open ? -1.9 : 0;
       updaters.push((dt) => { const to = c.open ? -1.9 : 0; if (Math.abs(hinge.rotation.x - to) > 0.002) hinge.rotation.x += (to - hinge.rotation.x) * (1 - Math.exp(-dt * 5)); });
     }
@@ -1207,6 +1222,32 @@ export function buildWorld(scene, opts = {}) {
       g.position.set(pk.x, terrainHeight(pk.x, pk.z) + 0.02, pk.z); g.rotation.y = pk.x * 1.7; g.visible = pk.there; scene.add(g); pk.group = g;
     }
   });
+  // Waystones: a lantern on a post in each part of the island. A visitor who has lit one can come back to it from any other.
+  const nearPath = (a) => { let best = null, bd = 1e9; for (const path of PATHS) for (const v of path) { const d = Math.hypot(v[0] - a.x, v[1] - a.z); if (d < bd) { bd = d; best = v; } } return best; };
+  const ways = FAR ? [{ id: 'landing', name: 'The Landing', x: 13.5, z: 7.5, lit: true }, ...AREAS.filter((a) => a.id !== 'landing').map((a) => { const v = nearPath(a) || [a.x, a.z]; return { id: a.id, name: a.name, x: v[0] + 2.4, z: v[1] + 1.6, lit: false }; })] : [];
+  for (const w of ways) { w.group = null; w.glow = []; colliders.push({ x: w.x, z: w.z, r: 0.35 }); }
+  const stock = { group: null, kind: '', n: -1 };
+  if (FAR) loadProps().then((make) => {
+    if (!make || !make('lantern_pole')) return;
+    for (const w of ways) {
+      const m = make('lantern_pole'); m.position.set(w.x, terrainHeight(w.x, w.z) - 0.03, w.z); m.scale.setScalar(1.25); m.rotation.y = w.x;
+      m.traverse((o) => { if (o.isMesh) { o.castShadow = false; if (o.material.name === 'c_lantern_glow') { o.material = o.material.clone(); w.glow.push(o.material); } } });
+      scene.add(m); w.group = m; setWay(w);
+    }
+    stock.make = make; stock.group = new THREE.Group(); stock.group.position.set(lighthouse.door.x + 3.2, 0, lighthouse.door.z + 4.2); scene.add(stock.group); setStock(stock.kind, stock.want || 0);
+  });
+  function setWay(w) { for (const g of w.glow) { g.emissive.set(w.lit ? 0xffb45a : 0x000000); g.emissiveIntensity = w.lit ? 2.2 : 0; g.color.set(w.lit ? 0xffd9a0 : 0x4a4640); } }
+  // What has been brought for the tower so far, stacked by its door: up to twelve heaps of whatever is being asked for.
+  function setStock(kind, share) {
+    stock.kind = kind; stock.want = share;
+    if (!stock.group || !stock.make) return;
+    const n = kind ? Math.max(share > 0 ? 1 : 0, Math.round(share * 12)) : 0;
+    if (stock.n === n && stock.shown === kind) return;
+    stock.n = n; stock.shown = kind;
+    while (stock.group.children.length) stock.group.remove(stock.group.children[0]);
+    const model = { stone: 'rubble_pile', timber: 'timber_stack', glass: 'pick_crystal', oil: 'lampseed' }[kind];
+    for (let i = 0; i < n; i++) { const m = stock.make(model); if (!m) break; const cx = (i % 4) * 1.5, cz = Math.floor(i / 4) * 1.5; m.position.set(cx, terrainHeight(stock.group.position.x + cx, stock.group.position.z + cz) - 0.03, cz); m.scale.setScalar(kind === 'glass' ? 1.6 : kind === 'oil' ? 0.8 : 0.55); m.rotation.y = i * 1.3; m.traverse((o) => { if (o.isMesh) o.castShadow = false; }); stock.group.add(m); }
+  }
   if (FAR) {
     // The lake under the hill: still, black water that gives back whatever light is brought to it.
     const lake = new THREE.Mesh(new THREE.CircleGeometry(CAVE.lake.r - 1.2, 24).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x1b3d47, roughness: 0.08, metalness: 0.55, transparent: true, opacity: 0.86, flatShading: true, emissive: 0x0a2a30, emissiveIntensity: 0.6 }));
@@ -1326,6 +1367,8 @@ export function buildWorld(scene, opts = {}) {
         draw: ({ line, sea, tower, boat, dot, r }) => { for (let i = 0; i < 46; i++) { const x = 30 + r() * 960, y = 30 + r() * 300; line([[x, y], [x - 26, y + 60]], INK, 4); } for (let i = 0; i < 6; i++) { const x = 90 + i * 150, y = 520 + (i % 2) * 50; line([[x - 60, y + 40], [x - 20, y - 30], [x + 30, y - 46], [x + 60, y - 10], [x + 40, y + 16], [x + 14, y + 4]], INK, 8); } sea(660, 40, 990); tower(840, 430, 130, false, true); boat(260, 470, 1.1, -0.5); line([[236, 430], [262, 442], [290, 436], [312, 452]], OCHRE, 9); dot(232, 428, 9, OCHRE); } },
       { id: 'leaving', title: 'The third stone', text: 'A small boat with one sail, and standing in it an animal with antlers, facing away. Behind it the broken tower. Ahead of it, far to the east, a low island with nothing on it but a fire, and chalk round the fire as there was once round the lights.',
         draw: ({ line, sea, tower, boat, stag, dot }) => { sea(590, 40, 990); sea(650, 60, 960); tower(120, 470, 120, false, true); boat(470, 520, 1.5); stag(452, 512, 1.0); line([[780, 560], [820, 520], [900, 512], [960, 556]], INK, 8); line([[858, 512], [866, 478], [876, 496], [884, 470], [892, 512]], OCHRE, 9); for (let k = 0; k < 6; k++) { const a = -Math.PI + 0.3 + k * 0.5; line([[874 + Math.cos(a) * 46, 490 + Math.sin(a) * 46], [874 + Math.cos(a) * 70, 490 + Math.sin(a) * 70]], CHALK, 5); } } },
+      { id: 'west', title: 'The fourth stone', text: 'The paint is still wet. A broken mast lying in the sea, and along it something small and long with a tail, its head up. A bell with a cut rope. Behind, far to the right, the antlered boat going the other way. Ahead, on the left edge of the stone, a row of towers with no chalk round any of them, and past the last a single stroke of white.',
+        draw: ({ line, sea, tower, boat, stag, dot }) => { sea(600, 40, 990); sea(655, 70, 960); line([[330, 560], [520, 540]], INK, 12); line([[400, 552], [392, 500]], INK, 6); line([[360, 540], [392, 530], [430, 536], [462, 524]], OCHRE, 10); dot(356, 536, 10, OCHRE); line([[462, 524], [486, 506]], OCHRE, 6); line([[560, 300], [560, 360]], INK, 5); line([[540, 360], [548, 400], [572, 400], [580, 360], [540, 360]], INK, 7); line([[560, 400], [556, 430]], INK, 4); boat(860, 520, 0.8); stag(850, 514, 0.55); [[70, 470, 70], [150, 440, 80], [230, 420, 86]].forEach(([x, y, h]) => tower(x, y, h, false)); line([[30, 380], [30, 330]], CHALK, 9); } },
     ];
     { const A = CAVE.pts[1];
       PAINTED.forEach((pn, i) => { const a = 3.55 + i * 0.78, x = A[0] + Math.cos(a) * 5.3, z = A[1] + Math.sin(a) * 5.3; paintings.push({ ...pn, x, z, ry: Math.atan2(A[0] - x, A[1] - z), mat: null, seen: false }); colliders.push({ x: x - Math.cos(a) * -0.6, z: z - Math.sin(a) * -0.6, r: 1.1 }); }); }
@@ -1975,6 +2018,14 @@ export function buildWorld(scene, opts = {}) {
         const sx = X(SIGHT_AT[id][0]), sz = Z(SIGHT_AT[id][1]);
         g.strokeStyle = seen.has(id) ? '#b23a1c' : 'rgba(178,58,28,0.5)'; g.beginPath(); g.moveTo(sx - 6, sz - 6); g.lineTo(sx + 6, sz + 6); g.moveTo(sx + 6, sz - 6); g.lineTo(sx - 6, sz + 6); g.stroke();
       }
+      // Who lives where (once the Mapmaker has heard from all of them), and the hidden places a visitor has been told of or has found.
+      if (st.pins) {
+        g.textAlign = 'center';
+        for (const p of st.pins.spots) { const sx = X(p.x), sz = Z(p.z); g.strokeStyle = p.found ? '#2f6f72' : 'rgba(47,111,114,0.55)'; g.lineWidth = 3; g.beginPath(); g.moveTo(sx, sz - 8); g.lineTo(sx + 7, sz); g.lineTo(sx, sz + 8); g.lineTo(sx - 7, sz); g.closePath(); g.stroke(); if (p.found) { g.fillStyle = '#2f6f72'; g.font = 'italic 15px Georgia, serif'; g.fillText(p.name, sx, sz + 24); } }
+        for (const q of st.pins.peers || []) { const sx = X(q.x), sz = Z(q.z); g.fillStyle = '#2b5fa8'; g.beginPath(); g.arc(sx, sz, 7, 0, 7); g.fill(); g.strokeStyle = '#f4ead2'; g.lineWidth = 2; g.stroke(); g.fillStyle = '#2b5fa8'; g.font = '600 17px Georgia, serif'; g.fillText(q.name, sx, sz - 13); }
+        if (st.pins.me) { const sx = X(st.pins.me.x), sz = Z(st.pins.me.z); g.strokeStyle = '#3d2e1f'; g.lineWidth = 3; g.beginPath(); g.arc(sx, sz, 9, 0, 7); g.stroke(); g.fillStyle = '#3d2e1f'; g.font = 'italic 15px Georgia, serif'; g.fillText('you', sx, sz + 24); }
+        for (const f of st.pins.folk) { const sx = X(f.x), sz = Z(f.z); g.fillStyle = '#8a4a2c'; g.beginPath(); g.arc(sx, sz, 5, 0, 7); g.fill(); g.font = 'italic 600 16px Georgia, serif'; g.fillText(f.name, sx, sz - 10); }
+      }
       g.fillStyle = '#3d2e1f'; g.font = 'italic 600 40px Georgia, serif'; g.textAlign = 'left'; g.fillText(st.named ? 'Lantern Rock' : 'The far shore', 38, 50);
       g.font = 'italic 22px Georgia, serif'; g.fillStyle = 'rgba(61,46,31,0.75)'; g.fillText(st.named && st.namer ? 'named again from the summit by ' + st.namer : 'as far as anyone has walked it', 40, 86);
       g.font = 'italic 18px Georgia, serif'; g.fillText('Dark ink: where you have walked.   \u00d7  a sight somebody has found.', 40, 644);
@@ -2003,10 +2054,11 @@ export function buildWorld(scene, opts = {}) {
   }
 
   const api = {
-    setMap: (st) => redrawMap(st),
+    setMap: (st) => redrawMap(st), setStarRush(on) { starRush = !!on; },
     mapmaker, lighthouse, hermit, paintings, echo, stones, heron, cottage, flats,
     ringBell() { flats.bell.swing = 0.5; },
     sources, setLightStage(n) { lighthouse.stage = n; lighthouse.parts.forEach((part, k) => { if (part) part.visible = k <= n; }); if (lighthouse.frame) lighthouse.frame.visible = n >= 2; },
+    ways, setWayLit(id, lit) { const w = ways.find((q) => q.id === id); if (w) { w.lit = lit; setWay(w); } }, setStock,
     chests, pickups,
     setChestOpen(id, open, now) { const c = chests.find((q) => q.id === id); if (c) { c.open = open; if (now && c.lid) c.lid.rotation.x = open ? -1.9 : 0; } },
     setPickup(i, there) { const pk = pickups[i]; if (pk) { pk.there = there; if (pk.group) pk.group.visible = there; } },

@@ -130,7 +130,7 @@ function makeRoom(wire) {
     if (m.t === 'in') { setIslandTime(m.now); if (m.kept) { const was = oldGuestId(); if (was) ls.set('hush.was', was); ls.set('hush.kept', '1'); } ashore = true; been = true; if (typeof m.id === 'string') known = m.id; if (onQueue) onQueue({ state: 'in', cap: m.cap, today: m.today, tracks: m.tracks, mu: m.mu, cc: m.cc, pid: m.pid, code: m.code, who: m.who }); post(); return; }
     if (m.t === 'muted') { if (onMod) onMod({ muted: m.until, why: m.why }); return; }
     if (m.t === 'hush') { if (onMod) onMod({ soft: true }); return; }
-    if (m.t === 'friends' || m.t === 'mail' || m.t === 'fask' || m.t === 'fyes' || m.t === 'fno' || m.t === 'w' || m.t === 'wok' || m.t === 'wno') { if (onSocial) onSocial(m); return; }
+    if (m.t === 'saved' || m.t === 'friends' || m.t === 'mail' || m.t === 'fask' || m.t === 'fyes' || m.t === 'fno' || m.t === 'w' || m.t === 'wok' || m.t === 'wno') { if (onSocial) onSocial(m); return; }
     if (m.t === 'wait') { ashore = false; inLine = true; if (onQueue) onQueue({ state: 'wait', pos: m.pos, of: m.of, cap: m.cap }); return; }
     if (m.t === 'out') { ashore = false; others.clear(); emit(); wire.post({ t: 'leave' }); const f = onQueue; onQueue = null; if (f) f({ state: 'out', why: m.why }); return; }
     if (typeof m.id !== 'string' || m.id === id) return;

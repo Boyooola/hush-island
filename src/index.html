@@ -160,6 +160,16 @@
   #list li.done { color: var(--ink-quiet); text-decoration: line-through; }
   /* Nothing in the HUD sits in a box. Words lie straight on the night, lit like firelight. */
   .tools { display: flex; gap: 4px 18px; flex-wrap: wrap; justify-content: flex-end; }
+  #btn-menu { display: none; }
+  #key-out { font: 600 13px ui-monospace, monospace; word-break: break-all; user-select: all; }
+  #key-in { font: inherit; padding: 4px 6px; width: min(100%, 30ch); }
+  /* A moment the story turns on: bars above and below, and one line held on the picture. */
+  #moment { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: flex; align-items: flex-end; justify-content: center; }
+  #moment::before, #moment::after { content: ""; position: absolute; left: 0; right: 0; height: 0; background: #05070c; transition: height 0.9s ease; }
+  #moment::before { top: 0; } #moment::after { bottom: 0; }
+  #moment.on::before, #moment.on::after { height: 11vh; }
+  #moment span { position: relative; z-index: 1; margin: 0 6vw 24vh; max-width: 34ch; text-align: center; font: italic 600 clamp(19px, 2.6vw, 30px)/1.3 Georgia, serif; color: #fff4dd; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 30px rgba(0, 0, 0, 0.7); opacity: 0; transition: opacity 0.9s ease; }
+  #moment.on span { opacity: 1; }
   .chip, .word {
     background: none; border: 0; padding: 4px 0; font-family: var(--display); font-weight: 800; font-size: 16px; line-height: 1.1; color: var(--ink);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.75);
@@ -403,13 +413,15 @@
     .card { gap: 11px; }
     .card p { font-size: 15.5px; }
     .bar { gap: 10px; }
-    .emotes { order: 2; flex: 1 1 100%; justify-content: space-between; gap: 6px 10px; }
+    .emotes { order: 2; flex: 1 1 100%; justify-content: flex-start; gap: 6px 18px; }
     .word::before { content: none; }
     .word { font-size: 16.5px; padding: 6px 0; }
     .act { font-size: 21px; }
     #help { padding-top: 56px; background: rgba(5, 9, 20, 0.93); }
     #tasks { top: 190px; }
-    .tools { gap: 4px 11px; }
+    #btn-menu { display: inline-block; margin-left: auto; }
+    .tools { display: none; flex-direction: column; align-items: flex-end; gap: 9px; position: absolute; right: 12px; top: 44px; background: rgba(12, 16, 26, 0.86); padding: 12px 14px; border-radius: 6px; z-index: 6; }
+    .tools.open { display: flex; }
     .chip { font-size: 13px; }
     #game { top: 108px; left: 16px; transform: none; gap: 10px; font-size: 14px; }
     #game b { font-size: 16px; }
@@ -460,7 +472,8 @@
 <div id="top" class="hud">
   <div class="brand"><b>Hush Island</b><span id="count">Just you and the Keeper</span></div>
   <div id="day" role="img" aria-label="Island time"><div id="daybar"><i id="daystar"></i><i id="daydot" class="sun"></i></div><span id="daytext"></span></div>
-  <div class="tools">
+  <button class="chip" id="btn-menu" type="button" aria-expanded="false">Menu</button>
+  <div class="tools" id="tools">
     <button class="chip" id="btn-music" type="button" aria-pressed="true">Music on</button>
     <button class="chip" id="btn-sound" type="button" aria-pressed="true">Sound on</button>
     <button class="chip" id="btn-help" type="button" aria-pressed="false">Help</button>
@@ -473,6 +486,7 @@
 <div id="game" class="hud" hidden><b id="game-text"></b><span id="game-count"></span><span id="game-time"></span><button id="game-btn" type="button"></button></div>
 <div id="flash" hidden aria-live="assertive"><b id="flash-title"></b><span id="flash-sub"></span></div>
 
+<div id="moment" hidden aria-live="polite"><span></span></div>
 <div id="goal" class="hud" hidden role="status" aria-live="polite"><span id="goal-arrow" aria-hidden="true">➤</span><span id="goal-text"></span><span id="goal-dist"></span></div>
 
 <aside id="tasks" class="hud" aria-label="Quests">
@@ -506,6 +520,15 @@
   <p>You are not the only ones here. Crabs keep to the sand, an owl watches from the dead tree at night, and Clover the cow grazes her way round the island.</p>
   <ul id="list" hidden></ul>
   <p>Quests are what the island asks of you. Each is done once and tells you a little more about this place. The one you are on is at the top left, with an arrow to it; your journal keeps the rest.</p>
+  <h3>Keeping what you have done</h3>
+  <p>The island keeps your quests, stamps, finds and satchel under a key that lives in this browser. To carry on from another phone or computer, or to get everything back after clearing this browser, use the same key there. Whoever has the key is you, so do not post it anywhere.</p>
+  <p><code id="key-out"></code> <button class="ghost" id="key-copy" type="button">Copy my key</button></p>
+  <p><input id="key-in" type="text" autocomplete="off" spellcheck="false" placeholder="A key from another device" aria-label="A key from another device"> <button class="ghost" id="key-use" type="button">Use this key</button></p>
+  <p id="key-note" role="status"></p>
+  <h3>If you are stuck</h3>
+  <p>If your animal is somewhere it cannot walk out of, this puts it back where it came ashore. Nothing you have done is lost.</p>
+  <p><button class="ghost" id="unstick" type="button">Take me back to where I landed</button></p>
+  <p>Postcard pictures stay on the device that took them; the stamps themselves come with you.</p>
   <p id="music-credit" hidden></p>
   <p id="nights">Nights on the island: 1. A scarf comes on night 3.</p>
   <button class="ghost" id="help-close" type="button">Close</button>
@@ -541,6 +564,9 @@
       <button class="word" id="emote-wag" type="button" data-key="4">Wag</button>
       <button class="word" id="emote-sit" type="button" data-key="5">Sit</button>
       <button class="word" id="emote-lie" type="button" data-key="6">Lie down</button>
+      <button class="word" id="emote-dance" type="button" data-key="7">Dance</button>
+      <button class="word" id="emote-wave" type="button" data-key="8">Wave</button>
+      <button class="word" id="emote-point" type="button" data-key="9">Point</button>
     </div>
     <div class="books">
       <button class="word" id="quests-btn" type="button" data-key="Q">Quests</button>

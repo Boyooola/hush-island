@@ -61,8 +61,8 @@ const idc = await c.evaluate(() => ({ pid: window.__ember.pid }));
 await c.evaluate((pid) => { const e = window.__ember; e.friends.push({ pid, name: 'x', code: '0000', s: 0, seen: 0, here: true }); e.whisperTo(pid, 'let me in'); }, idb.pid);
 ok('someone who is not a friend cannot whisper', await has(c, 'You can only whisper to friends') && !(await has(b, 'let me in', 2500)));
 // Away: the Friends list, a note left, and the note handed over.
-await b.click('#btn-leave'); await a.waitForTimeout(2500);
-await a.click('#btn-friends'); await a.waitForTimeout(600);
+await b.evaluate(() => document.getElementById('btn-leave').click()); await a.waitForTimeout(2500);
+await a.evaluate(() => document.getElementById('btn-friends').click()); await a.waitForTimeout(600);
 let txt = await a.evaluate(() => document.getElementById('sheet').innerText.replace(/\s+/g, ' '));
 ok('the Friends list shows an absent friend', txt.includes(idb.name) && txt.includes('#' + idb.code) && /last here/.test(txt), txt.slice(0, 160));
 await a.screenshot({ path: '/home/claude/ember-isle/shots/s3-friends.png' });

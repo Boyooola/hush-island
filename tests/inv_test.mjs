@@ -36,7 +36,7 @@ await p.evaluate(() => [...document.querySelectorAll('#sheet .bag button.tile')]
 ok(await p.evaluate(() => window.__ember.me.wearKey.split(',')[1] !== '0'), 'pressing a scarf puts it on'); await p.keyboard.press('Escape');
 await p.evaluate(() => window.__ember.found('glowcap')); await p.waitForTimeout(3000); await p.keyboard.press('j'); await p.waitForTimeout(600); await p.evaluate(() => [...document.querySelectorAll('#sheet .tabs button')].find((b) => b.textContent === 'Finds').click()); await p.waitForTimeout(1200); await p.screenshot({ path: S + 'i5.png' });
 ok(await p.evaluate(() => document.querySelectorAll('#sheet .album.finds figure').length > 15 && !!document.querySelector('#sheet .album.finds img')), 'finds are a poster, with a picture for what is found'); await p.keyboard.press('Escape');
-await p.keyboard.press('m'); await p.waitForTimeout(800); await p.screenshot({ path: S + 'i6.png' }); ok(await p.evaluate(() => !!document.querySelector('#sheet .mapimg') && /Chests: 2 of 16/.test(document.getElementById('sheet-body').textContent)), 'the map opens anywhere and counts chests'); await p.keyboard.press('Escape');
+await p.keyboard.press('m'); await p.waitForTimeout(800); await p.screenshot({ path: S + 'i6.png' }); ok(await p.evaluate(() => !!document.querySelector('#sheet .mapimg') && /Chests: 2 of 15/.test(document.getElementById('sheet-body').textContent)), 'the map opens anywhere and counts chests'); await p.keyboard.press('Escape');
 await p.keyboard.press('q'); await p.waitForTimeout(600); ok(await p.evaluate(() => document.getElementById('sheet-title').textContent === 'Quests'), 'Q opens the quests'); await p.keyboard.press('Escape');
 // under the hill
 await p.evaluate(() => window.__ember.setLamp(true));

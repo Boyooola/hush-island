@@ -45,7 +45,8 @@ export function parsePeer(p) {
     muted: num(s.mu, 0, 1e15),
     lamp: s.lp === 1,
     wear: Array.isArray(s.wr) ? s.wr.slice(0, 3).map((n) => Math.floor(num(n, 0, 40))) : [0, 0, 0],
-    ev: Array.isArray(s.ev) ? { kind: clean(s.ev[0], 8), n: Math.floor(num(s.ev[1], 0, 20)), at: num(s.ev[2], 0, 1e15) } : null,
+    ev: Array.isArray(s.ev) ? { kind: clean(s.ev[0], 8), n: Math.floor(num(s.ev[1], 0, 1e9)), at: num(s.ev[2], 0, 1e15) } : null,
+    shelf: Array.isArray(s.sh) ? s.sh.slice(0, 6).map((v) => Math.floor(num(v, 0, 999))) : [],
     it: num(s.it, 0, 1e15),
     tagTo: Array.isArray(s.tg) ? clean(s.tg[0], 16) : '',
     tagAt: Array.isArray(s.tg) ? num(s.tg[1], 0, 1e15) : 0,
@@ -53,7 +54,7 @@ export function parsePeer(p) {
     game: num(s.gm, 0, 1e15),
     dance: num(s.dn, 0, 1e15),
     // The boat: which voyage this visitor is aboard and when it casts off; and how many times they have sailed.
-    voyage: Array.isArray(s.vy) && num(s.vy[0], 0, 1e15) > 0 ? { id: num(s.vy[0], 0, 1e15), cast: num(s.vy[1], 0, 1e15), seated: s.vy[2] === 1 } : null,
+    voyage: Array.isArray(s.vy) && num(s.vy[0], 0, 1e15) > 0 ? { id: num(s.vy[0], 0, 1e15), cast: num(s.vy[1], 0, 1e15), seated: s.vy[2] === 1, dest: Math.floor(num(s.vy[3], 0, 2)) } : null,
     sailed: Math.floor(num(s.sv, 0, 99999)),
     fires: Math.floor(num(s.cf, 0, 99999)),
     found: Math.floor(num(s.jn, 0, 999)),        // how many kinds of thing are in their journal

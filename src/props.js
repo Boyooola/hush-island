@@ -2,6 +2,7 @@
 // rocks and so on. Each is a named piece in the one file. The shapes built in code stand in until the file arrives
 // (or for good, if it never does), and are swapped for these when it does.
 import * as THREE from 'three';
+import { ISLE } from './terrain.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -26,6 +27,11 @@ export function loadProps() {
     new GLTFLoader().load('./props.glb', (gltf) => {
       const scene = gltf.scene;
       scene.updateMatrixWorld(true);
+      // On Lantern Rock the leaves follow the real month: fresh in spring, deep green in summer, as modelled in autumn, frosted in winter.
+      if (ISLE === 'far') {
+        const m = new Date().getMonth(), to = m <= 1 || m === 11 ? [0xdfe6e8, 0.5] : m <= 4 ? [0x8cc063, 0.6] : m <= 7 ? [0x4f8a45, 0.6] : null, seen = new Set();
+        if (to) scene.traverse((o) => { if (o.isMesh && o.material && !seen.has(o.material) && /leaf|needle|pine_/.test(o.material.name) && !/^ga_|bark|trunk/.test(o.material.name)) { seen.add(o.material); o.material.color.lerp(new THREE.Color(to[0]), to[1]); } });
+      }
       const bake = (name, skip) => {
         const key = name + '|' + (skip || '');
         if (baked.has(key)) return baked.get(key);
@@ -33,7 +39,7 @@ export function loadProps() {
         if (!root) { baked.set(key, null); return null; }
         const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), by = new Map();
         const walk = (o) => {
-          if (o !== root && skip && o.name.startsWith(skip)) return;
+          if (o !== root && skip && (skip.test ? skip.test(o.name) : o.name.startsWith(skip))) return;
           if (o.isMesh) {
             const g = o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
             for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);

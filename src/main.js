@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   clamp, lerp, smoothstep, groundHeight, moveWithCollision, shoreProximity,
-  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip, FAR, ISLE, areaAt, MAPMAKER, POST, LENS, CHEST, POOL, CRAG, HOLLOW_TREE, CAVE, inCave, caveAt, SUMMIT, LIGHTHOUSE, COTTAGE, TIDE, tideAt, FLATS, ISLET, FLAT_SHORE, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN, AREAS, MAP_BOARD, WOODS as WOODS_AT, PATHS, SIGHT_AT } from './terrain.js';
+  FIRE, HILL, SPAWN, DOCK, WOODPILE, SEATS, spotAt, WALL, CRATE, BOTTLE_SPOTS, onSlip, FAR, ISLE, areaAt, MAPMAKER, POST, LENS, CHEST, POOL, CRAG, HOLLOW_TREE, CAVE, inCave, caveAt, SUMMIT, LIGHTHOUSE, COTTAGE, TIDE, tideAt, FLATS, ISLET, FLAT_SHORE, SPRING, SHELTER, FARBEACH, MOONPOOL, BONES, SEAT, WAYCAIRN, AREAS, MAP_BOARD, WOODS as WOODS_AT, PATHS, SIGHT_AT, BRIDGE, walkable, GAP as GAP_AT, LOCAL as LOCAL_DEV } from './terrain.js';
 import { buildWorld } from './world.js';
 import { Avatar, SPECIES, PLAYABLE, NAME_WORDS, POSE } from './avatar.js';
 import { buildCritters } from './critters.js';
@@ -12,7 +12,7 @@ import { createStore, todayKey } from './store.js';
 import { buildLife, showerState } from './life.js';
 import { islandHour, dayInfo, skyAt, rainAt } from './clock.js';
 import { buildSite, BOAT_GOAL } from './build.js';
-import { voyageAt, BOARD_MS } from './voyage.js';
+import { voyageAt, BOARD_MS, CROSS_MS, ARRIVE_MS } from './voyage.js';
 import { timeNow, clockSkew, setIslandTime } from './now.js';
 import { campfireAt, clockTime, inWords, bothTimes } from './campfire.js';
 import { FINDS, FIND, fishKind, createFinds } from './finds.js';
@@ -23,6 +23,10 @@ import { cutaway } from './props.js';
 import { makeGlowTexture } from './labels.js';
 import { buildShy } from './shy.js';
 import { ITEMS, WEAR_IDS, SLOTS, ITEM_OF_FIND, CHESTS, LETTERS } from './items.js';
+import { buildWide } from './wide.js';
+import { buildPlay } from './play.js';
+import { buildPuzzles } from './puzzles.js';
+import { buildAlive } from './alive.js';
 import { loadProps } from './props.js';
 import { DAY_MS } from './clock.js';
 import { judge } from './words.js';
@@ -183,7 +187,7 @@ const KEEPER_LINES = FAR ? [
   'It is not much of a light. But it is a light.', 'I used to keep a bigger one.', 'On a clear night you could see the next island from here. Not any more.',
   'No hurry here.', 'Lie as long as you like.', 'The sand stays warm near the fire.', 'Mind the dock. It creaks.',
   'Sticks are on the pile. I would be glad of one on the fire.', 'The boat needs driftwood. The beaches are full of it.',
-  'The current runs west from here. Everything does, in the end.', 'I count the days by the fire. I have lost count twice.',
+  'The current runs west from here. Everything does, in the end.', 'West, on a clear day, there is a dark line on the sea. That is Lantern Rock. I kept the light there once.', 'When the boat is built she will take you across. She knows the way. She will bring you back, too.', 'There are people over there still. A mole, a ram, a heron. Tell them the fire is lit.', 'I count the days by the fire. I have lost count twice.',
   'You came from the sea, like everyone. I came from further.', 'The stars are clearer from the hill. Look west, if you go.',
 ];
 const KEEPER_HELLO = FAR ? ['Ah. Fresh legs.', 'Welcome to the Landing.', 'Have a look at the map. Every name on it got there first.', 'You came a long way. Sit by the fire if you like.'] :
@@ -378,26 +382,35 @@ const chapterLeft = (c) => c.quests.filter((q) => !quests[q.id]).length;
 // A chapter of the story is open once the one before it is finished but for one quest; the side chapters always are.
 const checkNow = (q) => { try { return Number(QUEST_CHECK[q.check](q)) || 0; } catch (e) { return 0; } };      // some of what is counted is not set up until later in the page
 const chapterOpen = (c) => { if (c.isle === 'far') return true; if (c.side) return !!quests.cold; const main = MY_CHAPTERS.filter((k) => !k.side), i = main.indexOf(c); return i === 0 || (chapterOpen(main[i - 1]) && chapterLeft(main[i - 1]) <= 1); };
-const questOpen = (q) => !quests[q.id] && chapterOpen(q.chapter) && (!q.needsBoat || boatBuilt());
+const questOpen = (q) => !quests[q.id] && chapterOpen(q.chapter) && (!q.needsBoat || boatBuilt()) && (!q.after || !!quests[q.after]);
 // Some quests can only be done at night, by day or at low water: while one is waiting, the next that can be done is the one followed.
 const questReady = (q) => !q.when || (q.when === 'night' ? skyNow.dark > 0.55 : q.when === 'day' ? skyNow.dark < 0.4 : q.when === 'lowtide' ? tideAt(timeNow()).y < TIDE.flat - 0.14 : true);
-const questNow = () => { const open = MY_STORY.filter((q) => !q.chapter.side && questOpen(q)); return open.find(questReady) || open[0] || null; };
+// The line the panel follows: the first two things at the Landing, then the Message Round, then the rest of the story in its own order.
+const questRank = (q) => (q.first ? 0 : q.chapter.lead ? 1 : 2);
+const questNow = () => { const open = MY_STORY.filter((q) => !q.chapter.side && questOpen(q)).sort((a, b) => questRank(a) - questRank(b)); return open.find(questReady) || open[0] || null; };
 // A quest that somebody asks for has to be asked for: until the visitor has been to see them it shows only as
 // "has something to ask", with a gold mark over their head. Once asked the mark is grey until the quest is done.
 const GIVER = { 'The Keeper': 'keeper', 'The Mapmaker': 'keeper', 'The Hermit': 'hermit', 'The Lamplighter': 'heron' };
 const GREETS = { keeper: 'keeper', hermit: 'hermit', heron: 'heron' };
 const taken = (() => { const k = store('ember.taken'); return k && typeof k === 'object' ? k : {}; })();
 const needsAsking = (q) => !!GIVER[q.from] && !taken[q.id] && !(q.on && q.on.includes(GREETS[GIVER[q.from]])) && (FAR ? q.from !== 'The Keeper' : q.from === 'The Keeper');
-const giverPlace = (q) => (GIVER[q.from] === 'keeper' ? keeper : GIVER[q.from] === 'hermit' ? world.hermit : world.heron);
+const giverPlaces = {};      // who stands where, by the short names in GIVER (the folk of the wider island add themselves)
+let wide = null;
+const giverPlace = (q) => giverPlaces[GIVER[q.from]] || (GIVER[q.from] === 'keeper' ? keeper : GIVER[q.from] === 'hermit' ? world.hermit : world.heron);
 // Greeting somebody who has a quest waiting: they ask it. Returns what they say, or '' when they have nothing new.
 function askedBy(who) {
   const q = MY_STORY.find((k) => !k.chapter.side && questOpen(k) && GIVER[k.from] === who && needsAsking(k));
   if (!q) return '';
-  taken[q.id] = Date.now(); store('ember.taken', taken); showList(); audio.pop(600);
+  taken[q.id] = Date.now(); store('ember.taken', taken); showList(); audio.pop(600); if (wide) wide.onTaken(q.id);
   setTimeout(() => addLog('', `A quest from ${lower(q.from)}: ${q.title}. ${questAsk(q)}.`, 'sys'), 1800);
   return q.say || `There is something you could do for me. ${questAsk(q)}.`;
 }
+// Somebody hands a quest over outright, whatever else they might have asked first.
+function takeQuest(id) { const q = storyById[id]; if (!q || quests[id] || taken[id]) return ''; taken[id] = Date.now(); store('ember.taken', taken); showList(); audio.pop(600); if (wide) wide.onTaken(id); setTimeout(() => addLog('', `A quest from ${lower(q.from)}: ${q.title}. ${questAsk(q)}.`, 'sys'), 1800); return q.say || `There is something you could do for me. ${questAsk(q)}.`; }
 const chapterNow = () => { const q = questNow(); return q ? q.chapter : null; };
+const withCompany = () => peers.size > 0;
+// Quests that need another visitor are left out of the count while nobody else is ashore.
+const countedStory = () => MY_STORY.filter((q) => !q.chapter.company || withCompany() || quests[q.id]);
 const questsDone = () => MY_STORY.filter((q) => quests[q.id]).length;
 const askOf = (q) => (q.askBuilt && boatBuilt() ? q.askBuilt : q.ask);
 const questAsk = (q) => (q.need > 1 ? `${askOf(q)} (${Math.min(q.need, checkNow(q))} of ${q.need})` : askOf(q));
@@ -451,6 +464,7 @@ const FAR_WHERE = {
   'lr-wind': () => HILL, 'lr-tune': () => HILL, 'lr-summit': () => SUMMIT, 'lr-heron': () => world.heron, 'lr-carving': () => world.cottage.door,
   'lr-flats': () => FLATS, 'lr-stern': () => world.flats.wreck.stern || FLATS, 'lr-bell': () => world.flats.bell, 'lr-islet': () => ISLET, 'lr-logbook': pageAt,
   'lr-farbeach': () => SHELTER, 'lr-spring': () => SPRING, 'lr-grotto': () => CRAG, 'lr-moon': () => MOONPOOL, 'lr-whale': () => BONES, 'lr-seat': () => SEAT, 'lr-cairn': () => WAYCAIRN,
+  'lr-way': () => world.ways.find((w) => w.id === 'woods'),
   'lr-chest': () => world.chests.find((c) => c.id === 'c-landing'), 'lr-lake': () => (echoOpen ? CAVE.lake : xz(CAVE.pts[2])),
   'lr-took': forTower, 'lr-gave': forTower, 'lr-s1': forTower, 'lr-s2': forTower, 'lr-s3': forTower, 'lr-s4': forTower, 'lr-twenty': forTower, 'lr-climb': () => world.lighthouse.door,
 };
@@ -475,7 +489,7 @@ let goal = null;
 function findGoal() {
   if (itWho === 'me') { const q = taggable(999, true); return { text: q ? `You are it. Catch ${q.p.data.name}` : 'You are it. The others are resting, so wait for one to get up', at: q ? q.p.av : me, step: '' }; }
   if (game && itWho && folkHas(itWho)) return { text: `${itWho === 'keeper' ? 'The Keeper' : folkGet(itWho).data.name} is it. Keep away`, at: folkGet(itWho).av, step: '' };
-  if (FAR) { const fq = questNow(); if (!fq) return null; if (needsAsking(fq)) return { text: `${fq.from} has something to ask`, at: giverPlace(fq), step: '' }; let at = null; try { at = (FAR_WHERE[fq.id] || (() => null))(); } catch (e) { at = null; } return { text: questAsk(fq), at: at && Number.isFinite(at.x) ? at : null, step: '' }; }
+  if (FAR) { const fq = questNow(); if (!fq) return null; if (needsAsking(fq)) return { text: `${fq.from} has something to ask`, at: giverPlace(fq), step: '' }; let at = null; try { at = (FAR_WHERE[fq.id] || (wide && wide.where[fq.id]) || (() => null))(); } catch (e) { at = null; } return { text: questAsk(fq), at: at && Number.isFinite(at.x) ? at : null, step: '' }; }
   if (starterAt < STARTER.length) return { text: typeof STARTER[starterAt].text === 'function' ? STARTER[starterAt].text() : STARTER[starterAt].text, at: STARTER[starterAt].where(), step: '' };
   const q = questNow();
   if (q && needsAsking(q)) return { text: `${q.from} has something to ask`, at: keeper, step: '' };
@@ -515,7 +529,7 @@ function updateGuide(now) {
       if (guideFlags.fire) first('g3');
       if (guideFlags.greet) first('g4');
       if (guideFlags.greet) questEvent('keeper');
-      questChecks(); updateSights();
+      questChecks(); updateSights(); if (!FAR) keepProgress();
     }
     goal = asleepSince ? null : findGoal(); showMarks();
     // The Keeper's list stays out of the way until the fire is reached: one thing at a time.
@@ -563,7 +577,7 @@ function showList() {
       el.appendChild(li);
     }
   }
-  $('tasks-count').textContent = `${questsDone()} of ${MY_STORY.length}`;
+  $('tasks-count').textContent = FAR ? '' : `${questsDone()} of ${countedStory().length}`;
 }
 // The list on the left folds away under its heading; small screens start with it folded.
 {
@@ -1174,6 +1188,9 @@ let partyStand = false;
 // says which voyage it is on (the moment it was called) and when it casts off, and the earliest word wins.
 let voyage = 0, voyageCast = 0, seenVoyage = 0, seenCast = 0, voyageLine = '', voyageSaid = 0, voyageCalled = 0, voyageWas = '';
 let voyageNow = null, voyageCrew = [], voyageSeated = false, voyageWalkAt = 0, voyageDolphins = false;
+// Where she is bound: 0 once round the island and home, 1 across to the other island, 2 coming in from it.
+let voyageDest = 0, seenDest = 0, crossingOver = false;
+const OTHER = FAR ? 'the first island' : 'Lantern Rock', OTHER_SHORT = FAR ? 'home' : 'the far shore';
 // A short hop from one place to another (the last step into the boat, and back out onto the gangplank).
 let hop = null;
 function hopTo(to, done) { playEmote('hop'); hop = { x0: me.x, y0: me.y, z0: me.z, to, t0: t, dur: 0.5, done }; }
@@ -1187,20 +1204,21 @@ function updateHop() {
 }
 const boatDist = () => Math.hypot(yard.berth.x - me.x, yard.berth.z - me.z);
 const boatBuilt = () => boatTotal >= BOAT_GOAL;
-function boardBoat() {
+function boardBoat(dest = 0) {
   if (voyage || game || party || !entered || !boatBuilt() || boatDist() > 4.2) return;
   if (seenVoyage) {
     if (!voyageNow || voyageNow.phase !== 'board' || voyageCrew.length >= yard.crewMax) return;
-    voyage = seenVoyage; voyageCast = seenCast;
+    voyage = seenVoyage; voyageCast = seenCast; voyageDest = seenDest;
   } else {
-    voyage = timeNow(); voyageCast = voyage + BOARD_MS;
+    voyage = timeNow(); voyageCast = voyage + BOARD_MS; voyageDest = dest === 1 ? 1 : 0;
     addLog('', 'She casts off in a moment: anyone near can come aboard too.', 'sys');
   }
   // Up the gangplank on your own feet, and a hop over her side at the top.
   setHeld(0); audio.pop(700);
   voyageSeated = false; voyageWalkAt = timeNow(); voyageDolphins = false; hop = null;
   moveTarget = onSlip(me.x, me.z) ? [yard.plankHead] : [yard.plankFoot, yard.plankHead]; moveTarget.short = true;
-  flash('All aboard', 'Once round the island');
+  flash('All aboard', voyageDest === 1 ? `Bound for ${OTHER}` : 'Once round the island');
+  if (voyageDest === 1) addLog('', `She is bound for ${OTHER}. Anybody who climbs in goes too. Everything you carry comes with you.`, 'sys');
   voyageSaid = 0;
   pushPresence(true);
 }
@@ -1213,13 +1231,19 @@ function leaveBoat(why = '') {
   if (!voyage) return;
   const i = Math.max(0, voyageCrew.indexOf(myWireId()));
   const wasSeated = voyageSeated;
-  voyage = 0; voyageCast = 0; voyageSeated = false; hop = null;
+  voyage = 0; voyageCast = 0; voyageSeated = false; hop = null; voyageDest = 0;
   vel.x = vel.z = 0; moveTarget = null;
   setMode('stand');
   // Back over her side onto the gangplank, and down it to the sand.
   const walkOff = () => { moveTarget = [yard.plankFoot, yard.ashore(i)]; moveTarget.short = true; };
   if (entered) { if (wasSeated) hopTo(() => yard.plankHead, walkOff); else walkOff(); }
   if (why === 'missed') addLog('', 'She has gone without you.', 'sys');
+  else if (why === 'landed') {
+    const n = (Number(store('ember.crossed')) || 0) + 1; store('ember.crossed', n);
+    flash(FAR ? 'Lantern Rock' : 'Home again', FAR ? (n <= 1 ? 'You have crossed to the far shore' : 'The far shore') : 'Back on the first island');
+    addLog('', FAR ? 'Her keel takes the sand. You are across. The camp fire up the path is the Mapmaker\'s.' : 'Her keel takes the sand. You are home, with whatever you found over there.', 'sys');
+    audio.pop(880); questEvent('landed'); tally('crossed:' + ISLE);
+  }
   else if (why === 'home') {
     sailed += 1; store('ember.sailed', sailed);
     flash('Home again', sailed === 1 ? 'You have sailed round the island' : `${sailed} times round the island`);
@@ -1229,6 +1253,19 @@ function leaveBoat(why = '') {
   } else addLog('', 'You stepped back onto the sand.', 'sys');
   pushPresence(true);
 }
+// The far end of a crossing: the page for the other island is opened, and the boat is picked up there as she comes in.
+function crossOver() {
+  if (crossingOver) return; crossingOver = true;
+  store('ember.crossing', { id: voyage, cast: voyageCast + CROSS_MS, to: FAR ? 'home' : 'far', seat: Math.max(0, voyageCrew.indexOf(myWireId())), at: Date.now() });
+  questEvent('crossing'); try { keepProgress(); } catch (e) { /* it is kept in this browser all the same */ }
+  const veil = document.createElement('div'); veil.style.cssText = 'position:fixed;inset:0;background:#cfd8dc;opacity:0;transition:opacity 1.4s;z-index:90'; document.body.appendChild(veil); requestAnimationFrame(() => { veil.style.opacity = '1'; });
+  addLog('', 'The haze closes round her. For a while there is nothing but water.', 'sys');
+  store('ember.isle', FAR ? 'home' : 'far');      // which shore this browser is on from now, until the boat takes it back
+  setTimeout(() => { location.href = LOCAL_DEV ? (FAR ? '/' : '/far') : '/'; }, 1700);
+}
+// Arriving by boat: there is no stepping ashore from the title page; the visitor is already in their seat as she comes in.
+const arriving = (() => { const c = store('ember.crossing'); return c && typeof c === 'object' && c.to === ISLE && Date.now() - (c.at || 0) < 90000 ? c : null; })();
+if (store('ember.crossing')) store('ember.crossing', null);
 function updateVoyage(dt) {
   // Which voyage is on: mine, or the earliest one anybody near is on.
   const now = timeNow();
@@ -1237,24 +1274,25 @@ function updateVoyage(dt) {
   for (const [id, p] of peers) {
     const v = p.data.voyage;
     if (!v || now - v.cast > 200000) continue;
-    if (!g || v.id < g) { g = v.id; cast = v.cast; ids.length = 0; }
+    if (!g || v.id < g) { g = v.id; cast = v.cast; seenDest = v.dest || 0; ids.length = 0; }
     if (v.id === g) { ids.push(id); cast = Math.min(cast, v.cast); }
   }
-  if (voyage && g !== voyage) { voyage = g; pushPresence(true); }           // two were called at once: the earlier one stands
+  if (voyage && g === voyage) seenDest = voyageDest;
+  if (voyage && g !== voyage) { voyage = g; voyageDest = seenDest; pushPresence(true); }           // two were called at once: the earlier one stands
   if (voyage && cast < voyageCast) { voyageCast = cast; pushPresence(true); }
   seenVoyage = g; seenCast = cast;
   voyageCrew = g ? [...(voyage ? [myWireId()] : []), ...ids].sort() : [];
-  voyageNow = g && voyageCrew.length ? voyageAt(g, cast, now) : null;
+  voyageNow = g && voyageCrew.length ? voyageAt(g, cast, now, seenDest) : null;
   if (voyageNow && voyageNow.phase === 'done' && !voyage) voyageNow = null;
   const v = voyageNow;
   yard.setHull(v && v.pose, (x, z) => world.seaY(x, z), t);
   // Once on the way round, forty seconds out, dolphins come alongside: a few leaps and they are gone.
-  const since = v && v.phase === 'sail' ? (now - seenCast) / 1000 - 40 : -1;
+  const since = v && v.phase === 'sail' && !seenDest ? (now - seenCast) / 1000 - 40 : -1;
   const dolphins = since >= 0 && since < 10.5;
   life.escort(dolphins ? v.pose : null, seenCast / 1000 + 40);
   if (dolphins && voyage && voyageSeated && !voyageDolphins) { voyageDolphins = true; addLog('', 'Dolphins! Two of them, leaping alongside.', 'sys'); audio.pop(760); found('dolphin', true); }
   if (v && v.phase !== voyageWas) {
-    if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'She swings away from the shore.', 'sys'); } }
+    if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage && seenDest !== 2) { flash('Cast off', seenDest === 1 ? `For ${OTHER}` : 'Once round the island'); addLog('', 'She swings away from the shore.', 'sys'); } }
   }
   voyageWas = v ? v.phase : '';
   if (!seenVoyage && voyageCalled) voyageCalled = 0;
@@ -1264,7 +1302,7 @@ function updateVoyage(dt) {
     audio.pop(620);
   }
   if (voyage && v) {
-    if (v.phase === 'done') leaveBoat('home');
+    if (v.phase === 'done') { if (seenDest === 1) crossOver(); else leaveBoat(seenDest === 2 ? 'landed' : 'home'); }
     else if (!entered) leaveBoat();
     else if (!voyageSeated) {
       // Still on the way up the gangplank.
@@ -1288,9 +1326,11 @@ function updateVoyage(dt) {
       if (v.phase === 'sail') {
         // Things worth saying on the way round, once each.
         const say = (n, text) => { if (voyageSaid < n) { voyageSaid = n; addLog('', text, 'sys'); } };
-        if (v.u > 0.2) say(1, 'From out here the whole island fits in one look.');
-        if (v.u > 0.47) say(2, skyNow.dark > 0.55 ? 'The fire is a small warm light across the water.' : 'There is the dock, and the hill behind it.');
-        if (v.u > 0.75) say(3, 'She is turning for home.');
+        if (seenDest === 1) { if (v.u > 0.25) say(1, 'The island gets small behind you. From out here the whole of it fits in one look.'); if (v.u > 0.6) say(2, FAR ? 'East, where the sea meets the sky, there is a smudge with a thread of smoke over it. Home.' : 'West, where the sea meets the sky, there is a dark line. It has a tower on it, with no light.'); if (v.u > 0.86) say(3, 'The swell gets longer out here. She puts her nose into it and keeps going.'); }
+        else if (seenDest === 2) { if (v.u > 0.15) say(1, FAR ? 'It comes up out of the haze: cliffs, a hill with a flat top, and a tower with no light.' : 'There is the fire. Somebody has kept it burning.'); if (v.u > 0.7) say(2, 'She is coming in. There is the dock.'); }
+        else if (v.u > 0.2) say(1, 'From out here the whole island fits in one look.');
+        if (!seenDest && v.u > 0.47) say(2, skyNow.dark > 0.55 ? 'The fire is a small warm light across the water.' : 'There is the dock, and the hill behind it.');
+        if (!seenDest && v.u > 0.75) say(3, 'She is turning for home.');
         if (Math.floor(t * 1.4) !== Math.floor((t - dt) * 1.4)) world.ripple(v.pose.x - v.pose.hx * 2.6, v.pose.z - v.pose.hz * 2.6);
       }
     }
@@ -1301,7 +1341,7 @@ function updateVoyage(dt) {
   const n = voyageCrew.length, full = n >= yard.crewMax;
   const line = !show ? '' : v.phase === 'board'
     ? `${voyage ? 'In the boat' : 'The boat is going out'}|${n} aboard|${voyage ? 'Step ashore' : full || game || party || boatDist() > 4.2 ? '' : 'Climb in'}`
-    : `${voyage ? 'Sailing round the island' : 'The boat is out'}|${n} aboard|`;
+    : `${seenDest === 2 ? (voyage ? 'Coming in to land' : 'The boat is coming in') : seenDest === 1 ? (voyage ? `Sailing for ${OTHER_SHORT}` : `The boat has left for ${OTHER_SHORT}`) : voyage ? 'Sailing round the island' : 'The boat is out'}|${n} aboard|`;
   if (line) {
     el.hidden = false;
     $('game-time').textContent = clockText(v.left);
@@ -1399,6 +1439,7 @@ function askFriend(pid, name) {
   friendInvite = null;
 }
 function onSocial(m) {
+  if (m.t === 'saved') { onKept(m); return; }
   if (m.t === 'friends') { friends = Array.isArray(m.friends) ? m.friends : []; friendAsks = Array.isArray(m.asks) ? m.asks : []; withShown = ''; showFriendsCount(); if (!$('sheet').hidden && $('sheet-title').textContent === 'Friends') openFriends(); }
   if (m.t === 'friends' && m.first) {
     const hereNow = friends.filter((f) => f.here).map((f) => f.name.replace(/ #\d{4}$/, ''));
@@ -1523,7 +1564,7 @@ function callOut() {
   if (t - lastCallAt < 2.8) return;
   lastCallAt = t;
   audio.call(SPECIES[me.species].call, 1);
-  playEmote('call');
+  playEmote('call'); if (FAR) tellEvent('call', 1);
   const answering = answerTo && t < answerTo.until ? answerTo : null;
   noteCall(null, me.x, me.z);
   if (answering) {
@@ -1541,6 +1582,7 @@ function greet(av, name) {
   playEmote('greet');
   addLog('', `You greet ${name}.`, 'sys');
   if (av === critters.cow) critters.moo();
+  if (av === keeper && wide && wide.greeted('keeper', (l) => { keeper.play('greet'); keeperSays(l); keeperNext = Math.max(keeperNext, t + 30); })) return;
   if (av === keeper) setTimeout(() => { keeper.play('greet'); keeperSays(askedBy('keeper') || keeperHello()); keeperNext = Math.max(keeperNext, t + 30); }, 700);
 }
 
@@ -1665,9 +1707,10 @@ function presenceState() {
     v: 1, n: me.name, k: myCode, s: me.species, c: me.palette, t: originText(),
     x: Math.round(me.x * 100) / 100, z: Math.round(me.z * 100) / 100, r: Math.round(me.targetYaw * 100) / 100,
     st: me.mode === 'sit' ? 1 : me.mode === 'lie' ? (stargazing ? 3 : 2) : 0, se: mySeat,
+    sh: wide && wide.shelfIdx ? wide.shelfIdx() : undefined,
     m: sayMsg, e: emoteMsg, h: held, tl: Math.round(warmth * 10) / 10, w: Math.round(wet * 10) / 10, b: hasButterfly ? 1 : 0, zz: asleepSince, nv: nights,
     fr: fireRec.stamp ? [Math.round(fireRec.fuel * 1000) / 1000, fireRec.at] : null,
-    lp: lamp ? 1 : 0, wr: wearList(), ev: myEvent, it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0] : null, sv: sailed, cf: fires.count, jn: journalCount(), gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
+    lp: lamp ? 1 : 0, wr: wearList(), ev: myEvent, it: myIt, tg: myTag, gm: game, ti: myInvite, kp: keeperWire(), dn: party, vy: voyage ? [voyage, voyageCast, voyageSeated ? 1 : 0, voyageDest] : null, sv: sailed, cf: fires.count, jn: journalCount(), gs: myGesture, mu: mutedUntil > timeNow() ? mutedUntil : 0,
   };
 }
 const net = createNet({
@@ -1971,6 +2014,9 @@ window.addEventListener('keydown', (e) => {
   if (k === 'f' && actions[2]) { actions[2].run(); return; }
   if (k === '1') { callOut(); return; }
   if (k === '2') { playEmote('hop'); return; }
+  if (k === '7') { dance(); return; }
+  if (k === '8') { playEmote('greet'); return; }
+  if (k === '9') { pointAt(); return; }
   if (k === '3') { playEmote('shake'); return; }
   if (k === '4') { playEmote('wag'); return; }
   if (k === '5') { toggleRest('sit'); return; }
@@ -2062,6 +2108,14 @@ function toggleRest(kind) {
 }
 $('emote-call').addEventListener('click', callOut);
 $('emote-hop').addEventListener('click', () => playEmote('hop'));
+// A dance: three hops and a turn with each. Other visitors see the hops and the turns as they come.
+function dance() { if (me.mode !== 'stand') return; for (let i = 0; i < 4; i++) setTimeout(() => { me.targetYaw += Math.PI / 2; playEmote(i % 2 ? 'wag' : 'hop'); pushPresence(true); }, i * 520); questEvent('danced'); }
+$('emote-dance').addEventListener('click', dance);
+// Pointing: turn to face whatever the arrow at the top of the screen is leading to, and hold a paw out at it. Others are told.
+function pointAt() { if (me.mode !== 'stand') return; const g = findGoal(); if (g && g.at && g.at !== me) me.targetYaw = Math.atan2(g.at.x - me.x, g.at.z - me.z); playEmote('paw'); pushPresence(true); if (FAR) tellEvent('point', 1); addLog('', g && g.at && g.at !== me ? 'You point the way you are going.' : 'You point.', 'sys'); }
+$('emote-point').addEventListener('click', pointAt);
+$('emote-wave').addEventListener('click', () => playEmote('greet'));
+$('unstick').addEventListener('click', () => { const a = areaAt(me.x, me.z); tally('stuck:' + (a ? a.id : ISLE)); me.x = SPAWN.x; me.z = SPAWN.z; moveTarget = null; world.hideMarker(); if (me.mode !== 'stand') standUp(); pushPresence(true); for (const d of document.querySelectorAll('dialog[open]')) d.close(); addLog('', FAR ? 'You are back at the Landing. Sorry about that. It has been noted, without your name.' : 'You are back on the beach. Sorry about that. It has been noted, without your name.', 'sys'); });
 $('emote-shake').addEventListener('click', () => playEmote('shake'));
 $('emote-wag').addEventListener('click', () => playEmote('wag'));
 $('emote-sit').addEventListener('click', () => toggleRest('sit'));
@@ -2069,6 +2123,9 @@ $('emote-lie').addEventListener('click', () => toggleRest('lie'));
 $('action').addEventListener('click', () => { if (actions[0]) actions[0].run(); });
 $('action2').addEventListener('click', () => { if (actions[1]) actions[1].run(); });
 $('action3').addEventListener('click', () => { if (actions[2]) actions[2].run(); });
+// On a small screen the words along the top fold away under one.
+$('btn-menu').addEventListener('click', () => { const open = $('tools').classList.toggle('open'); $('btn-menu').setAttribute('aria-expanded', open ? 'true' : 'false'); });
+$('tools').addEventListener('click', () => { $('tools').classList.remove('open'); $('btn-menu').setAttribute('aria-expanded', 'false'); });
 const toggle = (btn, on) => { btn.setAttribute('aria-pressed', on ? 'true' : 'false'); };
 $('btn-sound').addEventListener('click', () => { audio.start(); audio.setSound(!audio.soundOn); toggle($('btn-sound'), audio.soundOn); $('btn-sound').textContent = audio.soundOn ? 'Sound on' : 'Sound off'; });
 $('btn-music').addEventListener('click', () => { audio.start(); audio.setMusic(!audio.musicOn); toggle($('btn-music'), audio.musicOn); $('btn-music').textContent = audio.musicOn ? 'Music on' : 'Music off'; });
@@ -2150,6 +2207,7 @@ $('name-form').addEventListener('submit', (e) => {
 // and step ashore by yourself when your turn comes.
 let asking = false;
 const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+if (arriving) setTimeout(() => { if (!entered) $('enter').click(); }, 900);
 $('enter').addEventListener('click', () => {
   if (entered || asking) return;
   asking = true;
@@ -2163,7 +2221,7 @@ $('enter').addEventListener('click', () => {
   // The guest account, if there is one, is how the island knows you from visit to visit. A moment is allowed for it.
   net.guest().then((g) => g, () => null).then((g) => { if (g && g.token) info.tok = g.token; startJoin(); });
   const startJoin = () => net.join((q) => {
-    if (q.state === 'in') { store('ember.day', utcDay); store('ember.been', true); comeAshore(q); return; }
+    if (q.state === 'in') { store('ember.day', utcDay); store('ember.been', true); comeAshore(q); setTimeout(() => net.social({ t: 'load' }), 1500); return; }
     if (q.state === 'out') { leaveIsland('tide'); return; }
     if (entered) return;
     $('queue-text').textContent = q.pos === 1 ? 'The island is full. You are next in line.' : `The island is full. You are ${nth(q.pos)} in line.`;
@@ -2216,14 +2274,16 @@ setInterval(() => {
 
 function comeAshore(q = {}) {
   if (entered) return;
-  entered = true;
+  entered = true; setTimeout(() => tally('enter:' + ISLE), 4000);
   lastInputAt = timeNow();
   $('hint').textContent = '';
   $('queue').hidden = true;
   store('ember.identity', identity);
   document.body.classList.add('playing');
   me.targetYaw = Math.atan2(FIRE.x - SPAWN.x, FIRE.z - SPAWN.z);      // turn to face the fire
-  addLog('', FAR ? 'You step onto a shore nobody has mapped. A camp fire is burning up the path.' : (quests.cold ? 'You come ashore again. The fire is still burning.' : 'You wash ashore on a small island. Someone has kept a fire burning here for a long time.'), 'sys');
+  if (arriving) { voyage = arriving.id; voyageCast = Math.max(arriving.cast, timeNow() - ARRIVE_MS * 0.5); voyageDest = seenDest = 2; voyageSeated = true; voyageSaid = 0; setMode('sit'); const st = yard.seat(arriving.seat || 0); me.x = st.x; me.z = st.z; pushPresence(true); }
+  if (arriving && voyage) addLog('', FAR ? 'Water on every side, and ahead of her a dark shore coming up out of the haze.' : 'Water on every side, and ahead of her a thread of smoke: the fire on the first island.', 'sys');
+  else addLog('', FAR ? 'You step onto a shore nobody has mapped. A camp fire is burning up the path.' : (quests.cold ? 'You come ashore again. The fire is still burning.' : 'You wash ashore on a small island. Someone has kept a fire burning here for a long time.'), 'sys');
   // When to find company: said to everyone on arrival, since the beach is often empty.
   setTimeout(() => { if (entered) addLog('', campLine(), 'sys'); }, 3500);
   // Signs of the others: how many have been here today, and whose tracks are still on the ground.
@@ -2292,6 +2352,7 @@ function updateActions() {
       if (dd < 4.2 && L && bag[L.kind] > 0) opts.unshift({ label: `Set down your ${L.many} for the tower`, run: giveToTower });
       if (dd < 3.2) opts.push({ label: 'Climb the tower', run: climbTower, side: opts.length > 0 });
     }
+    if (FAR && !perch) { const w = world.ways.find((q) => Math.hypot(q.x - me.x, q.z - me.z) < 2.3); if (w) opts.push(waysLit.has(w.id) ? { label: 'Follow the lit way', run: () => travelFrom(w) } : { label: 'Light the lantern', run: () => lightWay(w) }); }
     if (FAR && Math.hypot(MAP_BOARD.x - me.x, MAP_BOARD.z - me.z) < 3.4) opts.unshift({ label: 'Look at the map', run: lookAtMap });
     if (FAR && Math.hypot(world.hermit.x - me.x, world.hermit.z - me.z) < 3.3) { opts.unshift({ label: lamp ? 'Give back the lantern' : 'Ask for the lantern', run: askLantern }, { label: 'Greet the Hermit', run: greetHermit, side: true }); }
     if (FAR && Math.hypot(world.heron.x - me.x, world.heron.z - me.z) < 3.6) opts.push({ label: 'Greet the Lamplighter', run: greetHeron, side: opts.length > 0 });
@@ -2303,7 +2364,7 @@ function updateActions() {
     if (FAR && Math.hypot(SEAT.x + 1 - me.x, SEAT.z - me.z) < 2.6) opts.push({ label: 'Sit in the stone seat', run: sitInSeat });
     if (FAR && caveNow < 0.5) { const si = world.stones.findIndex((st) => Math.hypot(st.x - me.x, st.z - me.z) < 2.3); if (si >= 0) opts.push({ label: 'Touch the standing stone', run: () => touchStone(si) }); }
     if (FAR && caveNow > 0.5 && Math.hypot(world.echo.mark.x - me.x, world.echo.mark.z - me.z) < 3.4) opts.push({ label: 'Look at the mark on the rock', run: lookAtMark });
-    if (FAR && caveNow > 0.5) { const pn = world.paintings.find((q) => Math.hypot(q.x - me.x, q.z - me.z) < 3.6); if (pn && litNow()) opts.push({ label: 'Look at the painted stone', run: () => lookAtStone(pn) }); else if (pn && !stoneHint) { stoneHint = true; addLog('', 'There is something on this stone. It is too dark to make out.', 'sys'); } }
+    if (FAR && caveNow > 0.5) { const pn = world.paintings.find((q) => Math.hypot(q.x - me.x, q.z - me.z) < 3.6 && (q.id !== 'west' || (wide && wide.S.fourth))); if (pn && litNow()) opts.push({ label: 'Look at the painted stone', run: () => lookAtStone(pn) }); else if (pn && !stoneHint) { stoneHint = true; addLog('', 'There is something on this stone. It is too dark to make out.', 'sys'); } }
     if (!FAR && Math.hypot(POST.x - me.x, POST.z - me.z) < 2.3) opts.push({ label: 'Read the carved post', run: readPost });
     if (!FAR && !journal.lens && Math.hypot(LENS.x - me.x, LENS.z - me.z) < 2.1) opts.push({ label: 'See what is in the sand', run: findLens });
     if (!FAR && Math.hypot(CHEST.x - me.x, CHEST.z - me.z) < 1.9) opts.push({ label: 'Try the chest', run: tryChest });
@@ -2317,6 +2378,7 @@ function updateActions() {
     if (bottleSpot && Math.hypot(me.x - bottleSpot.x, me.z - bottleSpot.z) < 2.0) opts.push({ label: bottle.kind === 'reply' ? 'Dig up the bottle that came back' : 'Dig up the bottle', run: openBottle });
     if (Math.hypot(me.x - CRATE.x, me.z - CRATE.z) < 2.0) opts.push({ label: 'Send a bottle out to sea', run: openWriteNote });
     if (Math.hypot(me.x - HILL.x, me.z - HILL.z) < 2.8) opts.push({ label: skyNow.dark > 0.6 ? 'Lie down and watch the stars' : rainNow > 0.3 ? 'Lie down and watch the rain' : 'Lie back and watch the sky', run: () => { me.x = HILL.x - 0.2; me.z = HILL.z + 0.1; me.targetYaw = 0.4; setMode('lie', -1, true); camYaw = 0.5; pushPresence(true); } });
+    if (wide) wide.options(opts);
     if (FAR && !perch) {      // gathering for the tower comes after whatever else is in reach, so that it never hides it
       const sc = world.sources.find((q) => Math.hypot(q.x - me.x, q.z - me.z) < (q.tide ? 6 : 2.6) && (!q.cave || caveNow > 0.5) && (!q.tide || tideAt(timeNow()).y < TIDE.flat - 0.14));
       if (sc) opts.push({ label: LIGHT.find((l) => l.kind === sc.kind).take, run: () => takeFrom(sc) });
@@ -2342,8 +2404,10 @@ function updateActions() {
     const boarding = voyageNow && voyageNow.phase === 'board';
     main = boarding && voyageNow.left > 4 ? { label: 'Cast off now', run: castOff } : null;
     alt = boarding ? { label: 'Step back ashore', run: () => leaveBoat() } : null;
-  } else if (boatBuilt() && !FAR && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2 && (!seenVoyage || (voyageNow && voyageNow.phase === 'board' && voyageCrew.length < yard.crewMax))) {
-    if (!alt) alt = main; main = { label: seenVoyage ? 'Climb into the boat' : 'Take the boat out', run: boardBoat };
+  } else if (boatBuilt() && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2 && (!seenVoyage || (voyageNow && voyageNow.phase === 'board' && voyageCrew.length < yard.crewMax))) {
+    // She can go once round the island (from the first island) or across to the other one. Whoever calls her says which; the rest climb in.
+    if (seenVoyage) { if (!alt) alt = main; main = { label: seenDest === 1 ? `Climb in: she is bound for ${OTHER_SHORT}` : 'Climb into the boat', run: () => boardBoat() }; }
+    else { main = { label: FAR ? 'Sail the boat home' : 'Sail for the far shore', run: () => boardBoat(1) }; alt = FAR ? alt : { label: 'Take the boat out round the island', run: () => boardBoat(0) }; }
   }
   // A dance at the fire: start one when resting there in company, join one that is going, step out of yours.
   if (voyage) { /* nothing else from a seat in the boat */ }
@@ -2423,13 +2487,14 @@ const caveGlow = new THREE.PointLight(0xbfe8ff, 0, 9, 1.6); caveGlow.position.se
 const hermit = FAR ? new Avatar({ species: 5, palette: 0, name: 'Hermit', sub: 'lives in the hill' }) : null;
 if (hermit) addMark(hermit.group, 'The Hermit', 2.6);
 let lamp = false, hermitNext = 20, stoneHint = false;
-const stonesSeen = () => world.paintings.filter((pn) => pn.seen).length;
+const stonesSeen = () => world.paintings.filter((pn) => pn.seen && pn.id !== 'west').length;
 if (hermit) { hermit.parts.rig.visible = false; hermit.shadow.visible = false; hermit.mode = 'stand'; scene.add(hermit.group); for (const id of store('ember.stones') || []) { const pn = world.paintings.find((q) => q.id === id); if (pn) pn.seen = true; } }
 function hermitSays(line) { hermit.say(line); addLog('Hermit', line, 'sys'); hermitNext = Math.max(hermitNext, t + 30); }
 const HERMIT_LINES = ['Mind your head in there.', 'I do not get many callers. I did not think I minded.', 'The small lights on the roof are alive. Do not ask me how.', 'It goes right through, if you keep on. Comes out above the far beach.', 'There is a round room further in. It likes voices. More than one, if you have them.', 'I had a garden once, over in the valley. I still go, when nobody is looking.'];
 function greetHermit() {
   questEvent('hermit');
   me.targetYaw = Math.atan2(world.hermit.x - me.x, world.hermit.z - me.z); playEmote('greet'); addLog('', 'You greet the Hermit.', 'sys');
+  if (wide && wide.greeted('hermit', hermitSays)) return;
   const n = stonesSeen(), asked = askedBy('hermit');
   if (asked) { setTimeout(() => hermitSays(asked), 700); return; }
   setTimeout(() => hermitSays(n >= 3 ? ['So you have seen them. I painted them so that I would not be the only one who knew.', 'He was my friend, the keeper. So was the otter. One went into the sea and one went east, and I went into the hill.', 'If you ever see him, tell him the tower is still standing. Most of it.'][hermitTold++ % 3]
@@ -2446,6 +2511,7 @@ function askLantern() {
 function lookAtStone(pn) {
   me.targetYaw = Math.atan2(pn.x - me.x, pn.z - me.z);
   const first = !pn.seen; pn.seen = true; store('ember.stones', world.paintings.filter((q) => q.seen).map((q) => q.id));
+  if (pn.id === 'west') { questEvent('fourth'); openSheet({ title: pn.title, lines: [{ text: pn.text }], note: 'Painted after everyone on the island had told what they saw.' }); return; }
   openSheet({ title: pn.title, lines: [{ text: pn.text }], note: stonesSeen() >= 3 ? 'That is all three. The Hermit might have something to say about them.' : `${stonesSeen()} of 3 stones seen.` });
   if (first && stonesSeen() >= 3) { const A = CAVE.pts[1]; setTimeout(() => wantStamp('paintings', [A[0] + 4.6, me.y + 2.2, A[1] + 4.2], [A[0] - 2.4, me.y + 1.5, A[1] - 3.4]), 400); }
 }
@@ -2521,6 +2587,7 @@ const HERON_LINES = ['One stone a day. Some days the wind takes it back.', 'She 
 function greetHeron() {
   questEvent('heron');
   me.targetYaw = Math.atan2(world.heron.x - me.x, world.heron.z - me.z); playEmote('greet'); addLog('', 'You greet the Lamplighter.', 'sys');
+  if (wide && wide.greeted('heron', heronSays)) return;
   const asked = askedBy('heron'); if (asked) { setTimeout(() => heronSays(asked), 700); return; }
   const lines = [];
   if (journal.lens) lines.push('You found a lens? On his beach? Then it was not lost. Then there is a point to all this.');
@@ -2571,7 +2638,7 @@ function stoneNote(i, mine) {
   tuneKnown = true; store('ember.tune', true); tuneAt = 0;
   setTimeout(() => { TUNE.concat([4, 1]).forEach((n, k) => setTimeout(() => sound(n), k * 260)); }, 900);
   setTimeout(() => {
-    flash('The keeper\'s tune', 'The stones remember it'); cutTo([HILL.x + 13, me.y + 6.5, HILL.z + 4], [LIGHTHOUSE.x, LIGHTHOUSE.y + 6, LIGHTHOUSE.z], 7);
+    flash('The keeper\'s tune', 'The stones remember it'); moment('Somebody stood here and whistled this every night, so that boats could find the shore.'); cutTo([HILL.x + 13, me.y + 6.5, HILL.z + 4], [LIGHTHOUSE.x, LIGHTHOUSE.y + 6, LIGHTHOUSE.z], 7);
     addLog('', 'The whole ring sounds at once, and the tune goes out over the island towards the broken tower. Somebody stood here and whistled this every night, so that it would carry.', 'sys');
     setTimeout(() => wantStamp('stones', [HILL.x + 12, me.y + 4.6, HILL.z + 7], [HILL.x - 1, me.y + 1.6, HILL.z - 1]), 7600);
   }, 1500);
@@ -2592,7 +2659,7 @@ function echoCall(x, z) {
     echoOpen = true; store('ember.echo', true); world.setEchoOpen(true);
     const B = CAVE.pts[2], D = E.door, y = groundHeight(B[0], B[1]);
     cutTo([B[0] + (B[0] - D.x) * 0.35, y + 2.3, B[1] + (B[1] - D.z) * 0.35], [D.x, y + 2.2, D.z], 6.5);
-    flash('The hill answers', 'A door is opening'); audio.pop(300); setTimeout(() => audio.pop(240), 500);
+    flash('The hill answers', 'A door is opening'); moment('The hill answers. It was made for more than one voice.', 6); audio.pop(300); setTimeout(() => audio.pop(240), 500);
     addLog('', 'All three crystals are ringing at once. The sound gathers in the middle of the chamber, and under it something heavy begins to move.', 'sys');
   } else if (echoHint < 2) { echoHint = 2; addLog('', 'The crystal takes your voice and holds it, ringing. A ring of light comes up on the stone door. There are three rings, and three crystals, and this one will not ring for long.', 'sys'); }
 }
@@ -2606,6 +2673,12 @@ function lookAtMark() {
   ], note: 'The clay has been dry a long time. But the storm was longer ago than that.' });
 }
 // A short look elsewhere: the camera leaves the visitor, shows something, and comes back.
+// A moment the story turns on: the picture is given dark bars top and bottom and a line is held on it.
+function moment(line, secs = 7) {
+  const el = $('moment'); if (!el) return;
+  el.querySelector('span').textContent = line; el.hidden = false; requestAnimationFrame(() => el.classList.add('on'));
+  clearTimeout(moment.t); moment.t = setTimeout(() => { el.classList.remove('on'); setTimeout(() => { el.hidden = true; }, 900); }, secs * 1000);
+}
 function cutTo(pos, look, secs) { scene3 = { pos: new THREE.Vector3(...pos), look: new THREE.Vector3(...look), from: performance.now(), ms: secs * 1000 }; }
 function updateHermit(dt) {
   const H = world.hermit, d = Math.hypot(me.x - H.x, me.z - H.z);
@@ -2618,7 +2691,7 @@ function updateHermit(dt) {
   if (lamp && Math.hypot(me.x - CAVE.pts[1][0], me.z - CAVE.pts[1][1]) > 85) { lamp = false; addLog('', 'The lantern is not yours to carry off. You turn round, and it is back on its hook at the mouth of the cave.', 'sys'); }
   if (me.parts && me.parts.lantern) me.parts.lantern.visible = lamp || nights >= 7;
   lampLight.intensity = lamp ? 7 : nights >= 7 ? 4 : 0; lampLight.distance = lamp ? 17 : 9;
-  for (const pn of world.paintings) if (pn.mat) { const pd = Math.hypot(me.x - pn.x, me.z - pn.z); pn.mat.opacity = lerp(pn.mat.opacity, litNow() ? 0.06 + 0.94 * (1 - smoothstep(4.5, 10, pd)) : 0.035, 1 - Math.exp(-dt * 3)); }
+  for (const pn of world.paintings) if (pn.mat) { const pd = Math.hypot(me.x - pn.x, me.z - pn.z); pn.mat.opacity = lerp(pn.mat.opacity, pn.id === 'west' && !(wide && wide.S.fourth) ? 0 : litNow() ? 0.06 + 0.94 * (1 - smoothstep(4.5, 10, pd)) : 0.035, 1 - Math.exp(-dt * 3)); }
 }
 function wantStamp(id, pos, look) {
   if (cards[id] || cardWanted || !entered || Date.now() - cardAt < 12000 || !MY_SIGHTS.some((sg) => sg.id === id)) return;
@@ -2690,7 +2763,7 @@ function updateSights() {
     if (onTop && !summitSaid) {
       summitSaid = true;
       addLog('', 'This is the top. The whole island lies under you: the woods, the hidden valley, the broken tower on its point, and sea on every side.', 'sys');
-      if (!named) { named = true; store('ember.named', true); setTimeout(() => { flash('Lantern Rock', 'The island has its name again'); addLog('', 'The Mapmaker calls it the far shore, because he had no other name for it. But there is one cut into an old post on the island you came from: Lantern Rock.', 'sys'); showIsleName(); showMap(); }, 3200); }
+      if (!named) { named = true; store('ember.named', true); setTimeout(() => { flash('Lantern Rock', 'The island has its name again'); moment('Lantern Rock. The island has its name again.'); cutTo([SUMMIT.x + 14, me.y + 7, SUMMIT.z + 9], [LIGHTHOUSE.x, LIGHTHOUSE.y + 8, LIGHTHOUSE.z], 7); addLog('', 'The Mapmaker calls it the far shore, because he had no other name for it. But there is one cut into an old post on the island you came from: Lantern Rock.', 'sys'); showIsleName(); showMap(); }, 3200); }
       else { const top = prints['s-summit']; if (top && !top.mine) addLog('', `${fullName(top.name, top.code)} stood here before anyone, and remembered the name cut into the old post across the water. That is why the map says Lantern Rock.`, 'sys'); }
     }
     if (!cards.summit && onTop) wantStamp('summit', [SUMMIT.x + 7.5, gy + 3.4, SUMMIT.z - 4], [SUMMIT.x - 10, gy - 4, SUMMIT.z + 6]);
@@ -2753,8 +2826,11 @@ function openJournal(tab = journalTab) {
   const lines = [];
   if (tab === 'quests') {
     for (const c of MY_CHAPTERS) {
+      if (c.company && !withCompany() && !c.quests.some((q) => quests[q.id])) continue;
+      // On Lantern Rock the page shows the story, and of everything else only what has been asked of the visitor or done.
+      if (FAR && c.side) { const mine = c.quests.filter((q) => quests[q.id] || taken[q.id] || (!GIVER[q.from] && q.on && seenKeys && q.on.some((k) => seenKeys[k]))); if (!mine.length) continue; lines.push({ text: c.title, kind: 'head' }); for (const q of mine) lines.push(quests[q.id] ? { text: q.title, meta: `${q.tells} · ${stampDate(quests[q.id])}` } : { text: q.title, meta: `${q.from} asks: ${lower(questAsk(q))}.` }); continue; }
       if (!chapterOpen(c)) { lines.push({ text: c.side ? c.title : 'A later chapter', kind: 'head' }); lines.push({ text: 'Not yet', meta: 'Finish what came before.' }); continue; }
-      lines.push({ text: `${c.title} · ${c.quests.length - chapterLeft(c)} of ${c.quests.length}`, kind: 'head' });
+      lines.push({ text: FAR ? c.title : `${c.title} · ${c.quests.length - chapterLeft(c)} of ${c.quests.length}`, kind: 'head' });
       for (const q of c.quests) {
         if (quests[q.id]) lines.push({ text: q.title, meta: `${q.tells} · ${stampDate(quests[q.id])}` });
         else lines.push({ text: q.title, meta: q.needsBoat && !boatBuilt() ? 'When the boat is built.' : `${q.from} asks: ${lower(questAsk(q))}.` });
@@ -2788,7 +2864,7 @@ function openJournal(tab = journalTab) {
   }
   const got = MY_SIGHTS.filter((sg) => cards[sg.id]).length;
   openSheet({ title: tab === 'quests' ? 'Quests' : tab === 'satchel' ? 'Your satchel' : 'Your journal', lines, note: tab === 'stamps' ? (MY_SIGHTS.length ? `${got} of ${MY_SIGHTS.length} sights on ${ISLE_NAME[ISLE]}. Each card is the place as it was when you stood there.` : 'No sights have been marked on this shore yet.')
-    : tab === 'quests' ? `${questsDone()} of ${MY_STORY.length} quests done on ${ISLE_NAME[ISLE]}.` : tab === 'satchel' ? 'What you carry goes with you from island to island. Press a page to read it again.' : `${journalCount()} of ${myFinds().length} found. Some things only show at night, in rain, or at campfire hour.` });
+    : tab === 'quests' ? (FAR ? 'The story is here, and whatever you have been asked. The ones who live on the island have more to ask: go and meet them.' : `${questsDone()} of ${countedStory().length} quests done on ${ISLE_NAME[ISLE]}.${withCompany() ? '' : ' Quests for company show when somebody else is ashore.'}`) : tab === 'satchel' ? 'What you carry goes with you from island to island. Press a page to read it again.' : `${journalCount()} of ${myFinds().length} found. Some things only show at night, in rain, or at campfire hour.` });
   sheet.dataset.kind = 'journal';
   const body = $('sheet-body');
   // Three plain words across the top to turn between the parts.
@@ -2859,7 +2935,8 @@ function updateArea() {
   if (id && id !== areaNow) { flash(a.name); addLog('', id === 'flats' ? `${a.name}. ${tideWords()}` : `${a.name}.`, 'sys'); }
   if (id) areaNow = id;
   if (id && !walked.has(id)) { walked.add(id); store('ember.walked', [...walked]); showMap(); }
-  claimFirsts(); smallThings(); caveRooms();
+  if (id && id !== 'landing') claimToday('a-' + id);
+  claimFirsts(); smallThings(); caveRooms(); keepProgress();
 }
 
 // ---------- the satchel ----------
@@ -2913,6 +2990,7 @@ function openChest(c) {
   me.targetYaw = Math.atan2(c.x - me.x, c.z - me.z);
   if (opened.has(c.id)) { addLog('', 'The chest is open and empty. What was in it is in your satchel.', 'sys'); return; }
   if (c.when === 'night' && skyNow.dark < 0.55) { playEmote('paw'); addLog('', 'The lid will not lift. There is a moon cut into the lock, and the lock is cold. Perhaps it wants the dark.', 'sys'); questEvent('chestshut'); return; }
+  if (c.when === 'two' && ![...peers.values()].some((q) => q.fade > 0.5 && Math.hypot(q.av.x - c.x, q.av.z - c.z) < 4.5)) { playEmote('paw'); addLog('', 'There is a handle at each end, and the lid is far too heavy for one. It wants another animal on the other handle.', 'sys'); questEvent('chestshut'); return; }
   if (c.when === 'lowtide' && tideAt(timeNow()).y > TIDE.flat - 0.14) { addLog('', 'The sea is over it. It will have to wait for the tide.', 'sys'); return; }
   if (c.needs && !inv[c.needs]) { playEmote('paw'); audio.step('wood', 0.9); addLog('', `Locked. The lock is brass and the keyhole is ${c.needs === 'key_cottage' ? 'small' : c.needs === 'key_islet' ? 'green with salt' : c.needs === 'key_summit' ? 'long and narrow' : 'wide and black'}. The key is somewhere on this island.`, 'sys'); questEvent('chestshut'); return; }
   if (c.needs) { inv[c.needs]--; if (inv[c.needs] <= 0) delete inv[c.needs]; store('ember.inv', inv); addLog('', `${ITEMS[c.needs].name} turns in the lock, and stays there.`, 'sys'); }
@@ -2959,6 +3037,7 @@ function pickPage(i) {
   addLog('', 'A page of stiff paper under a pebble, torn down one edge. The ink has held. It goes into your satchel.', 'sys');
   found('logpage', true);
   const [title, text] = LOGBOOK[i];
+  if (logs.length >= LOGBOOK.length) setTimeout(() => moment('He did not leave because he gave up. He left to look for his friend.', 8), 5000);
   setTimeout(() => openSheet({ title, lines: [{ text }], note: logs.length >= LOGBOOK.length ? 'That is all six. The whole of it is in your satchel.' : `${logs.length} of ${LOGBOOK.length} pages found. They keep in your satchel.` }), 500);
 }
 let stillAt = 0, poolLooks = 0;
@@ -2982,9 +3061,10 @@ function lookInPool() {
 let myEvent = null;
 function tellEvent(kind, n) { myEvent = [kind, n, timeNow()]; pushPresence(true); }
 const lampPeer = (r) => [...peers.values()].find((q) => q.fade > 0.5 && q.data.lamp && Math.hypot(q.av.x - me.x, q.av.z - me.z) < r) || null;
-const litNow = () => lamp || !!lampPeer(7);
+const litNow = () => lamp || !!lampPeer(7) || !!(wide && wide.boosted && wide.boosted('eyes'));
 function heardEvent(d) {
   if (!FAR) return;
+  if (wide) wide.hear(d);
   if (d.ev.kind === 'bell') {
     const B = world.flats.bell, v = Math.max(0.12, hearFrom(B.x, B.z, 260)); world.ringBell(); audio.bell(v); setTimeout(() => audio.bell(v * 0.8), 620);
     if (v < 0.9) addLog('', `From the flats, a bell: two strokes, clear over the water. ${d.name} is out on the islet.`, 'sys');
@@ -3084,12 +3164,13 @@ if (FAR) saved.watchLight((totals, state, crew) => {
   const was = lightState === 'loading' ? -1 : lightStage();
   lightTotals = { stone: 0, timber: 0, glass: 0, oil: 0, ...totals }; lightState = state; if (crew) lightCrew = crew;
   const now = lightStage();
-  world.setLightStage(now);
+  world.setLightStage(now); showStock();
   if (was >= 0 && now > was && entered) stageDone(now - 1);
 });
+function showStock() { const L = LIGHT[lightStage()]; world.setStock(L ? L.kind : '', L ? Math.min(1, (lightTotals[L.kind] || 0) / L.need) : 0); }
 function stageDone(k) {
   const L = LIGHT[k], T = LIGHTHOUSE;
-  flash(L.done, L.sub); audio.pop(620); setTimeout(() => audio.pop(820), 350);
+  flash(L.done, L.sub); moment(`${L.done}. Everyone who carried ${L.many} to the point did this.`); audio.pop(620); setTimeout(() => audio.pop(820), 350);
   addLog('', `${L.done}. ${L.sub}. Everyone who carried ${L.many} to the point did this.`, 'sys');
   if (!perch && caveNow < 0.5) cutTo([T.x + 26, T.y + 13, T.z + 20], [T.x, T.y + 13, T.z], 7);
   if (k + 1 < LIGHT.length) setTimeout(() => addLog('Lamplighter', LIGHT[k + 1].says + ' ' + LIGHT[k + 1].where, 'sys'), 7500);
@@ -3117,7 +3198,7 @@ function giveToTower() {
   playEmote('paw'); audio.step('wood', 1.3);
   const left = Math.max(0, L.need - (lightTotals[L.kind] || 0) - n);
   addLog('', `You set down ${n === 1 ? L.one : `${n} of ${L.many}`} at the foot of the tower. ${left ? `It wants ${left} more.` : 'That is the last of it.'}`, 'sys');
-  saved.addLight(L.kind, n, me.name, myCode).then((r) => { if (r === 'local') { lightTotals[L.kind] = (lightTotals[L.kind] || 0) + n; const st = lightStage(); world.setLightStage(st); if (st > k) stageDone(k); } });
+  saved.addLight(L.kind, n, me.name, myCode).then((r) => { if (r === 'local') { lightTotals[L.kind] = (lightTotals[L.kind] || 0) + n; const st = lightStage(); world.setLightStage(st); showStock(); if (st > k) stageDone(k); } });
   questEvent('gave');
   setTimeout(() => heronSays(left ? ['That is the way. I lift, you carry.', 'Good. She is taller than she was this morning.', 'Set it there. I know where each one goes.', 'I have waited years for somebody with legs.'][Math.floor(Math.random() * 4)] : 'That is enough. Stand back and let me work.'), 900);
 }
@@ -3129,6 +3210,84 @@ function climbTower() {
 }
 function climbDown() { perch = false; world.setGalleryView(false); me.x = world.lighthouse.door.x + 1.2; me.z = world.lighthouse.door.z; audio.step('wood', 1); addLog('', 'Down again, and out at the foot of the tower.', 'sys'); }
 
+// ---------- waystones ----------
+// A lantern on a post in each part of the island. Light one and you can come back to it from any other that is lit.
+const waysLit = new Set((() => { const v = store('ember.ways'); return Array.isArray(v) ? v : []; })()); waysLit.add('landing');
+for (const id of waysLit) world.setWayLit(id, true);
+function lightWay(w) {
+  me.targetYaw = Math.atan2(w.x - me.x, w.z - me.z); playEmote('paw'); audio.pop(820);
+  waysLit.add(w.id); store('ember.ways', [...waysLit]); world.setWayLit(w.id, true); questEvent('way');
+  flash('A lantern lit', w.name); addLog('', `The wick takes. ${w.name} has a light now, and you can come back to it from any other lantern you have lit. ${waysLit.size} of ${world.ways.length} are burning.`, 'sys');
+}
+function travelFrom(w) {
+  const others = world.ways.filter((q) => q !== w && waysLit.has(q.id));
+  openSheet({ title: 'The lit way', lines: others.length ? others.map((q) => ({ text: q.name, meta: `${Math.round(Math.hypot(q.x - me.x, q.z - me.z))} m off · press to go`, kind: 'pick', run: () => { closeSheet(); if (lamp) { lamp = false; addLog('', 'The Hermit\'s lantern stays behind: it is back on its hook.', 'sys'); } perch = false; me.x = q.x + 1.3; me.z = q.z + 0.9; moveTarget = null; world.hideMarker(); audio.pop(700); flash(q.name, 'By the lit way'); addLog('', `You follow the lit way, and it is shorter than the walk: ${q.name}.`, 'sys'); pushPresence(true); } })) : [{ text: 'No other lantern is lit yet.', meta: 'There is one in every part of the island. Light them as you find them.' }],
+    note: `${waysLit.size} of ${world.ways.length} lanterns lit. A lantern you have lit is a place you can always come back to.` });
+}
+// ---------- first today ----------
+let todays = {}, todayTried = new Set(), todayAt = 0;
+if (FAR) saved.watchToday((list) => { todays = list; });
+function claimToday(key) {
+  if (todays[key] || todayTried.has(key) || Date.now() - todayAt < 6000 || !entered) return;
+  todayTried.add(key); todayAt = Date.now();
+  saved.claimToday(key, me.name, myCode).then((r) => { if (r !== 'ok') return; todays = { ...todays, [key]: { name: me.name, code: '', mine: true } }; if (!prints[key] || (prints[key].mine && Date.now() - prints[key].at < 60000)) return;      // first ever says it better
+    setTimeout(() => { flash('First today', placeName(key)); addLog('', `${placeName(key)}: nobody else has been here yet today.`, 'sys'); }, 2600); });
+}
+// ---------- progress kept by the island ----------
+// What a visitor has done is copied to the island under the number their browser's key gives, so that the same key
+// on another device (or after the browser has been cleared) brings it all back. Pictures are too big to send.
+const KEEP = { quests: 'obj', taken: 'obj', seen: 'obj', firsts: 'obj', finds: 'finds', cards: 'cards', inv: 'max', chests: 'arr', letters: 'arr', logs: 'arr', walked: 'arr', stones: 'arr', ways: 'arr', myLight: 'num', myPlanks: 'num', sailed: 'num', starter: 'num',
+  wide: 'obj', echo: 'flag', tune: 'flag', named: 'flag', whole: 'flag', been: 'flag', wear: 'mine', cairn: 'cairn', fires: 'fires' };
+function packProgress() { const out = {}; for (const k in KEEP) { let v = store('ember.' + k); if (v === null || v === undefined) continue; if (k === 'cards') { const bare = {}; for (const id in v) bare[id] = { ...v[id], img: '' }; v = bare; } out[k] = v; } return JSON.stringify(out); }
+let keptSent = '', keptAt = 0, keptAsked = false;
+function keepProgress() {
+  if (!entered || !keptAsked || Date.now() - keptAt < 25000) return;
+  const d = packProgress(); if (d === keptSent || d.length > 58000) return;
+  keptSent = d; keptAt = Date.now(); net.social({ t: 'save', d });
+}
+// Bring together what this browser has and what the island kept: nothing is ever taken away by it.
+function mergeProgress(theirs) {
+  let changed = false;
+  for (const k in KEEP) {
+    const kind = KEEP[k], a = store('ember.' + k), b = theirs[k]; if (b === null || b === undefined) continue;
+    let out = a;
+    if (kind === 'flag') out = !!a || !!b;
+    else if (kind === 'num') out = Math.max(Number(a) || 0, Number(b) || 0);
+    else if (kind === 'arr') out = [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+    else if (kind === 'mine') out = a && typeof a === 'object' && Object.keys(a).length ? a : b;
+    else if (b && typeof b === 'object') {
+      out = { ...(a && typeof a === 'object' ? a : {}) };
+      for (const id in b) {
+        if (kind === 'max') out[id] = Math.max(Number(out[id]) || 0, Number(b[id]) || 0);
+        else if (kind === 'finds') { const x = out[id], y = b[id]; out[id] = x && y ? { n: Math.max(x.n || 0, y.n || 0), at: Math.min(x.at || Infinity, y.at || Infinity) } : x || y; }
+        else if (kind === 'cairn' || kind === 'fires') { if (typeof b[id] === 'number') out[id] = Math.max(Number(out[id]) || 0, b[id]); else if (out[id] === undefined) out[id] = b[id]; }
+        else if (out[id] === undefined || out[id] === null) out[id] = b[id];
+      }
+    }
+    if (JSON.stringify(out) !== JSON.stringify(a)) { store('ember.' + k, out); changed = true; }
+  }
+  return changed;
+}
+function onKept(m) {
+  keptAsked = true;
+  let theirs = null; try { theirs = m.d ? JSON.parse(m.d) : null; } catch (e) { theirs = null; }
+  if (!theirs || typeof theirs !== 'object') return;
+  keptSent = m.d;
+  let once = false; try { once = sessionStorage.getItem('ember.restored') === '1'; } catch (e) { once = true; }
+  if (mergeProgress(theirs) && !once) { try { sessionStorage.setItem('ember.restored', '1'); } catch (e) { return; } addLog('', 'The island remembers you. Fetching what you had…', 'sys'); setTimeout(() => location.reload(), 900); }
+}
+function useKey(text) {
+  const k = String(text || '').trim().toLowerCase();
+  if (!/^[a-z0-9]{24,40}$/.test(k)) return 'That does not look like an island key. It is a long run of small letters and figures.';
+  if (k === myKey) return 'That is the key this browser already has.';
+  store('ember.key', k); try { sessionStorage.removeItem('ember.restored'); } catch (e) { /* asked again after the reload */ }
+  setTimeout(() => location.reload(), 600); return 'Key taken. Coming ashore again as the visitor it belongs to…';
+}
+{
+  const out = $('key-out'), box = $('key-in'), note = $('key-note');
+  if (out) { out.textContent = myKey; $('key-copy').onclick = () => { try { navigator.clipboard.writeText(myKey); note.textContent = 'Copied. Keep it somewhere safe: whoever has it is you.'; } catch (e) { note.textContent = 'Select the key and copy it by hand.'; } }; $('key-use').onclick = () => { note.textContent = useKey(box.value); }; }
+}
+
 // ---------- the Mapmaker's record ----------
 // The island's map is kept by everyone who walks it. The first visitor into each part of the island, and the first
 // to each sight, has their name written beside it for good; the board at the Landing shows what anyone has found,
@@ -3137,10 +3296,10 @@ let prints = {}, roll = [], firstsState = 'loading', claimAt = 0, toldFirst = ''
 const walked = new Set((() => { const w = store('ember.walked'); return Array.isArray(w) ? w : []; })());
 walked.add('landing');
 const claimTried = new Set();
-const WHERE = { woods: 'the trees to the west of here', flats: 'the mud to the south', hollow: 'the hill in the north', valley: 'the middle of the island, behind the ridges', meadow: 'the high ground in the west', point: 'the far western point', farbeach: 'the coast in the north-west' };
+const WHERE = { woods: 'the trees to the west of here', flats: 'the mud to the south', hollow: 'the hill in the north', valley: 'the middle of the island, behind the ridges', meadow: 'the high ground in the west', point: 'the far western point', farbeach: 'the coast in the north-west', north: 'the cliffs north of the woods', orchard: 'the shoulder of land south-east of the woods', southwest: 'the cliffs in the south-west', chapel: 'the rock off the south-west cliffs' };
 const placeName = (key) => ((key[0] === 'a' ? AREAS : MY_SIGHTS).find((q) => q.id === key.slice(2)) || { name: 'Somewhere' }).name;
 const farCards = () => new Set(MY_SIGHTS.filter((sg) => cards[sg.id]).map((sg) => sg.id));
-function showMap() { if (!FAR) return; const top = prints['s-summit']; world.setMap({ firsts: prints, walked, cards: farCards(), named, namer: top ? top.name : '' }); }
+function showMap() { if (!FAR) return; const top = prints['s-summit']; world.setMap({ firsts: prints, walked, cards: farCards(), named, namer: top ? top.name : '', pins: wide ? wide.mapPins() : null }); }
 if (FAR) saved.watchFirsts((f, r, state) => {
   const before = prints, was = firstsState;
   prints = f; roll = r; firstsState = state;
@@ -3184,10 +3343,11 @@ function mapmakerHello() {
 function fillSatchel(body) {
   const top = document.createElement('div'); top.className = 'bag';
   const tile = (id, n, on) => {
-    const it = ITEMS[id], b = document.createElement(it.kind === 'wear' ? 'button' : 'div'), im = document.createElement('img'), nm = document.createElement('span');
+    const it = ITEMS[id], b = document.createElement(it.kind === 'wear' || it.food ? 'button' : 'div'), im = document.createElement('img'), nm = document.createElement('span');
     b.className = 'tile' + (on ? ' on' : ''); im.alt = ''; thumbOf(it.model, im); nm.textContent = it.kind === 'wear' ? `${it.name}${on ? ' · on' : ''}` : `${it.name}${n > 1 ? ` × ${n}` : ''}`;
     b.title = it.says; b.append(im, nm);
     if (it.kind === 'wear') { b.type = 'button'; b.onclick = () => { wear(id); openJournal('satchel'); }; }
+    if (it.food && wide) { b.type = 'button'; nm.textContent += ' · press to eat'; b.onclick = () => { wide.eat(id); openJournal('satchel'); }; }
     return b;
   };
   const head = (t) => { const h = document.createElement('h4'); h.textContent = t; top.appendChild(h); };
@@ -3219,9 +3379,10 @@ function lookAtMap(pocket) {
   for (const a of AREAS) {
     const f = prints['a-' + a.id], mine = walked.has(a.id);
     if (a.id === 'landing') lines.push({ text: 'The Landing.', meta: 'drawn by the Mapmaker' });
-    else if (f || mine) lines.push({ text: `${a.name}.${mine ? '' : ' You have not been there.'}`, meta: by(f, 'first walked') });
+    else if (f || mine) lines.push({ text: `${a.name}.${mine ? '' : ' You have not been there.'}`, meta: [by(f, 'first walked'), todays['a-' + a.id] ? `first today: ${todays['a-' + a.id].mine ? 'you' : todays['a-' + a.id].name}` : 'nobody yet today'].filter(Boolean).join(' · ') });
     else lines.push({ text: `Blank paper: ${WHERE[a.id]}.`, meta: 'nobody has walked it' });
   }
+  if (wide) lines.push(...wide.seenLines(cards));
   const marked = MY_SIGHTS.filter((sg) => prints['s-' + sg.id] || cards[sg.id]);
   lines.push({ text: `Sights marked with a cross: ${marked.length} of ${MY_SIGHTS.length}`, kind: 'head' });
   for (const sg of marked) lines.push({ text: `${sg.name}.${cards[sg.id] ? '' : ' You have not found it.'}`, meta: by(prints['s-' + sg.id], 'first found') });
@@ -3327,6 +3488,27 @@ let lastFrame = performance.now();
 let t = 0;
 const tmpV = new THREE.Vector3();
 const viewFrustum = new THREE.Frustum(), viewMatrix = new THREE.Matrix4(), viewSphere = new THREE.Sphere(new THREE.Vector3(), 2.4);
+// The wider island: its folk, its errands, its hidden places and what everyone rebuilds (wide.js).
+if (FAR) {
+  Object.assign(giverPlaces, { keeper, hermit: world.hermit, heron: world.heron });
+  const wideApi = {
+    scene, me, world, store, addLog, flash, moment, audio, give, inv, quests, taken, questEvent, askedBy, playEmote, addMark, GIVER, GREETS, places: giverPlaces, peers,
+    sky: () => skyNow, rain: () => rainNow, now: timeNow, t: () => t, entered: () => entered, perch: () => perch, cave: () => caveNow, cottage: world.cottage, speed: () => me.speed, wind: () => 0.5,
+    sayAs: { hermit: hermitSays, heron: heronSays, keeper: keeperSays }, hoofed, species: () => SPECIES[me.species], openSheet, lit: () => litNow(),
+    restAt: (x, z, yaw, mode) => { me.x = x; me.z = z; me.targetYaw = me.yaw = yaw; moveTarget = null; world.hideMarker(); setMode(mode); pushPresence(true); },
+    redrawMap: () => showMap(), tally: (k) => tally(k), revealFourth: () => {}, changed: () => {}, tell: (kind, n) => tellEvent(kind, n),
+    watchWorks: (cb) => saved.watchLight((totals) => cb(totals)), addWork: (kind, n) => saved.addLight(kind, n, me.name, myCode),
+    ITEMS, SIGHT_AT, areaAt, takeQuest, campfire: () => campNow().on, setStarRush: (on) => world.setStarRush(on), groundHeight,
+    wantStamp: (...a) => wantStamp(...a), cards, closeSheet, myCode: () => myCode, wearing: () => wearing, guests: (cb) => saved.listGuests().then(cb), signGuest: (text) => saved.signGuest(text, me.name), heldNow: () => held, setHeld: (v) => setHeld(v), pushPresence: () => pushPresence(true), moveStop: () => { moveTarget = null; world.hideMarker(); },
+  };
+  wide = buildWide(wideApi);
+  wide.api = wideApi; buildPlay(wideApi, wide); buildPuzzles(wideApi, wide); buildAlive(wideApi, wide);
+  Object.assign(QUEST_CHECK, { fishkinds: () => wide.count.fishkinds(), birds: () => wide.count.birds(), dug: () => wide.count.dug(), puzzles: () => wide.count.puzzles(), lambs: () => wide.count.lambs(), accounts: () => wide.count.accounts(), spots: () => wide.count.spots(), work: (q) => wide.count.work(q), laid: () => wide.count.laid(), met: () => wide.count.met() });
+}
+// What visitors do, counted without names: each kind of thing once for each visit.
+const tallied = new Set();
+function tally(k) { if (tallied.has(k) || tallied.size > 60) return; tallied.add(k); saved.bump(k); }
+
 function frame() {
   const nowMs = performance.now();
   const dt = Math.min((nowMs - lastFrame) / 1000, 0.05);
@@ -3341,6 +3523,7 @@ function frame() {
   let wantX = 0, wantZ = 0;
   const stroll = keys.has('shift') || held === 1 || fireDist() < 7 || (moveTarget && moveTarget.short);
   let top = (stroll ? 1.5 : 3.6) * Math.min(1.25, SPECIES[me.species].height / 0.8);
+  if (wide && !stroll) top *= wide.pace(dt);
   if (itWho === 'me' && !stroll) top = Math.max(top * 1.15, 3.6 * 1.25 * 1.12);      // whoever is it outruns everyone, whatever their size
   if (entered) {
     if (world.surface(me.x, me.z) === 'water') top *= 0.62;
@@ -3438,6 +3621,7 @@ function frame() {
   me.y = groundHeight(me.x, me.z);
   updateParty(dt);
   if (voyage && voyageSeated) me.y = yWas;
+  if (wide && wide.rideY) { const ry = wide.rideY(); if (ry !== null) me.y = ry; }
   if (perch) { const a = camYaw + Math.PI; me.x = LIGHTHOUSE.x + Math.sin(a) * 2.85; me.z = LIGHTHOUSE.z + Math.cos(a) * 2.85; me.y = world.lighthouse.galleryY; me.targetYaw = a; me.speed = 0; moveTarget = null; }
   updateVoyage(dt);
   if (hop) updateHop();
@@ -3465,7 +3649,7 @@ function frame() {
   keeper.update(dt, t);
   // The Mapmaker turns, slowly, to look at whoever comes near, and bobs his head when he speaks.
   if (FAR && keeper.parts.rig.visible) { keeper.parts.rig.visible = false; keeper.shadow.visible = false; }      // his body arrives late; it stays out of sight
-  if (FAR) { updateHermit(dt); updateHeron(dt); if (entered) updatePushback(dt); }
+  if (FAR) { updateHermit(dt); updateHeron(dt); if (entered) updatePushback(dt); if (wide) wide.update(dt, t); }
   if (FAR && world.mapmaker.group) {
     const m = world.mapmaker, near = Math.hypot(me.x - m.x, me.z - m.z) < 7;
     const want = near ? Math.atan2(-(me.z - m.z), me.x - m.x) : m.home;
@@ -3513,13 +3697,13 @@ function frame() {
 
   // Camera.
   const sway = reducedMotion ? 0 : 1;
-  const wide = camera.aspect > 1;
+  const wideView = camera.aspect > 1;
   const introPos = tmpV.set(
-    me.x + (wide ? 2.1 : 0.25) + Math.sin(t * 0.21) * 0.25 * sway,
+    me.x + (wideView ? 2.1 : 0.25) + Math.sin(t * 0.21) * 0.25 * sway,
     me.y + 1.25 + Math.sin(t * 0.17) * 0.08 * sway,
-    me.z + (wide ? 3.5 : 5.2),
+    me.z + (wideView ? 3.5 : 5.2),
   ).clone();
-  const introLook = new THREE.Vector3(me.x + (wide ? 1.9 : 0), me.y + (wide ? 1.0 : -1.0), me.z - 3);
+  const introLook = new THREE.Vector3(me.x + (wideView ? 1.9 : 0), me.y + (wideView ? 1.0 : -1.0), me.z - 3);
   let goalPos, goalLook, fov = 58;
   if (stargazing) {
     goalPos = new THREE.Vector3(me.x + Math.sin(camYaw) * 1.6, me.y + 1.1, me.z + Math.cos(camYaw) * 1.6);
@@ -3607,7 +3791,7 @@ function frame() {
   for (const p of peers.values()) frame.players.push(p.av);
   critters.update(dt, t, { dark: skyNow.dark, rain: rainNow, players: frame.players, me });
   audio.setScene(skyNow.dark > 0.55, !!seenParty && fireDist() < 30);
-  audio.tick(dt, { fireDist: Math.hypot(camPos.x - FIRE.x, camPos.z - FIRE.z), shore: shoreProximity(me.x, me.z), heat: world.heat, cave: FAR ? caveNow : 0,
+  audio.tick(dt, { fireDist: Math.hypot(camPos.x - FIRE.x, camPos.z - FIRE.z), shore: shoreProximity(me.x, me.z), heat: world.heat, cave: FAR ? caveNow : 0, area: FAR ? ((areaAt(me.x, me.z) || {}).id || '') : undefined, dark: skyNow.dark, gap: FAR ? Math.max(0, 1 - Math.hypot(me.x - GAP_AT.x, me.z - GAP_AT.z) / 28) : 0,
     falls: FAR ? clamp(1 - Math.hypot(me.x - CRAG.x, me.z - CRAG.z) / 42, 0, 1) ** 1.6 : 0, wind: FAR ? clamp((me.y - 11) / 13, 0, 1) * (perch ? 1.3 : 1) : clamp((me.y - 4) / 5, 0, 1) * 0.5 });
   if (entered) { updateActions(); pushPresence(false); }
   cutaway.cam.value.copy(camera.position); cutaway.me.value.set(me.x, me.y, me.z);
@@ -3620,6 +3804,7 @@ requestAnimationFrame(frame);
 
 // A small handle for checking the page from a test script.
 window.__ember = {
+  get wide() { return wide; }, quests, taken, bridge: BRIDGE, walkable,
   me, peers, world, camera, renderer, keeper, POSE, life, mapBoard: MAP_BOARD,
   yard, did, listToday,
   critters,
@@ -3641,7 +3826,7 @@ window.__ember = {
   get campfire() { const c = campNow(); return { on: c.on, id: c.id, next: c.next, secs: campSecs, fires: fires.count, line: campLine(), top: $('camp').textContent }; },
   set campShift(ms) { campShift = ms; campCheck = 0; }, set campSecs(v) { campSecs = v; },
   surface: (x, z) => world.surface(x, z), get moving() { return !!moveTarget || !!hop; },
-  get voyage() { return { mine: voyage, seen: seenVoyage, cast: seenCast, crew: voyageCrew.slice(), seated: voyageSeated, dolphins: life.escorting, phase: voyageNow ? voyageNow.phase : '', left: voyageNow ? voyageNow.left : 0, u: voyageNow ? voyageNow.u : 0, sailed, line: voyageLine }; },
+  berth: yard.berth, get voyage() { return { dest: voyageDest, mine: voyage, seen: seenVoyage, cast: seenCast, crew: voyageCrew.slice(), seated: voyageSeated, dolphins: life.escorting, phase: voyageNow ? voyageNow.phase : '', left: voyageNow ? voyageNow.left : 0, u: voyageNow ? voyageNow.u : 0, sailed, line: voyageLine }; },
   set voyageCast(v) { if (voyage) { voyageCast = v; pushPresence(true); } },
   get party() { return party; },
   get seenParty() { return seenParty; },
@@ -3676,7 +3861,7 @@ window.__ember = {
   set wet(v) { wet = v; },
   teleport(x, z, yaw) { me.x = x; me.z = z; vel.x = vel.z = 0; moveTarget = null; if (yaw !== undefined) me.yaw = me.targetYaw = yaw; },
   paths: PATHS, sightAt: SIGHT_AT,
-  inv, give, wear, opened, pics, openMap,
+  inv, give, wear, opened, pics, openMap, packProgress, mergeProgress, get kept() { return { asked: keptAsked, sent: keptSent.length, at: keptAt }; }, get key() { return myKey; }, waysLit, moment,
   scene, shy, setReach(k, c) { world.setReach(k, c); }, setFog(v) { fogForce = v; }, setLamp(v) { lamp = v; },
   cutTo, get light() { return { totals: lightTotals, stage: lightStage(), bag, perch }; },
   cam(yaw, pitch, dist) { camYaw = yaw; if (pitch !== undefined) camPitch = pitch; if (dist !== undefined) camDist = dist; },

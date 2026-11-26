@@ -248,7 +248,7 @@ export function createStore() {
       if (!db) { cb(mine(), 'off'); return; }
       try {
         db.collection('light').orderBy('at', 'desc').limit(1000).onSnapshot((snap) => {
-          const totals = { stone: 0, timber: 0, glass: 0, oil: 0 }, by = new Map();
+          const totals = { stone: 0, timber: 0, glass: 0, oil: 0, plank: 0, sail: 0, rope: 0 }, by = new Map();
           for (const d of snap.docs) {
             const rec = d.data() || {}, n = Math.max(0, Math.min(6, Math.floor(Number(rec.n) || 0)));
             if (!(rec.kind in totals)) continue;
@@ -277,8 +277,36 @@ export function createStore() {
   }
   async function addCairn(name) { await ready; if (!db || canWrite === false) return 'local'; try { await db.collection('cairn').add({ n: 1, name: clean(name, 22), at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; } }
 
+  // ---- the guest book in the keeper's cottage: one line each ----
+  async function listGuests() {
+    const mine = () => (local.get('ember.guests') || []).map((t) => ({ text: t, name: 'You' }));
+    await ready; if (!db) return mine();
+    try { const snap = await db.collection('guests').orderBy('at', 'desc').limit(60).get(); return snap.docs.map((d) => { const r = d.data() || {}; return { text: clean(r.text, 80), name: clean(r.name, 22) || 'A visitor' }; }).filter((r) => r.text); } catch (e) { return mine(); }
+  }
+  async function signGuest(text, name) {
+    const v = local.get('ember.guests') || []; v.unshift(clean(text, 80)); local.set('ember.guests', v.slice(0, 20));
+    await ready; if (!db || canWrite === false) return 'local';
+    try { await db.collection('guests').add({ text: clean(text, 80), name: clean(name, 22), at: Date.now(), by: me() }); return 'ok'; } catch (e) { return 'local'; }
+  }
+  // ---- what visitors do, counted without names ----
+  async function bump(key) { await ready; if (!db || canWrite === false) return; try { await db.collection('tally').add({ k: String(key).slice(0, 40), at: Date.now() }); } catch (e) { /* not counted */ } }
+
+  // ---- first today: who stood in each place first since midnight by the island's calendar ----
+  const dayKey = () => new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  function watchToday(cb) {
+    ready.then(() => {
+      if (!db) return;
+      try { db.collection('today').orderBy('at', 'desc').limit(200).onSnapshot((snap) => { const out = {}, pre = 't-' + dayKey() + '-'; for (const d of snap.docs) if (d.id.startsWith(pre)) { const r = d.data() || {}; out[d.id.slice(pre.length)] = { name: clean(r.name, 22) || 'A visitor', code: /^\d{4}$/.test(String(r.code)) ? String(r.code) : '', mine: r.by === me() }; } cb(out); }, () => {}); } catch (e) { /* no record today */ }
+    });
+  }
+  async function claimToday(place, name, code) {
+    await ready; if (!db || canWrite === false) return 'local';
+    try { await db.collection('today').doc('t-' + dayKey() + '-' + place).set({ place, name: clean(name, 22) || 'A visitor', code: /^\d{4}$/.test(String(code)) ? String(code) : '', by: me() }); return 'ok'; } catch (e) { return 'late'; }
+  }
+
   return {
-    watchCairn, addCairn,
+    watchToday, claimToday,
+    watchCairn, addCairn, listGuests, signGuest, bump,
     watchLight, addLight,
     watchFirsts, claimFirst, signRoll,
     ready, watchBoat, addPlanks, watchCarvings, carve, findBottle, throwBottle, replyBottle, passBottle, finishBottle, countNight,

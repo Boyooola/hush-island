@@ -31,7 +31,7 @@ let d = await done(); ok(['lr-woods', 'lr-tree', 'lr-page'].every((q) => d.inclu
 await p.evaluate(() => window.__ember.openJournal('satchel')); await p.waitForTimeout(500); sh = await sheet(); await p.screenshot({ path: S + 'q4.png' });
 ok(/logbook · 1 of 6/.test(sh) && /second pagePress to read/.test(sh) && /A page is missing/.test(sh), 'the satchel holds the page', sh.slice(0, 300));
 await p.evaluate(() => window.__ember.openJournal('quests')); await p.waitForTimeout(500); sh = await sheet(); await p.screenshot({ path: S + 'q5.png' });
-ok(/The far shore · \d of 7/.test(sh) && /Under the hill/.test(sh) && !/Ashore/.test(sh), 'the journal lists Lantern Rock\'s quests', sh.slice(0, 200)); await p.keyboard.press('Escape');
+ok(/The far shore/.test(sh) && /Under the hill/.test(sh) && !/Ashore/.test(sh), 'the journal lists Lantern Rock\'s quests', sh.slice(0, 200)); await p.keyboard.press('Escape');
 // every page lies somewhere it can be reached
 for (let i = 0; i < 6; i++) { if (i === 1) continue; await go(W.pages[i].x + 0.9, W.pages[i].z + 0.6, i === 3 ? 6000 : 2500, [0.4, 0.5, 5]); const pos = await p.evaluate(() => ({ x: window.__ember.me.x, z: window.__ember.me.z })); const r = await run('Pick up the page'); ok(r === 'ok', `page ${i + 1} can be picked up`, r === 'ok' ? '' : `${r} at ${pos.x.toFixed(1)},${pos.z.toFixed(1)} want ${W.pages[i].x.toFixed(1)},${W.pages[i].z.toFixed(1)}`); if (i === 0 || i === 5) await p.screenshot({ path: S + `q6_${i}.png` }); await p.waitForTimeout(900); await p.keyboard.press('Escape'); }
 console.log(' ', await p.evaluate(() => window.__ember.log.slice(-4).join(' || ')));

@@ -29,7 +29,7 @@ const pre = await fetch('http://localhost:8787/room/feedback', { method: 'OPTION
 ok('feedback is allowed from another site', pre.status === 204 && pre.headers.get('access-control-allow-headers') === 'content-type');
 const rep = await fetch('http://localhost:8787/room/reports.json', { headers: { origin: 'https://html-classic.itch.zone', 'x-keeper-key': 'testkey' } });
 ok('the keeper\'s report is not opened to other sites', !rep.headers.get('access-control-allow-origin'));
-await f.click('#btn-feedback'); await p.waitForTimeout(400);
+await f.evaluate(() => document.getElementById('btn-feedback').click()); await p.waitForTimeout(400);
 await f.fill('#sheet-input', 'Sent from the copy on itch.'); await f.click('#sheet-send'); await p.waitForTimeout(1500);
 const d = await (await fetch('http://localhost:8787/room/reports.json', { headers: { 'x-keeper-key': 'testkey' } })).json();
 ok('a note sent from the framed copy reaches the keeper', d.feedback.some((x) => x.text === 'Sent from the copy on itch.'), (await f.evaluate(() => document.getElementById('sheet-note').textContent)));

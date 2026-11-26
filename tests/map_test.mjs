@@ -22,14 +22,14 @@ const a = await visitor('Mira');
 const board = await a.evaluate(() => window.__ember.mapBoard);
 await go(a, board.x + 1.5, board.z + 2.4, 2500, [0.2, 0.25, 5.5]); await a.screenshot({ path: S + 'm1.png' });
 ok((await run(a, 'Look at the map')) === 'ok', 'the map can be looked at'); await a.waitForTimeout(600);
-let sh = await sheet(a); ok(/far shore/.test(sh) && /Blank paper/.test(sh) && /1 of 8/.test(sh), 'an empty map is blank paper', sh.slice(0, 200)); await a.keyboard.press('Escape');
+let sh = await sheet(a); ok(/far shore/.test(sh) && /Blank paper/.test(sh) && /1 of 12/.test(sh), 'an empty map is blank paper', sh.slice(0, 200)); await a.keyboard.press('Escape');
 await go(a, -78, -8, 9000);                               // Whisper Woods
 let rows = await db(a); ok(rows.includes('first-a-woods=Mira'), 'the first into the woods is recorded', rows.join(','));
 ok(/nobody had stood here before you/.test(await log(a)), 'and is told so');
 const b = await visitor('Odo');
 await go(b, -78, -8, 8000);
 rows = await db(b); ok(rows.filter((r) => r.startsWith('first-a-woods')).length === 1 && rows.includes('first-a-woods=Mira'), 'a second visitor does not take the woods', rows.join(','));
-await go(b, -100, 132, 9000);                             // the Tide Flats: Odo is first
+await go(b, -100, 132, 16000);                             // the Tide Flats: Odo is first
 rows = await db(b); ok(rows.includes('first-a-flats=Odo'), 'but is first on the flats');
 await a.waitForTimeout(1500); ok(/Tide Flats: Odo.* is the first to stand there/.test(await log(a, 10)), 'the first visitor hears of it', (await log(a, 3)).slice(0, 200));
 await go(b, -265, -2, 45000);                             // the summit: Odo names the island

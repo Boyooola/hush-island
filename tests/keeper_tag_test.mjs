@@ -57,7 +57,7 @@ const who = [await a.evaluate(() => window.__ember.it), await b.evaluate(() => w
 ok('he chases and tags someone back', caught && who.includes('me'), JSON.stringify(who));
 ok('the one he caught is told', (await has(a, 'The keeper tagged you', 5000)) || (await has(b, 'The keeper tagged you', 5000)));
 // The one moving him leaves: the other carries on.
-await a.click('#btn-leave'); await b.waitForTimeout(3000);
+await a.evaluate(() => document.getElementById('btn-leave').click()); await b.waitForTimeout(3000);
 const p1 = await kpos(b);
 ok('when the first player leaves, the game goes on for the other', (await b.evaluate(() => window.__ember.game)) > 0 && (await b.evaluate(() => window.__ember.keeperLoose)), JSON.stringify(p1));
 // Time runs out: he goes home.

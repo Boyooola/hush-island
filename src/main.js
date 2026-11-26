@@ -1099,9 +1099,10 @@ function updateVoyage(dt) {
   if (voyageNow && voyageNow.phase === 'done' && !voyage) voyageNow = null;
   const v = voyageNow;
   yard.setHull(v && v.pose, (x, z) => world.seaY(x, z), t);
-  // Twice on the way round, dolphins come alongside for a while.
-  const dolphins = !!v && v.phase === 'sail' && ((v.u > 0.14 && v.u < 0.42) || (v.u > 0.58 && v.u < 0.84));
-  life.escort(dolphins ? v.pose : null);
+  // Once on the way round, forty seconds out, dolphins come alongside: a few leaps and they are gone.
+  const since = v && v.phase === 'sail' ? (now - seenCast) / 1000 - 40 : -1;
+  const dolphins = since >= 0 && since < 10.5;
+  life.escort(dolphins ? v.pose : null, seenCast / 1000 + 40);
   if (dolphins && voyage && voyageSeated && !voyageDolphins) { voyageDolphins = true; addLog('', 'Dolphins! Two of them, leaping alongside.', 'sys'); audio.pop(760); found('dolphin', true); }
   if (v && v.phase !== voyageWas) {
     if (v.phase === 'sail' && (voyage || boatDist() < 30)) { audio.pop(520); if (voyage) { flash('Cast off', 'Once round the island'); addLog('', 'She swings away from the shore.', 'sys'); } }

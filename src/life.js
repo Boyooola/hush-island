@@ -380,7 +380,7 @@ export function buildLife(scene, world) {
   }
   // Dolphins that come alongside the boat on her voyage: two of them, leaping in turn a little way off her beam.
   const escorts = [];
-  let escortPose = null;
+  let escortPose = null, escortFrom = 0;
   const SEA_TURN = Math.PI / 2;
   const DOLPHIN_EVERY = 95, WHALE_EVERY = 540;
   let lastSplash = -1;
@@ -404,8 +404,9 @@ export function buildLife(scene, world) {
     }
     if (d && !escorts.length) for (let i = 0; i < 2; i++) { const e = new THREE.Mesh(d.geometry, d.material); e.visible = false; scene.add(e); escorts.push(e); }
     escorts.forEach((e, i) => {
-      const p = escortPose, k = (now + i * 1.7) % 3.4, u = k / 1.5;
-      e.visible = !!p && u < 1;
+      // One visit a voyage: each of the two leaps twice, in turn, and then they are gone.
+      const p = escortPose, since = now - escortFrom - i * 1.7, n = Math.floor(since / 3.4), u = (since - n * 3.4) / 1.5;
+      e.visible = !!p && since >= 0 && n < 2 && u < 1;
       if (!e.visible) { e.userData.wet = 0; return; }
       // Abreast of the boat and a few lengths off, one each side, drawing ahead through the leap.
       const side = i ? -1 : 1, off = 4.6 + i * 1.3, fwd = -1.5 + u * 4.5 + i * 1.2;
@@ -486,7 +487,7 @@ export function buildLife(scene, world) {
     meteor,
     get shower() { return showerOn; },
     // Send the dolphins alongside the boat at this place and heading, or (null) call them off.
-    escort(pose) { escortPose = pose; },
+    escort(pose, from = 0) { escortPose = pose; escortFrom = from; },
     get whaleUp() { return !!(seaLife.whale && seaLife.whale.visible); },
     get escorting() { return escorts.filter((e) => e.visible).length; },
     forceShower(ms = 20000) { forced = timeNow() + ms; },

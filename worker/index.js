@@ -51,6 +51,8 @@ export class Island extends DurableObject {
     this.sql.exec('CREATE TABLE IF NOT EXISTS docs (coll TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, d TEXT NOT NULL, PRIMARY KEY (coll, id))');
     this.sql.exec('CREATE INDEX IF NOT EXISTS docs_at ON docs (coll, at)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS gone (id TEXT PRIMARY KEY)');                      // records removed here, so the move does not bring them back
+    this.sql.exec('CREATE TABLE IF NOT EXISTS mine (pid TEXT PRIMARY KEY, at INTEGER, d TEXT)');       // everything of a visitor's own: nothing but their key is kept in their browser
+    this.mineAt = new Map();
     this.sql.exec('CREATE TABLE IF NOT EXISTS saves (pid TEXT PRIMARY KEY, at INTEGER, d TEXT)');      // each visitor's progress, so that it outlives one browser
     this.sql.exec('CREATE TABLE IF NOT EXISTS alias (kh TEXT PRIMARY KEY, pid TEXT, code TEXT, at INTEGER)');   // browsers that kept the number they had as a Supabase guest
     this.sql.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)');
@@ -191,7 +193,8 @@ export class Island extends DurableObject {
     const h = (await this.hashOf(request)) || 'none', minute = Math.floor(now / 60000);
     let r = this.dbRate.get(h);
     if (!r || r[0] !== minute) { r = [minute, 0, 0]; this.dbRate.set(h, r); if (this.dbRate.size > 2000) this.dbRate.clear(); }
-    if (write ? ++r[2] > 20 : ++r[1] > 240) return json({ error: 'slow down' }, 429);
+    // The count of what visitors do is small and frequent: it is not allowed to use up a visitor's allowance for writing real things.
+    if (write && coll !== 'tally' ? ++r[2] > 20 : ++r[1] > 240) return json({ error: 'slow down' }, 429);
     const idOk = typeof m.id === 'string' && /^[\w-]{8,64}$/.test(m.id);
     const row = (id) => { const q = this.sql.exec('SELECT d FROM docs WHERE coll = ? AND id = ?', coll, id).toArray(); return q.length ? JSON.parse(q[0].d) : null; };
     const text = (v, max) => typeof v === 'string' && v.trim().length >= 1 && v.length <= max && judge(v) !== 'mute';
@@ -268,6 +271,27 @@ export class Island extends DurableObject {
   // A visitor is known by a scrambled form of their guest account with Supabase (the visitor sends its token,
   // Supabase says whose it is) or, failing that, of the secret their browser keeps. The four figures shown beside
   // a name are taken from it, so nobody can wear someone else's number.
+  // A visitor's own things, by the key their browser holds: read when the page opens, written a moment after anything changes.
+  async mine(request) {
+    const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    if (request.method !== 'POST') return json({ error: 'post' }, 405);
+    let m; try { m = JSON.parse(await request.text()); } catch (e) { return json({ error: 'bad' }, 400); }
+    const a = {}; await this.identify(a, m && m.key, null);
+    if (!a.pid) return json({ error: 'key' }, 400);
+    if (m.d === undefined) {
+      const r = this.sql.exec('SELECT at, d FROM mine WHERE pid = ?', a.pid).toArray();
+      if (r.length) return json({ at: r[0].at, d: r[0].d });
+      const o = this.sql.exec('SELECT d FROM saves WHERE pid = ?', a.pid).toArray();
+      return json({ at: 0, d: '', old: o.length ? o[0].d : '' });
+    }
+    if (typeof m.d !== 'string' || m.d.length > 400000) return json({ error: 'too much' }, 413);
+    const now = Date.now(), last = this.mineAt.get(a.pid) || 0;
+    if (now - last < 1200) return json({ error: 'slow down' }, 429);
+    try { const d = JSON.parse(m.d); if (!d || typeof d !== 'object' || Array.isArray(d)) return json({ error: 'bad' }, 400); } catch (e) { return json({ error: 'bad' }, 400); }
+    this.mineAt.set(a.pid, now); if (this.mineAt.size > 5000) this.mineAt.clear();
+    this.sql.exec('INSERT OR REPLACE INTO mine (pid, at, d) VALUES (?, ?, ?)', a.pid, now, m.d);
+    return json({ ok: true, at: now });
+  }
   async identify(a, key, tok) {
     let k = '';
     a.gid = ''; a.kept = 0;
@@ -503,6 +527,7 @@ export class Island extends DurableObject {
   async fetch(request) {
     this.later(this.moveIn());      // the one-time move from Supabase, if it is still to do
     if (request.headers.get('Upgrade') !== 'websocket') {
+      if (new URL(request.url).pathname === '/room/mine') return this.mine(request);
       if (new URL(request.url).pathname === '/room/db') return this.db(request);
       if (new URL(request.url).pathname === '/room/feedback') return request.method === 'POST' ? this.feedback(request) : new Response('Feedback is sent from inside the game.', { status: 405 });
       if (new URL(request.url).pathname === '/room/reports.json') {
@@ -1084,7 +1109,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const room = () => env.ISLAND.get(env.ISLAND.idFromName('main')).fetch(request);
-    if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback' || url.pathname === '/room/db') return room();
+    if (url.pathname === '/room/status.json' || url.pathname === '/room/stats.json' || url.pathname === '/room/reports.json' || url.pathname === '/room/feedback' || url.pathname === '/room/db' || url.pathname === '/room/mine') return room();
     // The far shore is the same game on another island: the same page, which reads the address to know where it is.
     // Lantern Rock has no address of its own: it is reached by the boat. The old one goes to the first island (and still works on a developer's machine, for the tests).
     if (url.pathname === '/far' || url.pathname === '/far/') return /^(localhost|127\.0\.0\.1)$/.test(url.hostname) ? env.ASSETS.fetch(new Request(new URL('/', url), request)) : Response.redirect(new URL('/', url).toString(), 302);

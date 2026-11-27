@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hush Island: wash ashore as an animal and explore with whoever is there</title>
-<meta name="description" content="A free social exploration game in your browser. Wash ashore as a fox, wolf, deer or other animal, find out who keeps the fire and why, and explore with whoever else is there.">
+<title>Hush Island: wash ashore as an animal, build the boat, sail for the far shore</title>
+<meta name="description" content="A free social exploration game in your browser. Wash ashore as a fox, wolf, deer or other animal, help whoever is there build the boat, and sail it to Lantern Rock, a larger island with a dark lighthouse and people who remember why.">
 <link rel="canonical" href="https://www.hush-island.dev/">
 <meta name="theme-color" content="#0b1426">
 <meta name="application-name" content="Hush Island">
@@ -17,19 +17,22 @@
 <link rel="manifest" href="/site.webmanifest">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Hush Island">
-<meta property="og:title" content="Hush Island: wash ashore as an animal and explore with whoever is there">
-<meta property="og:description" content="A free social exploration game. Find out who keeps the fire and why, help build the boat, and explore with whoever else is there.">
+<meta property="og:title" content="Hush Island: wash ashore as an animal, build the boat, sail for the far shore">
+<meta property="og:description" content="A free social exploration game. Two islands and one boat: build her with whoever is there, sail across together, and find out what happened to the light.">
+<meta property="og:locale" content="en_GB">
 <meta property="og:url" content="https://www.hush-island.dev/">
 <meta property="og:image" content="https://www.hush-island.dev/og.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="A fox and a stag by a campfire at night on a small low-poly island, with the words Hush Island.">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="A low-poly island at dusk seen from the sea, with a dock, a moored boat and a camp fire, and the words Hush Island.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Hush Island: a quiet island you visit as an animal">
-<meta name="twitter:description" content="A free browser game with nothing to win. Sit by the fire, fish off the dock, watch the stars, and meet whoever else is there.">
+<meta name="twitter:title" content="Hush Island: two islands, one boat, and whoever is there">
+<meta name="twitter:description" content="A free browser game. Arrive as an animal, build the boat with strangers, and sail to Lantern Rock to find out why its light went out.">
 <meta name="twitter:image" content="https://www.hush-island.dev/og.jpg">
+<meta name="twitter:image:alt" content="A low-poly island at dusk seen from the sea, with a dock, a moored boat and a camp fire, and the words Hush Island.">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"VideoGame","name":"Hush Island","url":"https://www.hush-island.dev/","image":"https://www.hush-island.dev/og.jpg","description":"Hush Island is a free browser game with nothing to win. Arrive as a fox, wolf, deer or other animal, sit by the fire, fish off the dock, watch the stars, and meet whoever else is there.","genre":["Casual","Social","Relaxing"],"gamePlatform":"Web browser","applicationCategory":"Game","operatingSystem":"Any","playMode":"MultiPlayer","inLanguage":"en","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+{"@context":"https://schema.org","@type":"VideoGame","name":"Hush Island","url":"https://www.hush-island.dev/","image":"https://www.hush-island.dev/og.jpg","description":"Hush Island is a free social exploration game played in a web browser. Visitors arrive as a fox, wolf, deer or other animal on a small island with a camp fire, build a boat together, and sail it to Lantern Rock: a larger island with a dark lighthouse, a character living in each part of it, hidden places, puzzles, and a story told in pieces.","genre":["Exploration","Social","Adventure","Relaxing"],"gamePlatform":"Web browser","applicationCategory":"Game","operatingSystem":"Any","playMode":["MultiPlayer","CoOp"],"numberOfPlayers":{"@type":"QuantitativeValue","minValue":1,"maxValue":40},"gameLocation":["Hush Island","Lantern Rock"],"inLanguage":"en","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -458,7 +461,7 @@
 </div>
 <script>
   // If the boat is bringing this visitor across, this is up before anything else is drawn, so the welcome page is never seen.
-  (function () { try { var c = JSON.parse(localStorage.getItem('ember.crossing')); if (c && c.to && Date.now() - (c.at || 0) < 90000) { var el = document.getElementById('crossing'), far = c.to === 'far'; el.style.backgroundImage = 'url(./shore-' + (far ? 'far' : 'home') + '.jpg)'; document.getElementById('cx-name').textContent = far ? 'Lantern Rock' : 'The first island'; document.getElementById('cx-line').textContent = far ? 'West, past where the land drops behind.' : 'East, toward the thread of smoke.'; document.getElementById('cx-step').textContent = 'Crossing'; document.getElementById('cx-fill').style.width = '12%'; el.hidden = false; } } catch (e) {} })();
+  (function () { try { var c = JSON.parse(sessionStorage.getItem('ember.crossing')); if (c && c.to && Date.now() - (c.at || 0) < 90000) { var el = document.getElementById('crossing'), far = c.to === 'far'; el.style.backgroundImage = 'url(./shore-' + (far ? 'far' : 'home') + '.jpg)'; document.getElementById('cx-name').textContent = far ? 'Lantern Rock' : 'The first island'; document.getElementById('cx-line').textContent = far ? 'West, past where the land drops behind.' : 'East, toward the thread of smoke.'; document.getElementById('cx-step').textContent = 'Crossing'; document.getElementById('cx-fill').style.width = '12%'; el.hidden = false; } } catch (e) {} })();
 </script>
 <canvas id="scene" tabindex="0" aria-label="Hush Island: a small island with a campfire"></canvas>
 
@@ -599,6 +602,6 @@
 </div>
 
 <noscript><p style="position:fixed;left:16px;right:16px;bottom:16px;color:#f6ead2;font:600 16px system-ui,sans-serif">Hush Island is a small 3D island you visit as an animal. It needs JavaScript to run.</p></noscript>
-<script type="module" src="./app.js"></script>
+<script type="module" src="./boot.js"></script>
 </body>
 </html>

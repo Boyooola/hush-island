@@ -37,8 +37,9 @@ export function noise2(x, z) {
 // reached by boat. It is the same game on a different piece of land, chosen by the address of the page (/far).
 // Which island this is. There is no address for Lantern Rock: a visitor is there because the boat took them there, and
 // the browser remembers which shore they are on. (On a developer's own machine the address /far still chooses it, for the tests.)
-export const LOCAL = typeof location !== 'undefined' && (!location.hostname || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
-const shoreKept = (() => { try { return JSON.parse(localStorage.getItem('ember.isle')); } catch (e) { return null; } })();
+const kept = typeof globalThis.__mine === 'object' && globalThis.__mine ? globalThis.__mine : null;
+export const LOCAL = typeof location !== 'undefined' && (!location.hostname || /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) && !(kept && kept.local === false);
+const shoreKept = kept ? kept.d['ember.isle'] : null;
 export const ISLE = typeof location === 'undefined' ? 'home' : LOCAL ? (/^\/far\/?$/.test(location.pathname) ? 'far' : 'home') : (shoreKept === 'far' ? 'far' : 'home');
 export const FAR = ISLE === 'far';
 

@@ -23,6 +23,7 @@ import { cutaway } from './props.js';
 import { makeGlowTexture } from './labels.js';
 import { buildShy } from './shy.js';
 import { ITEMS, WEAR_IDS, SLOTS, ITEM_OF_FIND, CHESTS, LETTERS } from './items.js';
+import { mine } from './mine.js';
 import { buildWide } from './wide.js';
 import { buildPlay } from './play.js';
 import { buildPuzzles } from './puzzles.js';
@@ -70,8 +71,11 @@ function localTime() {
 }
 function store(key, value) {
   try {
-    if (value === undefined) return JSON.parse(localStorage.getItem(key));
-    localStorage.setItem(key, JSON.stringify(value));
+    // Only the key that says who the visitor is lives in the browser, and the hand-over between the two islands' pages lasts no longer than the tab. Everything else is with the island (mine.js).
+    if (key === 'ember.key') { if (value === undefined) return JSON.parse(localStorage.getItem(key)); localStorage.setItem(key, JSON.stringify(value)); return null; }
+    if (key === 'ember.crossing') { if (value === undefined) return JSON.parse(sessionStorage.getItem(key)); if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, JSON.stringify(value)); return null; }
+    if (value === undefined) return mine.get(key);
+    mine.set(key, value);
   } catch (e) { /* storage may be missing: carry on without it */ }
   return null;
 }
@@ -339,7 +343,7 @@ function listToday() {
 }
 function listState() {
   let rec = null;
-  try { rec = JSON.parse(localStorage.getItem('ember.list')); } catch (e) { rec = null; }
+  rec = mine.get('ember.list');
   return rec && rec.day === todayKey() && Array.isArray(rec.done) ? rec : { day: todayKey(), done: [] };
 }
 // ---------- the guide: always one clear next thing, and a way to find it ----------
@@ -1266,8 +1270,8 @@ function crossOver() {
   store('ember.crossing', { id: voyage, cast: voyageCast + CROSS_MS, to: FAR ? 'home' : 'far', seat: Math.max(0, voyageCrew.indexOf(myWireId())), at: Date.now() });
   questEvent('crossing'); try { keepProgress(); } catch (e) { /* it is kept in this browser all the same */ }
   crossScreen(FAR ? 'home' : 'far', 0.06, 'Casting off');
-  store('ember.isle', FAR ? 'home' : 'far');      // which shore this browser is on from now, until the boat takes it back
-  setTimeout(() => { location.href = LOCAL_DEV ? (FAR ? '/' : '/far') : '/'; }, 700);
+  store('ember.isle', FAR ? 'home' : 'far');      // which shore the visitor is on from now, until the boat takes them back
+  mine.flush().then(() => { location.href = LOCAL_DEV ? (FAR ? '/' : '/far') : '/'; });
 }
 // Arriving by boat: there is no stepping ashore from the title page; the visitor is already in their seat as she comes in.
 const arriving = (() => { const c = store('ember.crossing'); return c && typeof c === 'object' && c.to === ISLE && Date.now() - (c.at || 0) < 90000 ? c : null; })();
@@ -2302,6 +2306,7 @@ function comeAshore(q = {}) {
   else addLog('', FAR ? 'You step onto a shore nobody has mapped. A camp fire is burning up the path.' : (quests.cold ? 'You come ashore again. The fire is still burning.' : 'You wash ashore on a small island. Someone has kept a fire burning here for a long time.'), 'sys');
   // When to find company: said to everyone on arrival, since the beach is often empty.
   setTimeout(() => { if (entered) addLog('', campLine(), 'sys'); }, 3500);
+  if (!mine.ok && !mine.local) setTimeout(() => addLog('', 'The island cannot reach its records just now. You can play, but nothing from this visit will be kept.', 'sys'), 5000);
   // Signs of the others: how many have been here today, and whose tracks are still on the ground.
   // The island knows which country the connection comes from, which beats guessing from the time zone.
   if (/^[A-Z]{2}$/.test(String(q.cc || ''))) { try { COUNTRY = new Intl.DisplayNames(['en'], { type: 'region' }).of(q.cc) || COUNTRY; } catch (e) { /* keep the guess */ } me.setName(me.name, mySub()); }
@@ -3300,7 +3305,7 @@ function useKey(text) {
   const k = String(text || '').trim().toLowerCase();
   if (!/^[a-z0-9]{24,40}$/.test(k)) return 'That does not look like an island key. It is a long run of small letters and figures.';
   if (k === myKey) return 'That is the key this browser already has.';
-  store('ember.key', k); try { sessionStorage.removeItem('ember.restored'); } catch (e) { /* asked again after the reload */ }
+  store('ember.key', k); try { sessionStorage.removeItem('ember.restored'); if (mine.local) for (const q of Object.keys(localStorage)) if (q !== 'ember.key' && (q.startsWith('ember.') || q.startsWith('hush.'))) localStorage.removeItem(q); } catch (e) { /* asked again after the reload */ }
   setTimeout(() => location.reload(), 600); return 'Key taken. Coming ashore again as the visitor it belongs to…';
 }
 {
@@ -3827,7 +3832,7 @@ requestAnimationFrame(frame);
 
 // A small handle for checking the page from a test script.
 window.__ember = {
-  get wide() { return wide; }, quests, taken, bridge: BRIDGE, walkable,
+  get wide() { return wide; }, isle: ISLE, mine, quests, taken, bridge: BRIDGE, walkable,
   me, peers, world, camera, renderer, keeper, POSE, life, mapBoard: MAP_BOARD,
   yard, did, listToday,
   critters,

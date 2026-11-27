@@ -6,9 +6,10 @@
 // visitor's guest account, lived in a Supabase project. What is left of that here is only the way across.)
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { setIslandTime } from './now.js';
+import { mine } from './mine.js';
 
 let made = null, refreshing = null;
-const ls = { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* no storage */ } } };
+const ls = { get: (k) => { const v = mine.get(k); return typeof v === 'string' ? v : v === null ? null : JSON.stringify(v); }, set: (k, v) => mine.set(k, v) };      // kept by the island (mine.js)
 // The guest account this browser had with Supabase, if it had one: what the old sign-in left in storage.
 function oldSession() {
   try { const s = JSON.parse(ls.get('hush.guest') || 'null'); return s && s.user && typeof s.user.id === 'string' && typeof s.refresh_token === 'string' ? s : null; } catch (e) { return null; }
@@ -189,8 +190,8 @@ function makeRoom(wire) {
 // A small document store: collections of records, each with an id. A driver says where the records live.
 function localDriver() {
   const KEY = 'hush.island.db';
-  const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } };
-  const save = (d) => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) { /* no storage */ } };
+  // With no room to keep them, shared things last as long as the page is open and no longer.
+  let held = {}; const load = () => held, save = (d) => { held = d; };
   return {
     async list(coll, filters, order, lim) {
       let rows = Object.entries(load()[coll] || {}).filter(([, d]) => filters.every(([f, op, v]) => (op === '==' ? d[f] === v : op === '<' ? d[f] < v : true)));

@@ -5,12 +5,10 @@ const CARVING_LIFE = 7 * DAY;
 const BOTTLE_LIFE = 30 * DAY;
 
 import { use } from './backend.js';
+import { mine } from './mine.js';
 
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
-const local = {
-  get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } },
-  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* no storage: carry on */ } },
-};
+const local = { get: (key) => mine.get(key), set: (key, value) => mine.set(key, value) };      // a visitor's own counts and marks, kept by the island (mine.js)
 export function todayKey() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

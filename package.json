@@ -2,7 +2,7 @@
   "name": "hush-island",
   "version": "0.1.0",
   "private": true,
-  "description": "A small island where animals from all over the world rest by a fire.",
+  "description": "A free social exploration game: two islands, one boat, and whoever is there.",
   "type": "module",
   "scripts": {
     "build": "sh build.sh",

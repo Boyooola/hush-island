@@ -3,6 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 npx esbuild src/main.js --bundle --format=esm --minify --target=es2020 --outfile=dist/app.js --log-level=warning
+npx esbuild src/boot.js --format=esm --minify --target=es2022 --outfile=dist/boot.js --log-level=warning
 cp src/index.html dist/index.html
 cp -r assets/site/. dist/
 cp assets/sea.json dist/sea.json

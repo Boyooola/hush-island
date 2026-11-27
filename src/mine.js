@@ -10,11 +10,12 @@ async function send() {
   if (!box.ok || !box.key) return false;
   if (sending) { again = true; return false; }
   sending = true; firstDirty = 0;
-  try { const r = await fetch('/room/mine', { method: 'POST', headers: { 'content-type': 'application/json' }, body: body(), keepalive: true }); if (r.status === 429) again = true; }
+  let kept = false;
+  try { const r = await fetch('/room/mine', { method: 'POST', headers: { 'content-type': 'application/json' }, body: body(), keepalive: true }); if (r.status === 429) again = true; else kept = r.ok; }
   catch (e) { again = true; }
   sending = false;
-  if (again) { again = false; touch(); }
-  return true;
+  if (again) { again = false; kept = false; touch(); }
+  return kept;
 }
 function touch() {
   if (!box.ok) return;
@@ -29,7 +30,18 @@ export const mine = {
     touch();
   },
   // Sent now, and waited for (briefly): before the page is left for the other island.
-  async flush() { clearTimeout(timer); try { await Promise.race([send(), new Promise((r) => setTimeout(r, 1800))]); } catch (e) { /* it will be sent from the other side */ } },
+  // It keeps trying for a few seconds: a save already on its way, or one the room turned back for coming too soon, is waited out.
+  async flush() {
+    if (!box.ok) return false;
+    const until = Date.now() + 6000;
+    while (Date.now() < until) {
+      clearTimeout(timer);
+      let kept = false; try { kept = await send(); } catch (e) { kept = false; }
+      if (kept) { clearTimeout(timer); return true; }
+      await new Promise((r) => setTimeout(r, 450));
+    }
+    return false;
+  },
   get ok() { return box.ok; }, get old() { return box.old; }, get local() { return box.local; },
 };
 // Leaving the page: whatever has not been sent yet goes now.
@@ -37,3 +49,4 @@ if (typeof addEventListener === 'function') {
   const last = () => { if (box.ok && box.key && firstDirty && navigator.sendBeacon) { firstDirty = 0; clearTimeout(timer); try { navigator.sendBeacon('/room/mine', new Blob([body()], { type: 'application/json' })); } catch (e) { /* gone */ } } };
   addEventListener('pagehide', last); document.addEventListener('visibilitychange', () => { if (document.hidden) last(); });
 }
+if (box.dirty) { box.dirty = false; touch(); }      // boot.js changed something on the way in

@@ -6,6 +6,8 @@ let live = false; try { if (/[?&]live\b/.test(location.search)) sessionStorage.s
 const local = DEV && !live;      // a developer's machine: the browser's copy is also read, for the tests
 let key = null; try { key = JSON.parse(localStorage.getItem('ember.key')); } catch (e) { key = null; }
 if (typeof key !== 'string' || !/^[a-z0-9]{24,40}$/.test(key)) { const b = new Uint8Array(20); crypto.getRandomValues(b); key = [...b].map((x) => (x % 36).toString(36)).join('') + Date.now().toString(36).slice(-6); try { localStorage.setItem('ember.key', JSON.stringify(key)); } catch (e) { /* a visit with no key is a visit nothing is kept from */ } }
+const wake = (share, step, slow) => { try { const f = document.getElementById('wk-fill'); if (!f) return; if (slow) f.style.transitionDuration = slow + 's'; f.style.width = share + '%'; if (step) document.getElementById('wk-step').textContent = step; } catch (e) { /* no page to show it on */ } };
+wake(30, 'Finding your things', 5);
 const box = G.__mine = { d: {}, ok: false, key, local, old: null, had: false };
 async function fetchMine() {
   for (let i = 0; i < 3; i++) {
@@ -29,4 +31,8 @@ else if (box.ok) {
   }
 }
 delete box.d['ember.key'];
-await import('./app.js');
+// Arriving by boat: the note carried across says which shore this is, even if the room did not hear of it in time.
+if (!local) { try { const c = JSON.parse(sessionStorage.getItem('ember.crossing')); if (c && (c.to === 'far' || c.to === 'home') && Date.now() - (c.at || 0) < 90000 && box.d['ember.isle'] !== c.to) { box.d['ember.isle'] = c.to; box.dirty = true; } } catch (e) { /* no note */ } }
+if (!local && box.d['ember.isle'] === 'far') { try { document.getElementById('scene').classList.add('far'); } catch (e) { /* no canvas */ } }
+wake(88, 'Waking the island', 9);
+try { await import('./app.js'); } catch (e) { wake(88, 'The island did not load. Check your connection and reload the page.'); throw e; }

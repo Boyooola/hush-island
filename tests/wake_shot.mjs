@@ -1,0 +1,13 @@
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox'] });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 740 } });
+await ctx.route((u) => u.hostname !== 'localhost', (r) => r.abort());
+await ctx.route('**/app.js', async (r) => { await new Promise((x) => setTimeout(x, 4000)); r.continue(); });
+const p = await ctx.newPage(); p.on('pageerror', (e) => console.log('ERR', e.message));
+await p.goto('http://localhost:8787/', { waitUntil: 'domcontentloaded' });
+await p.waitForTimeout(2500); await p.screenshot({ path: '/tmp/wake1.jpg', type: 'jpeg', quality: 85 });
+console.log('waking while loading:', await p.evaluate(() => document.getElementById('intro').classList.contains('waking')), 'button shown:', await p.isVisible('#enter'), 'step:', await p.textContent('#wk-step'));
+await p.waitForFunction(() => !document.getElementById('intro').classList.contains('waking'), null, { timeout: 90000 });
+await p.waitForTimeout(1500); await p.screenshot({ path: '/tmp/wake2.jpg', type: 'jpeg', quality: 85 });
+console.log('after: button shown:', await p.isVisible('#enter'), 'bar shown:', await p.isVisible('#waking'));
+await browser.close();

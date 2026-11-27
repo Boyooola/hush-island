@@ -120,7 +120,7 @@ try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 } catch (e) {
   // No 3D drawing on this device or browser: say so on the title screen instead of leaving it dead.
-  $('enter').hidden = true; $('reroll').hidden = true;
+  $('enter').hidden = true; $('reroll').hidden = true; $('intro').classList.remove('waking');
   $('hint').textContent = 'This browser cannot draw 3D graphics (WebGL is switched off or not supported), so the island cannot be shown here. Try another browser or device.';
   throw e;
 }
@@ -1276,6 +1276,7 @@ function crossOver() {
 // Arriving by boat: there is no stepping ashore from the title page; the visitor is already in their seat as she comes in.
 const arriving = (() => { const c = store('ember.crossing'); return c && typeof c === 'object' && c.to === ISLE && Date.now() - (c.at || 0) < 90000 ? c : null; })();
 if (store('ember.crossing')) store('ember.crossing', null);
+if (!arriving && !$('crossing').hidden) $('crossing').hidden = true;      // the note was stale or for the other shore: no loading picture left hanging
 if (arriving) { crossScreen(ISLE, 0.3, 'Raising the island'); loadProps().then(() => { if (!entered) crossScreen(ISLE, 0.55, 'Finding the shore'); }); setTimeout(() => { if (!entered) { $('crossing').hidden = true; } }, 25000); }
 function updateVoyage(dt) {
   // Which voyage is on: mine, or the earliest one anybody near is on.
@@ -3829,6 +3830,8 @@ function frame() {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+// The title page has shown only a bar until now; with the island drawn behind it, the name and the button come in.
+{ const f = $('wk-fill'); if (f) { f.style.transitionDuration = '.25s'; f.style.width = '100%'; } const t0 = performance.now(); const up = () => { if (performance.now() - t0 < 350) { requestAnimationFrame(up); return; } $('intro').classList.remove('waking'); }; requestAnimationFrame(up); setTimeout(() => $('intro').classList.remove('waking'), 4000); }
 
 // A small handle for checking the page from a test script.
 window.__ember = {

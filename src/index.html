@@ -68,7 +68,8 @@
     user-select: none;
     -webkit-user-select: none;
   }
-  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; background: #0c1222 url(./shore-home.jpg) center / cover no-repeat; }
+  #scene.far { background-image: url(./shore-far.jpg); }
 
   button { font: inherit; color: inherit; cursor: pointer; }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
@@ -80,6 +81,12 @@
     background: linear-gradient(270deg, rgba(8, 14, 30, 0.82) 0%, rgba(8, 14, 30, 0.45) 38%, rgba(8, 14, 30, 0) 62%);
     transition: opacity 0.9s ease, visibility 0.9s;
   }
+  /* Until the island is ready there is nothing to choose or press: only the title, the story, and a bar. */
+  #intro.waking .who, #intro.waking #name-form, #intro.waking #picker, #intro.waking #enter, #intro.waking .when, #intro.waking .hint { display: none; }
+  #intro:not(.waking) #waking { display: none; }
+  #waking .wk-bar { height: 6px; background: rgba(246, 236, 214, 0.22); border-radius: 3px; overflow: hidden; }
+  #waking .wk-bar i { display: block; height: 100%; width: 6%; background: var(--amber); transition: width 1.2s ease-out; }
+  #waking p { margin: 9px 0 0; font-size: 14.5px; color: var(--ink-quiet); text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); }
   .card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 14px; }
   .card h1 {
     font-family: var(--display); font-weight: 800; font-size: clamp(44px, 7vw, 68px); line-height: 0.95; margin: 0;
@@ -465,10 +472,11 @@
 </script>
 <canvas id="scene" tabindex="0" aria-label="Hush Island: a small island with a campfire"></canvas>
 
-<section id="intro" aria-labelledby="title">
+<section id="intro" class="waking" aria-labelledby="title">
   <div class="card">
     <h1 id="title">Hush Island</h1>
     <p>You wash ashore on a small island. A stag keeps a fire burning on the beach and is building a boat. He will not say where it is going. Find out, with whoever else is here.</p>
+    <div id="waking" role="status" aria-live="polite"><div class="wk-bar"><i id="wk-fill"></i></div><p id="wk-step">Waking the island</p></div>
     <div class="who">
       <div><small>You arrive as</small><strong id="who-name">Sleepy Otter</strong> <span id="who-code"></span></div>
       <div class="namers"><button class="ghost" id="reroll" type="button">Another name</button><button class="ghost" id="rename" type="button">Choose my own</button></div>

@@ -1,0 +1,3 @@
+import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
+const root = '/home/claude/hush-island/dist', types = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.woff2': 'font/woff2', '.css': 'text/css' };
+http.createServer((q, r) => { let u = decodeURIComponent(q.url.split('?')[0]); if (u === '/' || u === '/far') u = '/index.html'; const f = path.join(root, u); if (!f.startsWith(root) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': types[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(r); }).listen(8766);

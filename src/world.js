@@ -1119,7 +1119,7 @@ export function buildWorld(scene, opts = {}) {
       const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace;
       const cut = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.24), new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthWrite: false })); cut.position.set(-0.25, 2.2, 2.69); g.add(cut);
       g.position.set(COTTAGE.x, COTTAGE.y - 0.08, COTTAGE.z); g.rotation.y = COTTAGE.ry; g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(g);
-      const bird = make('heron'); if (bird) { bird.position.set(heron.x, terrainHeight(heron.x, heron.z) - 0.02, heron.z); bird.rotation.y = heron.home; bird.scale.setScalar(1.2); bird.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(bird); heron.group = bird; }
+      const birdPup = make.puppet ? make.puppet('heron', -Math.PI / 2) : null, bird = birdPup ? birdPup.group : make('heron'); heron.pup = birdPup; if (bird) { bird.position.set(heron.x, terrainHeight(heron.x, heron.z) - 0.02, heron.z); bird.rotation.y = heron.home; bird.scale.setScalar(1.2); bird.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.noShadow = true; } }); scene.add(bird); heron.group = bird; }
     });
   }
   // The Tide Flats: the sea comes in over the mud and goes out again every sixteen minutes, by the island's shared
@@ -1397,7 +1397,7 @@ export function buildWorld(scene, opts = {}) {
         const slab = quiet(make('painted_stone')); slab.position.set(echo.mark.x, caveAt(echo.mark.x, echo.mark.z).floor - 0.1, echo.mark.z + 0.7); slab.rotation.y = Math.PI; slab.scale.setScalar(0.8);
         const tx = paint(({ line, dot, sea }) => { sea(560, 250, 780); line([[400, 470], [430, 510], [600, 510], [640, 462], [400, 470]], INK, 8); line([[515, 468], [515, 360]], INK, 6); line([[515, 362], [580, 440], [515, 448]], INK, 7); for (const [x, y] of [[470, 250], [500, 226], [534, 226], [564, 250]]) dot(x, y, 13, OCHRE); dot(517, 292, 30, OCHRE); line([[640, 300], [730, 300], [706, 280]], CHALK, 6); line([[730, 300], [706, 320]], CHALK, 6); });
         const art = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 2.1), new THREE.MeshBasicMaterial({ map: tx, transparent: true, opacity: 0.7, depthWrite: false, fog: false, toneMapped: false })); art.position.set(0, 1.3, -0.36); art.rotation.x = -0.3; slab.add(art); scene.add(slab); }
-      const hm = make('hermit'); if (hm) { hm.position.set(hermit.x, terrainHeight(hermit.x, hermit.z) - 0.04, hermit.z); hm.rotation.y = hermit.home; hm.scale.setScalar(1.15); quiet(hm); scene.add(hm); hermit.group = hm; }
+      const hmPup = make.puppet ? make.puppet('hermit', -Math.PI / 2) : null, hm = hmPup ? hmPup.group : make('hermit'); hermit.pup = hmPup; if (hm) { hm.position.set(hermit.x, terrainHeight(hermit.x, hermit.z) - 0.04, hermit.z); hm.rotation.y = hermit.home; hm.scale.setScalar(1.15); quiet(hm); scene.add(hm); hermit.group = hm; }
       for (const pn of paintings) {
         const slab = quiet(make('painted_stone')); if (!slab) break;
         slab.position.set(pn.x, caveAt(pn.x, pn.z).floor - 0.1, pn.z); slab.rotation.y = pn.ry;
@@ -2048,7 +2048,7 @@ export function buildWorld(scene, opts = {}) {
         if (p.kind === 'lantern_pole') m.traverse((o) => { if (o.isMesh && o.material.name === 'c_lantern_glow') { o.material.emissive.set(0xffb45a); o.material.emissiveIntensity = 2.2; o.material.color.set(0xffd9a0); o.castShadow = false; } });
         scene.add(m);
       }
-      const t = make('mapmaker');
+      const tPup = make.puppet ? make.puppet('mapmaker', -Math.PI / 2) : null, t = tPup ? tPup.group : make('mapmaker'); mapmaker.pup = tPup; if (tPup) tPup.mesh.castShadow = false;
       if (t) { mapmaker.home = Math.atan2(-(2 - MAPMAKER.z), 16 - MAPMAKER.x); t.position.set(MAPMAKER.x, terrainHeight(MAPMAKER.x, MAPMAKER.z), MAPMAKER.z); t.rotation.y = mapmaker.home; t.scale.setScalar(1.25); scene.add(t); mapmaker.group = t; }
     });
   }

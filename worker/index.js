@@ -278,15 +278,25 @@ export class Island extends DurableObject {
     let m; try { m = JSON.parse(await request.text()); } catch (e) { return json({ error: 'bad' }, 400); }
     const a = {}; await this.identify(a, m && m.key, null);
     if (!a.pid) return json({ error: 'key' }, 400);
-    if (m.d === undefined) {
+    if (m.d === undefined && m.p === undefined) {
       const r = this.sql.exec('SELECT at, d FROM mine WHERE pid = ?', a.pid).toArray();
       if (r.length) return json({ at: r[0].at, d: r[0].d });
       const o = this.sql.exec('SELECT d FROM saves WHERE pid = ?', a.pid).toArray();
       return json({ at: 0, d: '', old: o.length ? o[0].d : '' });
     }
-    if (typeof m.d !== 'string' || m.d.length > 400000) return json({ error: 'too much' }, 413);
     const now = Date.now(), last = this.mineAt.get(a.pid) || 0;
     if (now - last < 1200) return json({ error: 'slow down' }, 429);
+    // A patch: only the things that changed, folded into what is held. null takes a thing away.
+    if (m.d === undefined && m.p && typeof m.p === 'object' && !Array.isArray(m.p)) {
+      const r = this.sql.exec('SELECT d FROM mine WHERE pid = ?', a.pid).toArray();
+      let d = {}; if (r.length) { try { d = JSON.parse(r[0].d) || {}; } catch (e) { d = {}; } }
+      let k = 0; for (const key in m.p) { if (++k > 400 || typeof key !== 'string' || key.length > 60) return json({ error: 'bad' }, 400); if (m.p[key] === null) delete d[key]; else d[key] = m.p[key]; }
+      const out = JSON.stringify(d); if (out.length > 400000) return json({ error: 'too much' }, 413);
+      this.mineAt.set(a.pid, now); if (this.mineAt.size > 5000) this.mineAt.clear();
+      this.sql.exec('INSERT OR REPLACE INTO mine (pid, at, d) VALUES (?, ?, ?)', a.pid, now, out);
+      return json({ ok: true, at: now });
+    }
+    if (typeof m.d !== 'string' || m.d.length > 400000) return json({ error: 'too much' }, 413);
     try { const d = JSON.parse(m.d); if (!d || typeof d !== 'object' || Array.isArray(d)) return json({ error: 'bad' }, 400); } catch (e) { return json({ error: 'bad' }, 400); }
     this.mineAt.set(a.pid, now); if (this.mineAt.size > 5000) this.mineAt.clear();
     this.sql.exec('INSERT OR REPLACE INTO mine (pid, at, d) VALUES (?, ?, ?)', a.pid, now, m.d);

@@ -30,6 +30,8 @@ else if (box.ok) {
     try { const r = await fetch('/room/mine', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, d: JSON.stringify(box.d) }) }); if (r.ok) { for (const k of keys) localStorage.removeItem(k); localStorage.removeItem('hush.island.db'); } } catch (e) { /* next visit */ }
   }
 }
+// A visitor the room knows only from its older record (kept before their things moved here) gets that record now.
+if (!local && box.ok && !box.had && box.old) { try { const o = JSON.parse(box.old); if (o && typeof o === 'object') { for (const k in o) if (box.d['ember.' + k] === undefined && o[k] !== null) box.d['ember.' + k] = o[k]; box.dirty = true; } } catch (e) { /* nothing usable */ } }
 delete box.d['ember.key'];
 // Arriving by boat: the note carried across says which shore this is, even if the room did not hear of it in time.
 if (!local) { try { const c = JSON.parse(sessionStorage.getItem('ember.crossing')); if (c && (c.to === 'far' || c.to === 'home') && Date.now() - (c.at || 0) < 90000 && box.d['ember.isle'] !== c.to) { box.d['ember.isle'] = c.to; box.dirty = true; } } catch (e) { /* no note */ } }

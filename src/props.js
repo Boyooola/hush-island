@@ -1,6 +1,7 @@
 // The island's furniture, modelled in Blender (assets/site/props.glb): the fire ring, the seat logs, the woodpile,
 // rocks and so on. Each is a named piece in the one file. The shapes built in code stand in until the file arrives
 // (or for good, if it never does), and are swapped for these when it does.
+import { makePuppet } from './puppet.js';
 import * as THREE from 'three';
 import { ISLE } from './terrain.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -81,6 +82,7 @@ export function loadProps() {
         return g;
       };
       make.single = single;
+      make.puppet = (name, turn) => makePuppet(scene, name, turn);
       res(make);
     }, undefined, () => res(null));
   });

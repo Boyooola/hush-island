@@ -9,6 +9,7 @@ import {
   HILL, GARDEN, SHELTER, FARBEACH, MAPMAKER, AREAS, WRECK,
 } from './terrain.js';
 import { loadProps } from './props.js';
+import { moveQuad, moveFolk } from './puppet.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeNameTag, makeBubble } from './labels.js';
 import { FOLK, folkById, ROUND, ROUND_THANKS, STORM_TOLD, STORM_WHO, SPOTS } from './folk.js';
@@ -214,6 +215,8 @@ export function buildWide(api) {
     const many = (name, list, reach) => { const one = make.single(name); if (!one || !list.length) return null; const im = new THREE.InstancedMesh(one.geometry, one.material, list.length), d = new THREE.Object3D(); list.forEach((q, i) => { d.position.set(q.x, (q.y !== undefined ? q.y : terrainHeight(q.x, q.z)) + (q.dy || 0), q.z); d.rotation.set(0, q.ry || 0, 0); d.scale.setScalar(q.s || 1); d.updateMatrix(); im.setMatrixAt(i, d.matrix); }); im.frustumCulled = false; im.userData.noShadow = true; scene.add(im); return im; };
     // The folk themselves.
     for (const f of folk) {
+      const pup = make.puppet(f.def.model);
+      if (pup) { f.pup = pup; const g = pup.group; const crook = f.def.id === 'shepherd' ? one('shepherd_crook') : null; if (crook) { crook.position.set(0.72, 0, 0.25); g.add(crook); } g.scale.setScalar(f.def.size); g.rotation.y = f.home; g.position.set(f.x, f.y, f.z); scene.add(g); f.group = g; continue; }
       const g = one(f.def.model, /_(head|arm|leg\d)$/); if (!g) continue;
       // The parts that move: a head each, and the Gardener's digging arm. Each turns about its own joint.
       const joint = { forager: [0, 0.85, 0.25], gardener: [0, 0.9, 0.1], shepherd: [0, 1.0, 0.45], beachcomber: [0, 0.9, 0.05], castaway: [0, 0.8, 0.3], pedlar: [0, 1.2, 0.6] }[f.def.id], head = one(f.def.model + '_head'); if (head && joint) { head.position.set(...joint); g.add(head); f.head = head; }
@@ -264,7 +267,7 @@ export function buildWide(api) {
     // Fires that are lit after dark.
     for (const f of FIRES) { const fl = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.95, 6), flameMat); fl.position.set(f.x, terrainHeight(f.x, f.z) + 0.6, f.z); fl.visible = false; scene.add(fl); f.flame = fl; }
     // The flock.
-    { const r = mulberry32(88), lump = make.single('sheep'); if (lump) { for (let i = 0; i < 5 + LAMBS.length; i++) { const lamb = i >= 5 ? LAMBS[i - 5] : null, a = r() * 6.28, d = 4 + r() * 10, s = { lamb, x: lamb ? lamb.x : HILL.x - 8 + Math.cos(a) * d, z: lamb ? lamb.z : HILL.z - 4 + Math.sin(a) * d, yaw: r() * 6, tx: 0, tz: 0, wait: r() * 8, v: 0, size: lamb ? 0.52 : 0.85 + r() * 0.2, hop: r() * 6, y: 0, seen: true }; s.tx = s.x; s.tz = s.z; sheep.push(s); } flock = new THREE.InstancedMesh(lump.geometry, lump.material, sheep.length); flock.frustumCulled = false; flock.userData.noShadow = true; scene.add(flock); } }
+    { const r = mulberry32(88), lump = make.puppet('sheep'); if (lump) { for (let i = 0; i < 5 + LAMBS.length; i++) { const lamb = i >= 5 ? LAMBS[i - 5] : null, a = r() * 6.28, d = 4 + r() * 10, s = { lamb, x: lamb ? lamb.x : HILL.x - 8 + Math.cos(a) * d, z: lamb ? lamb.z : HILL.z - 4 + Math.sin(a) * d, yaw: r() * 6, tx: 0, tz: 0, wait: r() * 8, v: 0, size: lamb ? 0.52 : 0.85 + r() * 0.2, hop: r() * 6, y: 0, seen: true }; s.tx = s.x; s.tz = s.z; sheep.push(s); } for (const s of sheep) { s.pup = make.puppet('sheep'); if (s.pup) { s.pup.group.scale.setScalar(s.size); s.pup.mesh.castShadow = false; s.grazeAt = r() * 10; scene.add(s.pup.group); } } flock = true; } }
     setWorks();
   });
 
@@ -303,6 +306,12 @@ export function buildWide(api) {
         if (f.group) { const d = Math.hypot(me.x - f.x, me.z - f.z), want2 = d < 7 ? turnTo(me.x - f.x, me.z - f.z) : f.home; let dy = want2 - f.group.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); f.group.rotation.y += dy * (1 - Math.exp(-dt * 1.8)); const s = f.def.size; f.group.scale.set(s, s * (1 + Math.sin(t * 1.2 + f.x) * 0.012), s); }
       }
       const d = Math.hypot(me.x - f.x, me.z - f.z);
+      if (f.pup && d < 70) {
+        const s = f.def.size, id = f.def.id;
+        if (id === 'shepherd') { f.group.scale.setScalar(s); let lk = 0; if (d < 7) { lk = turnTo(me.x - f.x, me.z - f.z) - f.group.rotation.y; lk = clamp(Math.atan2(Math.sin(lk), Math.cos(lk)), -0.8, 0.8); } moveQuad(f.pup, { speed: 0, graze: d < 7 ? 0 : Math.sin(t * 0.21) > 0.2 ? 1 : 0, lie: 0, look: lk, size: s }, dt, t); }
+        else if (id === 'pedlar') { const v = f.px === undefined ? 0 : Math.hypot(f.x - f.px, f.z - f.pz) / Math.max(dt, 0.001); f.px = f.x; f.pz = f.z; f.v = (f.v || 0) + ((v < 6 ? v : 0) - (f.v || 0)) * Math.min(1, dt * 4); moveQuad(f.pup, { speed: f.moving ? Math.max(0.6, f.v) : 0, graze: !f.moving && d > 7 && Math.sin(t * 0.17) > 0.5 ? 0.7 : 0, lie: 0, size: 1.75 }, dt, t); }
+        else moveFolk(f.pup, id, { near: d < 7, talk: f.bubble && f.bubble.visible }, dt, t);
+      }
       if (f.head && d < 60) { const h = f.head, id = f.def.id, calm = d < 7 ? 0.35 : 1, ph = f.def.tall * 3;
         if (id === 'forager') { h.rotation.y = Math.sin(t * 0.37 + ph) * 0.3 * calm; h.rotation.x = Math.sin(t * 0.8) * 0.07 + (Math.sin(t * 0.5) > 0.6 ? Math.sin(t * 9) * 0.05 : 0); }
         else if (id === 'gardener') { h.rotation.y = Math.sin(t * 0.3) * 0.22 * calm; h.rotation.x = 0.08 + Math.sin(t * 0.45) * 0.05; if (f.arm) f.arm.rotation.x = Math.sin(t * 0.25) > 0 && d > 5 ? Math.max(0, Math.sin(t * 2.4)) * 0.8 : f.arm.rotation.x * 0.9; }
@@ -332,10 +341,13 @@ export function buildWide(api) {
         s.run = Math.max(0, (s.run || 0) - dt);
         const dt2 = Math.hypot(s.tx - s.x, s.tz - s.z); if (dt2 > 0.6) sp = s.run > 0 ? 5.5 : Math.hypot(s.x - fold.x, s.z - fold.z) > fold.r + 8 ? 2.6 : 0.7;
       }
+      s.spNow = sp;
       if (sp > 0) { const a = Math.atan2(s.tx - s.x, s.tz - s.z); let dy = a - s.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); s.yaw += dy * Math.min(1, dt * 6); s.x += Math.sin(s.yaw) * sp * dt; s.z += Math.cos(s.yaw) * sp * dt; s.hop += dt * (4 + sp * 2.2); }
       s.y = groundHeight(s.x, s.z) + (sp > 0 ? Math.abs(Math.sin(s.hop)) * 0.07 * Math.min(2, sp) : 0);
     }
-    if (flock) { sheep.forEach((s, i) => { flockDummy.position.set(s.x, s.y, s.z); flockDummy.rotation.set(0, s.yaw + Math.PI, 0); flockDummy.scale.setScalar(s.seen ? s.size : 0); flockDummy.updateMatrix(); flock.setMatrixAt(i, flockDummy.matrix); }); flock.instanceMatrix.needsUpdate = true; flock.visible = sheep.some((s) => s.seen); }
+    for (const k of ['mapmaker', 'hermit', 'heron']) { const o = api.world[k]; if (!o || !o.pup) continue; const d = Math.hypot(me.x - o.x, me.z - o.z); if (d < 70) moveFolk(o.pup, k, { near: d < 7, talk: false }, dt, t); }
+    // Each of the flock walks on its own legs, grazes when it has stopped, and lies down in the fold after dark.
+    if (flock) for (const s of sheep) { const p = s.pup; if (!p) continue; p.group.visible = !!s.seen; if (!s.seen) continue; p.group.position.set(s.x, groundHeight(s.x, s.z), s.z); p.group.rotation.y = s.yaw; const v = s.spNow || 0; s.grazeAt -= dt; if (s.grazeAt < -9) s.grazeAt = 4 + Math.random() * 9; if (Math.hypot(me.x - s.x, me.z - s.z) < 80) moveQuad(p, { speed: v, graze: s.grazeAt < 0 && !(s.lamb && lambState(s.lamb.id) === 'follow') ? 1 : 0, lie: dk > 0.7 && v < 0.05 && !s.lamb ? 1 : 0, size: s.size }, dt, t); }
     if (performance.now() < slow) return; slow = performance.now() + 400;
     // Hidden places are found by walking into them.
     if (api.entered()) for (const id in SPOT_AT) { const p = SPOT_AT[id]; if (!p || S.spots.includes(id)) continue; if (Math.hypot(me.x - p.x, me.z - p.z) < (id === 'stack' ? 3.6 : id === 'gap' ? 2.2 : 3) && (id !== 'duskring' || (ring && ring.visible)) && (id !== 'cove' || lowTide())) foundSpot(id); }
@@ -351,6 +363,7 @@ export function buildWide(api) {
     update(dt, t) { update(dt, t); for (const f of fast) f(dt, t); },
     carrying: () => carry, lambsHome, workDone, trade: (key, who) => W.tradeSheet && W.tradeSheet(key, who),
     count: { lambs: lambsHome, accounts: () => S.told.length, spots: () => S.spots.length, work: (q) => (workDone(q.arg) ? 1 : 0), laid: () => S.laid || 0, met: () => FOLK.filter((f) => S.met[f.id]).length },
+    whoAt: (k) => { const q = k === 'mapmaker' ? api.world.mapmaker : api.places[k]; return q ? { x: q.x, z: q.z } : null; },
     where: {
       ...Object.fromEntries(ROUND.map((r, n) => [r.id, () => (api.taken[r.id] ? api.places[r.to] : api.places[r.from])])),
       'lr-lambs': () => { const f = sheep.find((s) => s.lamb && lambState(s.lamb.id) === 'follow'); if (f) return who.shepherd; const l = LAMBS.find((q) => lambState(q.id) === 'lost' && S.said['lamb-' + q.id]); return l || who[(LAMBS.find((q) => lambState(q.id) === 'lost') || {}).seen] || who.shepherd; },

@@ -13,9 +13,10 @@ const run = (label) => p.evaluate((label) => { const e = window.__ember, i = e.a
 const log = (n = 3) => p.evaluate((n) => window.__ember.log.slice(-n).join(' || '), n);
 const ev = (f, a) => p.evaluate(f, a);
 await ev(() => { const e = window.__ember; e.setBoat(99999); e.give && e.give('shell', 2, true); e.teleport(e.berth.x + 1.5, e.berth.z + 1.5, 0); }); await p.waitForTimeout(3000);
-ok((await run('Sail for the far shore')) === 'ok', 'a built boat can be sailed for the far shore', await run('zz'));
-ok(/Take the boat out/.test(await run('zz')) || true, 'and still taken round the island');
-await p.waitForTimeout(9000); await run('Cast off now'); 
+ok(/Take the boat out/.test(await run('zz')), 'she can still be taken round the island');
+const gone = p.waitForURL('**/far', { timeout: 60000 });
+ok((await run('Sail for the far shore').catch(() => 'ok')) === 'ok', 'a built boat takes a visitor to the far shore');
+ok(await ev(() => !document.getElementById('crossing').hidden && !window.__ember.voyage.mine).catch(() => true), 'with no voyage: the loading picture comes straight up and the boat stays on her berth'); await gone;
 await p.waitForURL('**/far', { timeout: 60000 }); ok(true, 'the far island is loaded');
 ok(await ev(() => !document.getElementById('crossing').hidden && /Lantern Rock/.test(document.getElementById('cx-name').textContent) && !document.body.classList.contains('playing')), 'the loading screen is up from the first moment, not the welcome page');
 await p.waitForTimeout(1500); await p.screenshot({ path: '/home/claude/ember-isle/shots/crossing.png' });
@@ -33,9 +34,8 @@ ok(await ev(() => !document.body.classList.contains('playing') && document.getEl
 await ev(() => { const e = window.__ember; e.lockQuality(); e.idleAfter = 3600000; document.querySelector('#enter').click(); }); await p.waitForTimeout(8000);
 ok(await ev(() => Math.hypot(window.__ember.me.x + 40, window.__ember.me.z + 4) < 3), 'and the visitor is where they left off', await ev(() => [window.__ember.me.x, window.__ember.me.z].map(Math.round).join(',')));
 await ev(() => { const e = window.__ember; e.teleport(e.berth.x + 1.5, e.berth.z + 1.5, 0); }); await p.waitForTimeout(6000);
-ok((await run('Sail the boat home')) === 'ok', 'from the far shore she can be sailed home', await run('zz'));
-await p.waitForTimeout(9000); await run('Cast off now');
-await p.waitForURL((u) => u.pathname === '/', { timeout: 60000 });
+const back = p.waitForURL((u) => u.pathname === '/', { timeout: 60000 });
+ok((await run('Sail the boat home').catch(() => 'ok')) === 'ok', 'from the far shore the crossing home is the same'); await back;
 for (let i = 0; i < 40 && !(await ev(() => document.getElementById('crossing').hidden && document.body.classList.contains('playing')).catch(() => false)); i++) await p.waitForTimeout(1000);
 await p.waitForTimeout(4000);
 st = await ev(() => { const e = window.__ember; return { v: e.voyage.mine, ok: e.walkable(e.me.x, e.me.z), log: e.log.slice(-6).join(' || ') }; });

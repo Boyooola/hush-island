@@ -5,15 +5,20 @@
 const G = globalThis;
 const box = G.__mine || (G.__mine = { d: {}, ok: false, key: '', local: true, old: null });
 let timer = 0, firstDirty = 0, sending = false, again = false;
-const body = () => JSON.stringify({ key: box.key, d: JSON.stringify(box.d) });
+// Only what has changed is sent, and the room folds it into what it holds: two tabs open at once no longer undo each other.
+const dirty = new Set();
+const patch = (keys) => { const p = {}; for (const k of keys) p[k] = box.d[k] === undefined ? null : box.d[k]; return JSON.stringify({ key: box.key, p }); };
 async function send() {
   if (!box.ok || !box.key) return false;
   if (sending) { again = true; return false; }
+  if (!dirty.size) return true;
   sending = true; firstDirty = 0;
+  const keys = [...dirty]; dirty.clear();
   let kept = false;
-  try { const r = await fetch('/room/mine', { method: 'POST', headers: { 'content-type': 'application/json' }, body: body(), keepalive: true }); if (r.status === 429) again = true; else kept = r.ok; }
+  try { const r = await fetch('/room/mine', { method: 'POST', headers: { 'content-type': 'application/json' }, body: patch(keys), keepalive: true }); if (r.status === 429) again = true; else kept = r.ok; }
   catch (e) { again = true; }
   sending = false;
+  if (!kept) for (const k of keys) dirty.add(k);
   if (again) { again = false; kept = false; touch(); }
   return kept;
 }
@@ -26,6 +31,7 @@ export const mine = {
   get(key) { const v = box.d[key]; return v === undefined ? null : v; },
   set(key, value) {
     if (value === null || value === undefined) delete box.d[key]; else box.d[key] = value;
+    dirty.add(key);
     if (box.local) { try { if (value === null || value === undefined) localStorage.removeItem(key); else localStorage.setItem(key, typeof value === 'string' && key.startsWith('hush.') ? value : JSON.stringify(value)); } catch (e) { /* no storage */ } }
     touch();
   },
@@ -46,7 +52,7 @@ export const mine = {
 };
 // Leaving the page: whatever has not been sent yet goes now.
 if (typeof addEventListener === 'function') {
-  const last = () => { if (box.ok && box.key && firstDirty && navigator.sendBeacon) { firstDirty = 0; clearTimeout(timer); try { navigator.sendBeacon('/room/mine', new Blob([body()], { type: 'application/json' })); } catch (e) { /* gone */ } } };
+  const last = () => { if (box.ok && box.key && dirty.size && !sending && navigator.sendBeacon) { firstDirty = 0; clearTimeout(timer); const keys = [...dirty]; try { if (navigator.sendBeacon('/room/mine', new Blob([patch(keys)], { type: 'application/json' }))) dirty.clear(); } catch (e) { /* gone */ } } };
   addEventListener('pagehide', last); document.addEventListener('visibilitychange', () => { if (document.hidden) last(); });
 }
-if (box.dirty) { box.dirty = false; touch(); }      // boot.js changed something on the way in
+if (box.dirty) { box.dirty = false; for (const k in box.d) dirty.add(k); touch(); }      // boot.js changed something on the way in

@@ -1210,6 +1210,9 @@ const boatDist = () => Math.hypot(yard.berth.x - me.x, yard.berth.z - me.z);
 const boatBuilt = () => boatTotal >= BOAT_GOAL;
 function boardBoat(dest = 0) {
   if (voyage || game || party || !entered || !boatBuilt() || boatDist() > 4.2) return;
+  // Crossing to the other island needs no voyage: the visitor goes straight to the loading picture, and the boat stays
+  // on her berth for whoever comes next.
+  if (dest === 1) { if (crossingOver) return; setHeld(0); audio.pop(700); crossOver(); return; }
   if (seenVoyage) {
     if (!voyageNow || voyageNow.phase !== 'board' || voyageCrew.length >= yard.crewMax) return;
     voyage = seenVoyage; voyageCast = seenCast; voyageDest = seenDest;
@@ -2432,8 +2435,11 @@ function updateActions() {
     alt = boarding ? { label: 'Step back ashore', run: () => leaveBoat() } : null;
   } else if (boatBuilt() && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2 && (!seenVoyage || (voyageNow && voyageNow.phase === 'board' && voyageCrew.length < yard.crewMax))) {
     // She can go once round the island (from the first island) or across to the other one. Whoever calls her says which; the rest climb in.
-    if (seenVoyage) { if (!alt) alt = main; main = { label: seenDest === 1 ? `Climb in: she is bound for ${OTHER_SHORT}` : 'Climb into the boat', run: () => boardBoat() }; }
+    if (seenVoyage) { if (!alt) alt = main; main = { label: 'Climb into the boat', run: () => boardBoat() }; if (!voyage) alt = { label: FAR ? 'Sail the boat home' : 'Sail for the far shore', run: () => boardBoat(1) }; }
     else { main = { label: FAR ? 'Sail the boat home' : 'Sail for the far shore', run: () => boardBoat(1) }; alt = FAR ? alt : { label: 'Take the boat out round the island', run: () => boardBoat(0) }; }
+  } else if (boatBuilt() && !game && !party && !held && me.mode === 'stand' && boatDist() < 4.2) {
+    // She is out round the island with somebody else: the crossing can still be made from her berth.
+    if (!alt) alt = main; main = { label: FAR ? 'Cross back home' : 'Cross to the far shore', run: () => boardBoat(1) };
   }
   // A dance at the fire: start one when resting there in company, join one that is going, step out of yours.
   if (voyage) { /* nothing else from a seat in the boat */ }
@@ -3296,6 +3302,9 @@ function mergeProgress(theirs) {
 }
 function onKept(m) {
   keptAsked = true;
+  // Everything of a visitor's is fetched before the game starts now, so this older record has nothing to add and must
+  // never send them back to the title page. (On a developer's machine the old way still runs, for the tests.)
+  if (mine.ok && !mine.local) { keptSent = typeof m.d === 'string' ? m.d : ''; return; }
   let theirs = null; try { theirs = m.d ? JSON.parse(m.d) : null; } catch (e) { theirs = null; }
   if (!theirs || typeof theirs !== 'object') return;
   keptSent = m.d;
@@ -3831,7 +3840,8 @@ function frame() {
 }
 requestAnimationFrame(frame);
 // The title page has shown only a bar until now; with the island drawn behind it, the name and the button come in.
-{ const f = $('wk-fill'); if (f) { f.style.transitionDuration = '.25s'; f.style.width = '100%'; } const t0 = performance.now(); const up = () => { if (performance.now() - t0 < 350) { requestAnimationFrame(up); return; } $('intro').classList.remove('waking'); }; requestAnimationFrame(up); setTimeout(() => $('intro').classList.remove('waking'), 4000); }
+{ const f = $('wk-fill'), t0 = performance.now(); let propsIn = false; loadProps().then(() => { propsIn = true; }, () => { propsIn = true; }); if (f) { f.style.transitionDuration = '1.5s'; f.style.width = '94%'; }
+  const up = () => { const ready = propsIn && (!!me.parts.quad || !me.parts.empty), late = performance.now() - t0 > 20000; if ((!ready && !late) || performance.now() - t0 < 350) { setTimeout(up, 120); return; } if (f) { f.style.transitionDuration = '.2s'; f.style.width = '100%'; } setTimeout(() => $('intro').classList.remove('waking'), 220); }; up(); }
 
 // A small handle for checking the page from a test script.
 window.__ember = {
